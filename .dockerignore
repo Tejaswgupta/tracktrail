@@ -1,0 +1,74 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# Virtual environments
+.venv
+venv/
+ENV/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+*.csv
+*.xlsx
+*.json
+exports/
+uploads/
+__pycache__/
+*.spec
+build/
+dist/
+*.exe
+
+# Documentation
+BUILD_INSTRUCTIONS.md
+README.md
+
+# Other Python files (only include the main app)
+app_launcher.py
+build.py
+deploy_update.py
+license_server.py
+standardize.py
+test_license.py
+updater.py
+server_requirements.txt 
