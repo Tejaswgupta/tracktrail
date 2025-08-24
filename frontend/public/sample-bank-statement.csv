@@ -1,0 +1,6 @@
+Date,Description,Debit,Credit,Balance
+2024-01-01,Opening Balance,0.00,10000.00,10000.00
+2024-01-02,ATM Withdrawal,500.00,0.00,9500.00
+2024-01-03,Salary Credit,0.00,5000.00,14500.00
+2024-01-04,UPI Payment to John Doe,200.00,0.00,14300.00
+2024-01-05,NEFT from ABC Corp,0.00,2500.00,16800.00

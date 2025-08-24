@@ -1,0 +1,1073 @@
+import type {
+  Account,
+  AccountWithStatements,
+  BankStatement,
+  Case,
+  CaseWithStats,
+  Entity,
+  EntityWithAccounts,
+  Transaction,
+} from "@/types/database";
+import { createClient } from "@/utils/supabase/client";
+
+export const supabase = createClient();
+
+// Cases
+export const casesService = {
+  async getAll(): Promise<CaseWithStats[]> {
+    const { data, error } = await supabase
+      .from("case_overview")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getById(caseId: string): Promise<CaseWithStats | null> {
+    const { data, error } = await supabase
+      .from("case_overview")
+      .select("*")
+      .eq("case_id", caseId)
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async create(
+    caseData: Omit<Case, "case_id" | "created_at" | "updated_at">
+  ): Promise<Case> {
+    const { data, error } = await supabase
+      .from("cases")
+      .insert(caseData)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async update(caseId: string, updates: Partial<Case>): Promise<Case> {
+    const { data, error } = await supabase
+      .from("cases")
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq("case_id", caseId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+};
+
+// Entities
+export const entitiesService = {
+  async getAll(): Promise<Entity[]> {
+    const { data, error } = await supabase
+      .from("entities")
+      .select("*")
+      .order("entity_name", { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getByCaseId(caseId: string): Promise<EntityWithAccounts[]> {
+    const { data, error } = await supabase
+      .from("case_entities")
+      .select(
+        `
+        entity_role,
+        added_date,
+        entities!inner (
+          *,
+          accounts (
+            *,
+            bank_statements (count)
+          )
+        )
+      `
+      )
+      .eq("case_id", caseId);
+
+    if (error) throw error;
+
+    return (data || []).map((item: any) => ({
+      ...item.entities,
+      entity_role: item.entity_role,
+      accounts: item.entities.accounts || [],
+      account_count: item.entities.accounts?.length || 0,
+      statement_count:
+        item.entities.accounts?.reduce(
+          (sum: number, acc: any) =>
+            sum + (acc.bank_statements?.[0]?.count || 0),
+          0
+        ) || 0,
+    }));
+  },
+
+  async create(
+    entityData: Omit<Entity, "entity_id" | "created_at" | "updated_at">
+  ): Promise<Entity> {
+    const { data, error } = await supabase
+      .from("entities")
+      .insert(entityData)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async addToCase(
+    caseId: string,
+    entityId: string,
+    role: string,
+    addedBy: string
+  ): Promise<void> {
+    const { error } = await supabase.from("case_entities").insert({
+      case_id: caseId,
+      entity_id: entityId,
+      entity_role: role,
+      added_by: addedBy,
+    });
+
+    if (error) throw error;
+  },
+
+  async delete(entityId: string): Promise<void> {
+    // Delete entity and all related data (cascading)
+    // This will also delete related accounts, statements, and transactions
+    const { error } = await supabase
+      .from("entities")
+      .delete()
+      .eq("entity_id", entityId);
+
+    if (error) throw error;
+  },
+
+  async removeFromCase(caseId: string, entityId: string): Promise<void> {
+    const { error } = await supabase
+      .from("case_entities")
+      .delete()
+      .eq("case_id", caseId)
+      .eq("entity_id", entityId);
+
+    if (error) throw error;
+  },
+};
+
+// Accounts
+export const accountsService = {
+  async getByEntityId(entityId: string): Promise<AccountWithStatements[]> {
+    const { data, error } = await supabase
+      .from("accounts")
+      .select(
+        `
+        *,
+        bank_statements (
+          *
+        )
+      `
+      )
+      .eq("entity_id", entityId);
+
+    if (error) throw error;
+
+    return (data || []).map((account) => ({
+      ...account,
+      statements: account.bank_statements || [],
+      statement_count: account.bank_statements?.length || 0,
+      last_statement_date:
+        account.bank_statements?.length > 0
+          ? Math.max(
+              ...account.bank_statements.map((s: any) =>
+                new Date(s.upload_date).getTime()
+              )
+            )
+          : undefined,
+    }));
+  },
+
+  async create(
+    accountData: Omit<Account, "account_id" | "created_at">
+  ): Promise<Account> {
+    const { data, error } = await supabase
+      .from("accounts")
+      .insert(accountData)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async delete(accountId: string): Promise<void> {
+    // Delete account and all related statements and transactions
+    const { error } = await supabase
+      .from("accounts")
+      .delete()
+      .eq("account_id", accountId);
+
+    if (error) throw error;
+  },
+};
+
+// Bank Statements
+export const statementsService = {
+  async getByAccountId(accountId: string): Promise<BankStatement[]> {
+    const { data, error } = await supabase
+      .from("bank_statements")
+      .select("*")
+      .eq("account_id", accountId)
+      .order("upload_date", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async create(
+    statementData: Omit<BankStatement, "statement_id" | "upload_date">
+  ): Promise<BankStatement> {
+    const { data, error } = await supabase
+      .from("bank_statements")
+      .insert(statementData)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async updateProcessingStatus(
+    statementId: string,
+    status: BankStatement["processing_status"],
+    progress?: number
+  ): Promise<void> {
+    const updates: any = { processing_status: status };
+    if (progress !== undefined) {
+      updates.processing_progress = progress;
+    }
+
+    const { error } = await supabase
+      .from("bank_statements")
+      .update(updates)
+      .eq("statement_id", statementId);
+
+    if (error) throw error;
+  },
+
+  async delete(statementId: string): Promise<void> {
+    // Delete statement and all related transactions
+    const { data, error } = await supabase
+      .from("bank_statements")
+      .delete()
+      .eq("statement_id", statementId)
+      .select();
+
+    console.log(data);
+    console.log(error);
+
+    if (error) throw error;
+  },
+};
+
+// Transactions
+export const transactionsService = {
+  async getByAccountId(accountId: string): Promise<Transaction[]> {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("*")
+      .eq("account_id", accountId)
+      .order("tx_date", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getByEntityId(entityId: string): Promise<Transaction[]> {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("*")
+      .eq("entity_id", entityId)
+      .order("tx_date", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getByCaseId(caseId: string): Promise<Transaction[]> {
+    // First get all entity IDs for this case
+    const { data: caseEntities, error: caseError } = await supabase
+      .from("case_entities")
+      .select("entity_id")
+      .eq("case_id", caseId);
+
+    if (caseError) throw caseError;
+
+    if (!caseEntities || caseEntities.length === 0) {
+      return [];
+    }
+
+    const entityIds = caseEntities.map((ce) => ce.entity_id);
+
+    // Then get transactions for those entities
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("*")
+      .in("entity_id", entityIds)
+      .order("tx_date", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Optimized method for AML analysis - only fetches metadata
+  async getCaseAMLMetadata(caseId: string): Promise<{
+    entityIds: string[];
+    dateRange: { from: string; to: string };
+    transactionCount: number;
+    totalVolume: number;
+  }> {
+    // First get all entity IDs for this case
+    const { data: caseEntities, error: caseError } = await supabase
+      .from("case_entities")
+      .select("entity_id")
+      .eq("case_id", caseId);
+
+    if (caseError) throw caseError;
+
+    if (!caseEntities || caseEntities.length === 0) {
+      return {
+        entityIds: [],
+        dateRange: { from: "", to: "" },
+        transactionCount: 0,
+        totalVolume: 0,
+      };
+    }
+
+    const entityIds = caseEntities.map((ce) => ce.entity_id);
+
+    // Get transaction metadata for those entities
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("tx_date, amount, entity_id")
+      .in("entity_id", entityIds);
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      return {
+        entityIds,
+        dateRange: { from: "", to: "" },
+        transactionCount: 0,
+        totalVolume: 0,
+      };
+    }
+
+    // Calculate date range
+    const dates = data
+      .map((tx: any) => new Date(tx.tx_date))
+      .sort((a, b) => a.getTime() - b.getTime());
+    const dateRange = {
+      from: dates[0].toISOString().split("T")[0],
+      to: dates[dates.length - 1].toISOString().split("T")[0],
+    };
+
+    // Calculate totals
+    const transactionCount = data.length;
+    const totalVolume = data.reduce(
+      (sum: number, tx: any) => sum + tx.amount,
+      0
+    );
+
+    return {
+      entityIds,
+      dateRange,
+      transactionCount,
+      totalVolume,
+    };
+  },
+
+  // Optimized method for AML analysis - fetches only required fields
+  async getCaseTransactionsForAnalysis(
+    caseId: string,
+    fields: string[] = [
+      "transaction_id",
+      "tx_date",
+      "amount",
+      "direction",
+      "counterparty_merged",
+      "entity_id",
+    ]
+  ): Promise<Transaction[]> {
+    // First get all entity IDs for this case
+    const { data: caseEntities, error: caseError } = await supabase
+      .from("case_entities")
+      .select("entity_id")
+      .eq("case_id", caseId);
+
+    if (caseError) throw caseError;
+
+    if (!caseEntities || caseEntities.length === 0) {
+      return [];
+    }
+
+    const entityIds = caseEntities.map((ce) => ce.entity_id);
+    const selectFields = fields.join(", ");
+
+    // Then get transactions for those entities with only required fields
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(selectFields)
+      .in("entity_id", entityIds)
+      .order("tx_date", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async create(
+    transactionData: Omit<Transaction, "transaction_id" | "created_at">
+  ): Promise<Transaction> {
+    const { data, error } = await supabase
+      .from("transactions")
+      .insert(transactionData)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async createBatch(
+    transactions: Omit<Transaction, "transaction_id" | "created_at">[]
+  ): Promise<Transaction[]> {
+    const { data, error } = await supabase
+      .from("transactions")
+      .insert(transactions)
+      .select();
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getTransactionSummary(accountId: string) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("amount, direction")
+      .eq("account_id", accountId);
+
+    if (error) throw error;
+
+    const summary = {
+      totalCredits: 0,
+      totalDebits: 0,
+      transactionCount: data?.length || 0,
+    };
+
+    data?.forEach((tx) => {
+      if (tx.direction === "CR") {
+        summary.totalCredits += tx.amount;
+      } else {
+        summary.totalDebits += tx.amount;
+      }
+    });
+
+    return summary;
+  },
+
+  async getByStatementIds(statementIds: string[]): Promise<Transaction[]> {
+    if (statementIds.length === 0) return [];
+
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("*")
+      .in("statement_id", statementIds)
+      .order("tx_date", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getByAccountIdAndStatements(
+    accountId: string,
+    statementIds?: string[],
+    options?: {
+      offset?: number;
+      limit?: number;
+    }
+  ): Promise<Transaction[]> {
+    let query = supabase
+      .from("transactions")
+      .select("*")
+      .eq("account_id", accountId);
+
+    if (statementIds && statementIds.length > 0) {
+      query = query.in("statement_id", statementIds);
+    }
+
+    query = query.order("tx_date", { ascending: false });
+
+    if (options?.offset !== undefined) {
+      query = query.range(
+        options.offset,
+        options.offset + (options.limit || 10) - 1
+      );
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getTransactionSummaryByStatements(
+    accountId: string,
+    statementIds?: string[]
+  ) {
+    let query = supabase
+      .from("transactions")
+      .select("amount, direction")
+      .eq("account_id", accountId);
+
+    if (statementIds && statementIds.length > 0) {
+      query = query.in("statement_id", statementIds);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const summary = {
+      totalCredits: 0,
+      totalDebits: 0,
+      transactionCount: data?.length || 0,
+    };
+
+    data?.forEach((tx) => {
+      if (tx.direction === "CR") {
+        summary.totalCredits += tx.amount;
+      } else {
+        summary.totalDebits += tx.amount;
+      }
+    });
+
+    return summary;
+  },
+
+  async searchTransactions(
+    accountId: string,
+    filters: {
+      dateFrom?: string;
+      dateTo?: string;
+      minAmount?: number;
+      maxAmount?: number;
+      direction?: "DR" | "CR";
+      description?: string;
+      statementIds?: string[];
+      offset?: number;
+      limit?: number;
+    }
+  ): Promise<Transaction[]> {
+    let query = supabase
+      .from("transactions")
+      .select("*")
+      .eq("account_id", accountId);
+
+    if (filters.dateFrom) {
+      query = query.gte("tx_date", filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      query = query.lte("tx_date", filters.dateTo);
+    }
+    if (filters.minAmount) {
+      query = query.gte("amount", filters.minAmount);
+    }
+    if (filters.maxAmount) {
+      query = query.lte("amount", filters.maxAmount);
+    }
+    if (filters.direction) {
+      query = query.eq("direction", filters.direction);
+    }
+    if (filters.description) {
+      query = query.ilike("description", `%${filters.description}%`);
+    }
+    if (filters.statementIds && filters.statementIds.length > 0) {
+      query = query.in("statement_id", filters.statementIds);
+    }
+
+    query = query.order("tx_date", { ascending: false });
+
+    if (filters.offset !== undefined) {
+      query = query.range(
+        filters.offset,
+        filters.offset + (filters.limit || 10) - 1
+      );
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getTransactionCount(
+    accountId: string,
+    filters?: {
+      dateFrom?: string;
+      dateTo?: string;
+      minAmount?: number;
+      maxAmount?: number;
+      direction?: "DR" | "CR";
+      description?: string;
+      statementIds?: string[];
+    }
+  ): Promise<number> {
+    let query = supabase
+      .from("transactions")
+      .select("*", { count: "exact", head: true })
+      .eq("account_id", accountId);
+
+    if (filters?.dateFrom) {
+      query = query.gte("tx_date", filters.dateFrom);
+    }
+    if (filters?.dateTo) {
+      query = query.lte("tx_date", filters.dateTo);
+    }
+    if (filters?.minAmount) {
+      query = query.gte("amount", filters.minAmount);
+    }
+    if (filters?.maxAmount) {
+      query = query.lte("amount", filters.maxAmount);
+    }
+    if (filters?.direction) {
+      query = query.eq("direction", filters.direction);
+    }
+    if (filters?.description) {
+      query = query.ilike("description", `%${filters.description}%`);
+    }
+    if (filters?.statementIds && filters.statementIds.length > 0) {
+      query = query.in("statement_id", filters.statementIds);
+    }
+
+    const { count, error } = await query;
+    if (error) throw error;
+    return count || 0;
+  },
+};
+
+// Counterparty Operations
+export const counterpartyService = {
+  async getAllCounterparties(): Promise<
+    Array<{ name: string; count: number }>
+  > {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("counterparty_merged")
+      .not("counterparty_merged", "is", null);
+
+    if (error) throw error;
+
+    // Count occurrences
+    const counts = new Map<string, number>();
+    data?.forEach((tx) => {
+      if (tx.counterparty_merged) {
+        counts.set(
+          tx.counterparty_merged,
+          (counts.get(tx.counterparty_merged) || 0) + 1
+        );
+      }
+    });
+
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  },
+
+  async getCaseCounterpartyStats(caseId: string): Promise<
+    Array<{
+      counterparty_name: string;
+      transaction_count: number;
+      total_amount: number;
+      first_seen: string;
+      last_seen: string;
+    }>
+  > {
+    const { data, error } = await supabase.rpc("get_case_counterparty_stats", {
+      p_case_id: caseId,
+    });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async findSimilarCounterparties(
+    caseId: string,
+    similarityThreshold: number = 0.8
+  ): Promise<
+    Array<{
+      name1: string;
+      name2: string;
+      similarity_score: number;
+      combined_transaction_count: number;
+      name1_count: number;
+      name2_count: number;
+    }>
+  > {
+    const { data, error } = await supabase.rpc(
+      "find_similar_counterparties_v2",
+      {
+        p_case_id: caseId,
+        p_similarity_threshold: similarityThreshold,
+      }
+    );
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getCounterpartyMergeCandidates(
+    caseId: string,
+    minSimilarity: number = 0.75,
+    limit: number = 100
+  ): Promise<
+    Array<{
+      representative: string;
+      similar_names: string[];
+      similarity_scores: number[];
+      total_transactions: number;
+      potential_savings: number;
+    }>
+  > {
+    const { data, error } = await supabase.rpc(
+      "get_counterparty_merge_candidates_v2",
+      {
+        p_case_id: caseId,
+        p_min_similarity: minSimilarity,
+        p_limit: limit,
+      }
+    );
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async previewCounterpartyMerge(
+    caseId: string,
+    fromNames: string[],
+    toName: string
+  ): Promise<{
+    affected_transactions: number;
+    affected_accounts: number;
+    total_amount: number;
+    date_range_start: string;
+    date_range_end: string;
+  } | null> {
+    const { data, error } = await supabase.rpc(
+      "preview_counterparty_merge_v2",
+      {
+        p_case_id: caseId,
+        p_from_names: fromNames,
+        p_to_name: toName,
+      }
+    );
+
+    if (error) throw error;
+    return data?.[0] || null;
+  },
+
+  async getCounterpartiesByCase(
+    caseId: string
+  ): Promise<Array<{ name: string; count: number }>> {
+    // Use the new efficient function instead of complex joins
+    const stats = await this.getCaseCounterpartyStats(caseId);
+    return stats.map((stat) => ({
+      name: stat.counterparty_name,
+      count: stat.transaction_count,
+    }));
+  },
+
+  async mergeCounterparties(
+    fromName: string,
+    toName: string,
+    userId: string
+  ): Promise<{ affectedCount: number }> {
+    const { data, error } = await supabase
+      .from("transactions")
+      .update({
+        counterparty_merged: toName,
+        updated_at: new Date().toISOString(),
+        updated_by: userId,
+      })
+      .eq("counterparty_merged", fromName)
+      .select("*");
+
+    if (error) throw error;
+
+    return { affectedCount: data.length || 0 };
+  },
+
+  async batchMergeCounterparties(
+    merges: Array<{ from: string; to: string }>,
+    userId: string
+  ): Promise<{ totalAffected: number; errors: string[] }> {
+    let totalAffected = 0;
+    const errors: string[] = [];
+
+    for (const merge of merges) {
+      try {
+        const result = await this.mergeCounterparties(
+          merge.from,
+          merge.to,
+          userId
+        );
+        totalAffected += result.affectedCount;
+      } catch (error) {
+        errors.push(
+          `Failed to merge "${merge.from}" to "${merge.to}": ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`
+        );
+      }
+    }
+
+    return { totalAffected, errors };
+  },
+};
+
+// Entity Mapping Operations
+export const entityMappingService = {
+  async getCaseStats(caseId: string) {
+    const { data, error } = await supabase.rpc(
+      "get_case_entity_mapping_stats",
+      {
+        p_case_id: caseId,
+      }
+    );
+
+    if (error) throw error;
+    return (
+      data?.[0] || {
+        total_counterparties: 0,
+        mapped_counterparties: 0,
+        unmapped_counterparties: 0,
+        high_confidence_mappings: 0,
+        medium_confidence_mappings: 0,
+        low_confidence_mappings: 0,
+        mapping_completeness: 0,
+      }
+    );
+  },
+
+  async getUnmappedCounterparties(caseId: string) {
+    const { data, error } = await supabase.rpc(
+      "get_case_unmapped_counterparties",
+      {
+        p_case_id: caseId,
+      }
+    );
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getMappedTransactions(caseId: string) {
+    const { data, error } = await supabase
+      .from("transaction_entity_mappings")
+      .select("*")
+      .eq("case_id", caseId);
+
+    if (error) throw error;
+    return data || [];
+  },
+};
+
+// Debug and Diagnostics
+export const diagnosticsService = {
+  async checkStatementTransactionConsistency(accountId: string) {
+    const { data, error } = await supabase.rpc(
+      "check_statement_transaction_consistency",
+      {
+        p_account_id: accountId,
+      }
+    );
+
+    if (error) {
+      // Fallback to manual check if RPC doesn't exist
+      const [statements, transactions] = await Promise.all([
+        statementsService.getByAccountId(accountId),
+        transactionsService.getByAccountId(accountId),
+      ]);
+
+      const results = statements.map((stmt) => {
+        const actualCount = transactions.filter(
+          (tx) => tx.statement_id === stmt.statement_id
+        ).length;
+        return {
+          statement_id: stmt.statement_id,
+          file_name: stmt.file_name,
+          expected_count: stmt.transaction_count,
+          actual_count: actualCount,
+          status: actualCount === stmt.transaction_count ? "OK" : "MISMATCH",
+        };
+      });
+
+      return results;
+    }
+
+    return data || [];
+  },
+
+  async getOrphanedTransactions(accountId: string) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(
+        `
+        transaction_id,
+        statement_id,
+        tx_date,
+        description,
+        amount
+      `
+      )
+      .eq("account_id", accountId)
+      .not(
+        "statement_id",
+        "in",
+        supabase
+          .from("bank_statements")
+          .select("statement_id")
+          .eq("account_id", accountId)
+      );
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async repairStatementTransactionLinks(accountId: string) {
+    // This function attempts to repair broken statement-transaction links
+    // by matching transactions to statements based on date ranges and other criteria
+
+    const [statements, transactions] = await Promise.all([
+      statementsService.getByAccountId(accountId),
+      transactionsService.getByAccountId(accountId),
+    ]);
+
+    const repairs = [];
+
+    for (const statement of statements) {
+      const linkedTransactions = transactions.filter(
+        (tx) => tx.statement_id === statement.statement_id
+      );
+
+      if (linkedTransactions.length !== statement.transaction_count) {
+        // Find potential matches based on date range
+        const potentialMatches = transactions.filter((tx) => {
+          // Check if transaction is orphaned or incorrectly linked
+          const isOrphaned = !statements.find(
+            (s) => s.statement_id === tx.statement_id
+          );
+          const isInDateRange =
+            statement.statement_period_from && statement.statement_period_to
+              ? tx.tx_date >= statement.statement_period_from &&
+                tx.tx_date <= statement.statement_period_to
+              : true; // If no date range, consider all
+
+          return isOrphaned && isInDateRange;
+        });
+
+        if (potentialMatches.length > 0) {
+          repairs.push({
+            statement_id: statement.statement_id,
+            file_name: statement.file_name,
+            expected_count: statement.transaction_count,
+            current_count: linkedTransactions.length,
+            potential_matches: potentialMatches.length,
+            transactions_to_fix: potentialMatches.slice(
+              0,
+              statement.transaction_count - linkedTransactions.length
+            ),
+          });
+        }
+      }
+    }
+
+    return repairs;
+  },
+
+  async executeRepairs(repairs: any[], userId: string) {
+    const results = [];
+
+    for (const repair of repairs) {
+      try {
+        const transactionIds = repair.transactions_to_fix.map(
+          (tx: any) => tx.transaction_id
+        );
+
+        const { data, error } = await supabase
+          .from("transactions")
+          .update({
+            statement_id: repair.statement_id,
+            updated_at: new Date().toISOString(),
+            updated_by: userId,
+          })
+          .in("transaction_id", transactionIds)
+          .select();
+
+        if (error) throw error;
+
+        results.push({
+          statement_id: repair.statement_id,
+          file_name: repair.file_name,
+          fixed_count: data?.length || 0,
+          status: "success",
+        });
+      } catch (error) {
+        results.push({
+          statement_id: repair.statement_id,
+          file_name: repair.file_name,
+          fixed_count: 0,
+          status: "error",
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+
+    return results;
+  },
+};
+
+// Search and Analytics
+export const searchService = {
+  async findEntitiesByPAN(pan: string): Promise<Entity[]> {
+    const { data, error } = await supabase
+      .from("entities")
+      .select("*")
+      .eq("pan", pan);
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async findEntitiesByName(
+    name: string,
+    threshold: number = 0.3
+  ): Promise<Entity[]> {
+    const { data, error } = await supabase
+      .from("entities")
+      .select("*")
+      .textSearch("entity_name", name);
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getCaseStats(caseId: string) {
+    // Get total transaction volume, suspicious patterns, etc.
+    const { data, error } = await supabase.rpc("get_case_analytics", {
+      case_id: caseId,
+    });
+
+    if (error) throw error;
+    return data;
+  },
+};

@@ -1,0 +1,6 @@
+Date,Description,Debit,Credit,Balance
+2024-01-01,Opening Balance,0,10000,10000
+2024-01-02,ATM Withdrawal,500,0,9500
+2024-01-03,Salary Credit,0,50000,59500
+2024-01-04,Online Transfer,2000,0,57500
+2024-01-05,Interest Credit,0,150,57650

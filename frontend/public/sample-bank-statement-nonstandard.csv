@@ -1,0 +1,6 @@
+Transaction Date,Particulars,Withdrawal,Deposit,Running Balance
+01/01/2024,Account Opening,0,10000,10000
+02/01/2024,Cash Withdrawal ATM,500,0,9500
+03/01/2024,Salary Received,0,5000,14500
+04/01/2024,Online Transfer,200,0,14300
+05/01/2024,Bank Transfer Received,0,2500,16800
