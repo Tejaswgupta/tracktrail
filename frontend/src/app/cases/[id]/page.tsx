@@ -1,6 +1,7 @@
 "use client";
 
 import AMLTab from "@/app/components/AMLTab";
+import AIModeTab from "@/app/components/AIModeTab";
 import EfficientCounterpartyMerge from "@/app/components/EfficientCounterpartyMerge";
 import EntityStandardizationTab from "@/app/components/EntityStandardizationTab";
 import OverviewTab from "@/app/components/OverviewTab";
@@ -35,6 +36,7 @@ export default function CaseDetailPage() {
     | "entities"
     | "timeline"
     | "analytics"
+    | "ai-mode"
     | "counterparty-merge"
     | "entity-standardization"
   >("overview");
@@ -266,6 +268,7 @@ export default function CaseDetailPage() {
               { key: "entities", label: "Entities" },
               { key: "timeline", label: "Timeline" },
               { key: "analytics", label: "AML Analytics" },
+              { key: "ai-mode", label: "AI Mode" },
               { key: "counterparty-merge", label: "Counterparty Merge" },
               {
                 key: "entity-standardization",
@@ -343,6 +346,18 @@ export default function CaseDetailPage() {
               </h2>
 
               <AMLTab caseId={caseData.id} />
+            </div>
+          </div>
+        )}
+
+        {activeTab === "ai-mode" && (
+          <div className="space-y-8">
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-6">
+                AI-Powered AML Analysis
+              </h2>
+
+              <AIModeTab caseId={caseData.id} />
             </div>
           </div>
         )}

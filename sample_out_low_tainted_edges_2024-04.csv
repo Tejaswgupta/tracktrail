@@ -1,0 +1,1 @@
+edge_id,supplier_gstin,recipient_gstin,period,tax_total,verified_tax,unverified_tax,tainted_amount_raw,tax_cap,tainted_amount

@@ -20,8 +20,13 @@ def _upper_str(x):
 
 
 def _period_from_date(series: pd.Series) -> pd.Series:
-    # Expecting dd-mm-yyyy or yyyy-mm-dd; pandas will parse smartly
-    dt = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    # Robust parsing: try ISO first (YYYY-MM-DD), then fallback to day-first (e.g., DD-MM-YYYY)
+    s = series.astype(str).str.strip()
+    dt = pd.to_datetime(s, errors="coerce", format="%Y-%m-%d")
+    mask = dt.isna()
+    if mask.any():
+        dt2 = pd.to_datetime(s[mask], errors="coerce", dayfirst=True)
+        dt.loc[mask] = dt2
     return dt.dt.strftime("%Y-%m")
 
 
