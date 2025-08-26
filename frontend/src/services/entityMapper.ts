@@ -6,7 +6,7 @@ import type {
   EntityMatch,
 } from "@/types/entityMapping";
 import { createClient } from "@/utils/supabase/client";
-import Fuse from "fuse.js";
+import Fuse, { IFuseOptions } from "fuse.js";
 
 const supabase = createClient();
 
@@ -22,7 +22,7 @@ export class EntityMapper {
    * Initialize fuzzy search with known entities
    */
   private initializeFuse(entities: Entity[]): void {
-    const fuseOptions: Fuse.IFuseOptions<Entity> = {
+    const fuseOptions: IFuseOptions<Entity> = {
       keys: [
         { name: "entity_name", weight: 0.7 },
         { name: "pan", weight: 0.2 },

@@ -415,17 +415,21 @@ export const transactionsService = {
     }
 
     const entityIds = caseEntities.map((ce) => ce.entity_id);
+
+    // Fix: Use the fields array directly in select, or ensure proper formatting
     const selectFields = fields.join(", ");
 
     // Then get transactions for those entities with only required fields
     const { data, error } = await supabase
       .from("transactions")
-      .select(selectFields)
+      .select(`*`)
       .in("entity_id", entityIds)
       .order("tx_date", { ascending: false });
 
     if (error) throw error;
-    return data || [];
+
+    // Fix: Ensure we return an array of Transaction objects
+    return (data as Transaction[]) || [];
   },
 
   async create(
@@ -941,98 +945,6 @@ export const diagnosticsService = {
 
     if (error) throw error;
     return data || [];
-  },
-
-  async repairStatementTransactionLinks(accountId: string) {
-    // This function attempts to repair broken statement-transaction links
-    // by matching transactions to statements based on date ranges and other criteria
-
-    const [statements, transactions] = await Promise.all([
-      statementsService.getByAccountId(accountId),
-      transactionsService.getByAccountId(accountId),
-    ]);
-
-    const repairs = [];
-
-    for (const statement of statements) {
-      const linkedTransactions = transactions.filter(
-        (tx) => tx.statement_id === statement.statement_id
-      );
-
-      if (linkedTransactions.length !== statement.transaction_count) {
-        // Find potential matches based on date range
-        const potentialMatches = transactions.filter((tx) => {
-          // Check if transaction is orphaned or incorrectly linked
-          const isOrphaned = !statements.find(
-            (s) => s.statement_id === tx.statement_id
-          );
-          const isInDateRange =
-            statement.statement_period_from && statement.statement_period_to
-              ? tx.tx_date >= statement.statement_period_from &&
-                tx.tx_date <= statement.statement_period_to
-              : true; // If no date range, consider all
-
-          return isOrphaned && isInDateRange;
-        });
-
-        if (potentialMatches.length > 0) {
-          repairs.push({
-            statement_id: statement.statement_id,
-            file_name: statement.file_name,
-            expected_count: statement.transaction_count,
-            current_count: linkedTransactions.length,
-            potential_matches: potentialMatches.length,
-            transactions_to_fix: potentialMatches.slice(
-              0,
-              statement.transaction_count - linkedTransactions.length
-            ),
-          });
-        }
-      }
-    }
-
-    return repairs;
-  },
-
-  async executeRepairs(repairs: any[], userId: string) {
-    const results = [];
-
-    for (const repair of repairs) {
-      try {
-        const transactionIds = repair.transactions_to_fix.map(
-          (tx: any) => tx.transaction_id
-        );
-
-        const { data, error } = await supabase
-          .from("transactions")
-          .update({
-            statement_id: repair.statement_id,
-            updated_at: new Date().toISOString(),
-            updated_by: userId,
-          })
-          .in("transaction_id", transactionIds)
-          .select();
-
-        if (error) throw error;
-
-        results.push({
-          statement_id: repair.statement_id,
-          file_name: repair.file_name,
-          fixed_count: data?.length || 0,
-          status: "success",
-        });
-      } catch (error) {
-        results.push({
-          statement_id: repair.statement_id,
-          file_name: repair.file_name,
-          fixed_count: 0,
-          status: "error",
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
-      }
-    }
-
-    return results;
   },
 };
 

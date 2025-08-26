@@ -48,6 +48,8 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
   }, [caseId]);
 
   const analyzeWithAI = async () => {
+    //TODO: USe amlBackendClient instead of fetch
+
     setAnalyzing(true);
     setAnalysisResult(null);
     setError(null);

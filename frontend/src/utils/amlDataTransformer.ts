@@ -374,6 +374,7 @@ export class AMLDataTransformer {
         counterparty_merged: movement.in_counterparty,
         created_at: new Date().toISOString(),
         created_by: "system",
+        original_index: 0, //TODO: Add original index
       };
 
       const outTransaction: Transaction = {
@@ -388,6 +389,7 @@ export class AMLDataTransformer {
         counterparty_merged: movement.out_counterparty,
         created_at: new Date().toISOString(),
         created_by: "system",
+        original_index: 0, //TODO: Add original index
       };
 
       const pattern = {

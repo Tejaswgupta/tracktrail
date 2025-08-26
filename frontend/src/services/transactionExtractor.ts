@@ -175,7 +175,7 @@ export const transactionExtractorService = {
         columnIndices.AMOUNT === -1 &&
         (columnIndices.DEBIT === -1 || columnIndices.CREDIT === -1)
       ) {
-        const missingCols = [];
+        const missingCols: string[] = [];
         if (columnMapping.DEBIT && columnIndices.DEBIT === -1)
           missingCols.push(`"${columnMapping.DEBIT}"`);
         if (columnMapping.CREDIT && columnIndices.CREDIT === -1)

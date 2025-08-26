@@ -391,7 +391,7 @@ export class AMLUtils {
       }
     }
 
-    const results = [];
+    const results: any = [];
     for (let digit = 1; digit <= 9; digit++) {
       const actual =
         totalTransactions > 0
