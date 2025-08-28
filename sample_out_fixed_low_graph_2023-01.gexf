@@ -1,0 +1,162 @@
+<?xml version='1.0' encoding='utf-8'?>
+<gexf xmlns="http://www.gexf.net/1.2draft" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.gexf.net/1.2draft http://www.gexf.net/1.2draft/gexf.xsd" version="1.2">
+  <meta lastmodifieddate="2025-08-27">
+    <creator>NetworkX 3.5</creator>
+  </meta>
+  <graph defaultedgetype="directed" mode="static" name="">
+    <attributes mode="static" class="edge">
+      <attribute id="7" title="edge_id" type="long" />
+      <attribute id="8" title="period" type="string" />
+      <attribute id="9" title="tax_total" type="double" />
+      <attribute id="10" title="verified_tax" type="double" />
+      <attribute id="11" title="unverified_tax" type="double" />
+      <attribute id="12" title="tainted_amount_raw" type="double" />
+      <attribute id="13" title="tainted_amount" type="double" />
+    </attributes>
+    <attributes mode="static" class="node">
+      <attribute id="0" title="period" type="string" />
+      <attribute id="1" title="g1_out_tax" type="double" />
+      <attribute id="2" title="legit_in_itc" type="double" />
+      <attribute id="3" title="credit_utilized" type="double" />
+      <attribute id="4" title="pass_through_factor" type="double" />
+      <attribute id="5" title="risk_score" type="double" />
+      <attribute id="6" title="origin_suspicious_itc" type="double" />
+    </attributes>
+    <nodes>
+      <node id="GSTIN3" label="GSTIN3">
+        <attvalues>
+          <attvalue for="0" value="2023-01" />
+          <attvalue for="1" value="6000.0" />
+          <attvalue for="2" value="4000.0" />
+          <attvalue for="3" value="3500.0" />
+          <attvalue for="4" value="0.875" />
+          <attvalue for="5" value="0.0" />
+          <attvalue for="6" value="0.0" />
+        </attvalues>
+      </node>
+      <node id="GSTIN1" label="GSTIN1">
+        <attvalues>
+          <attvalue for="0" value="2023-01" />
+          <attvalue for="1" value="5800.0" />
+          <attvalue for="2" value="0.0" />
+          <attvalue for="3" value="0.0" />
+          <attvalue for="4" value="0.0" />
+          <attvalue for="5" value="7.241379310344828" />
+          <attvalue for="6" value="600.0" />
+        </attvalues>
+      </node>
+      <node id="GSTIN2" label="GSTIN2">
+        <attvalues>
+          <attvalue for="0" value="2023-01" />
+          <attvalue for="1" value="3000.0" />
+          <attvalue for="2" value="1800.0" />
+          <attvalue for="3" value="1800.0" />
+          <attvalue for="4" value="1.0" />
+          <attvalue for="5" value="0.0" />
+          <attvalue for="6" value="0.0" />
+        </attvalues>
+      </node>
+      <node id="GSTIN5" label="GSTIN5">
+        <attvalues>
+          <attvalue for="0" value="2023-01" />
+          <attvalue for="1" value="500.0" />
+          <attvalue for="2" value="6000.0" />
+          <attvalue for="3" value="500.0" />
+          <attvalue for="4" value="0.08333333333333333" />
+          <attvalue for="5" value="0.0" />
+          <attvalue for="6" value="0.0" />
+        </attvalues>
+      </node>
+      <node id="GSTIN6" label="GSTIN6">
+        <attvalues>
+          <attvalue for="0" value="2023-01" />
+          <attvalue for="1" value="0.0" />
+          <attvalue for="2" value="0.0" />
+          <attvalue for="3" value="0.0" />
+          <attvalue for="4" value="0.0" />
+          <attvalue for="5" value="30.0" />
+          <attvalue for="6" value="0.0" />
+        </attvalues>
+      </node>
+      <node id="GSTIN4" label="GSTIN4">
+        <attvalues>
+          <attvalue for="0" value="2023-01" />
+          <attvalue for="1" value="300.0" />
+          <attvalue for="2" value="3000.0" />
+          <attvalue for="3" value="2000.0" />
+          <attvalue for="4" value="0.6666666666666666" />
+          <attvalue for="5" value="0.0" />
+          <attvalue for="6" value="0.0" />
+        </attvalues>
+      </node>
+    </nodes>
+    <edges>
+      <edge source="GSTIN3" target="GSTIN5" id="0">
+        <attvalues>
+          <attvalue for="7" value="3" />
+          <attvalue for="8" value="2023-01" />
+          <attvalue for="9" value="6000.0" />
+          <attvalue for="10" value="6000.0" />
+          <attvalue for="11" value="0.0" />
+          <attvalue for="12" value="349.9999999998833" />
+          <attvalue for="13" value="349.9999999998833" />
+        </attvalues>
+      </edge>
+      <edge source="GSTIN1" target="GSTIN2" id="1">
+        <attvalues>
+          <attvalue for="7" value="6" />
+          <attvalue for="8" value="2023-01" />
+          <attvalue for="9" value="-200.0" />
+          <attvalue for="10" value="-200.0" />
+          <attvalue for="11" value="0.0" />
+          <attvalue for="12" value="0.0" />
+          <attvalue for="13" value="0.0" />
+        </attvalues>
+      </edge>
+      <edge source="GSTIN1" target="GSTIN3" id="2">
+        <attvalues>
+          <attvalue for="7" value="1" />
+          <attvalue for="8" value="2023-01" />
+          <attvalue for="9" value="4000.0" />
+          <attvalue for="10" value="4000.0" />
+          <attvalue for="11" value="0.0" />
+          <attvalue for="12" value="399.9999999999333" />
+          <attvalue for="13" value="399.9999999999333" />
+        </attvalues>
+      </edge>
+      <edge source="GSTIN2" target="GSTIN4" id="3">
+        <attvalues>
+          <attvalue for="7" value="2" />
+          <attvalue for="8" value="2023-01" />
+          <attvalue for="9" value="3000.0" />
+          <attvalue for="10" value="3000.0" />
+          <attvalue for="11" value="0.0" />
+          <attvalue for="12" value="199.9999999999" />
+          <attvalue for="13" value="199.9999999999" />
+        </attvalues>
+      </edge>
+      <edge source="GSTIN5" target="GSTIN6" id="4">
+        <attvalues>
+          <attvalue for="7" value="5" />
+          <attvalue for="8" value="2023-01" />
+          <attvalue for="9" value="500.0" />
+          <attvalue for="10" value="0.0" />
+          <attvalue for="11" value="500.0" />
+          <attvalue for="12" value="0.0" />
+          <attvalue for="13" value="0.0" />
+        </attvalues>
+      </edge>
+      <edge source="GSTIN4" target="GSTIN6" id="5">
+        <attvalues>
+          <attvalue for="7" value="4" />
+          <attvalue for="8" value="2023-01" />
+          <attvalue for="9" value="300.0" />
+          <attvalue for="10" value="0.0" />
+          <attvalue for="11" value="300.0" />
+          <attvalue for="12" value="133.33333333282224" />
+          <attvalue for="13" value="133.33333333282224" />
+        </attvalues>
+      </edge>
+    </edges>
+  </graph>
+</gexf>

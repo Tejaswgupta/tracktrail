@@ -1,0 +1,4 @@
+Origin GSTIN1 @ 2023-01
+  amt=350.00 path=GSTIN1 -> GSTIN3 -> GSTIN5
+  amt=133.33 path=GSTIN1 -> GSTIN2 -> GSTIN4 -> GSTIN6
+

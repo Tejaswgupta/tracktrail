@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 import argparse
+import json
 from collections import defaultdict
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
+import networkx as nx
 import numpy as np
 import pandas as pd
-import networkx as nx
 from networkx.readwrite import json_graph
-import json
 
 # -----------------------------
 # Helpers and parsing
@@ -238,11 +238,13 @@ class BogusITCDetector:
         )
 
         # Inbound claimed (from GSTR2)
+        # Fixed _sum_if_masked function
         def _sum_if_masked(series: pd.Series, mask: pd.Series) -> float:
             if len(series) == 0:
                 return 0.0
-            m = mask.loc[series.index]
-            return float(series[m].sum())
+            # Align mask index with series index
+            aligned_mask = mask.reindex(series.index, fill_value=False)
+            return float(series[aligned_mask].sum())
 
         g2 = self.g2
         inbound = (
@@ -251,11 +253,11 @@ class BogusITCDetector:
                 g2_in_claimed_total=('itc_claimed_total', 'sum'),
                 g2_in_matched_total=(
                     'itc_claimed_total',
-                    lambda s: _sum_if_masked(s, g2['matched_in_g1'])
+                    lambda s: _sum_if_masked(s, g2.loc[s.index, 'matched_in_g1'])
                 ),
                 g2_in_unmatched_total=(
                     'itc_claimed_total',
-                    lambda s: _sum_if_masked(s, ~g2['matched_in_g1'])
+                    lambda s: _sum_if_masked(s, ~g2.loc[s.index, 'matched_in_g1'])
                 ),
                 g2_in_invoices=('itc_claimed_total', 'count'),
             )
