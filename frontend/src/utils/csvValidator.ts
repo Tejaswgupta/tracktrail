@@ -4,6 +4,7 @@ export interface RequiredColumns {
   DEBIT: string;
   CREDIT: string;
   AMOUNT?: string; // Optional unified amount column
+  DIRECTION?: string; // Optional direction (Dr/Cr) column when using unified amount
 }
 
 export interface CSVValidationResult {
@@ -21,6 +22,7 @@ export interface ColumnMapping {
   DEBIT: string;
   CREDIT: string;
   AMOUNT?: string;
+  DIRECTION?: string;
 }
 
 /**
@@ -153,6 +155,19 @@ export function validateCSVColumns(headers: string[]): CSVValidationResult {
       "TRANSACTION_AMOUNT",
       "TXN_AMOUNT",
     ],
+    DIRECTION: [
+      "DR/CR",
+      "DR - CR",
+      "DR CR",
+      "CR/DR",
+      "CREDIT/DEBIT",
+      "DEBIT/CREDIT",
+      "TYPE",
+      "TRANSACTION TYPE",
+      "TXN TYPE",
+      "DR_CR",
+      "DRCR",
+    ],
   };
 
   const foundColumns: Partial<RequiredColumns> = {};
@@ -187,14 +202,11 @@ export function validateCSVColumns(headers: string[]): CSVValidationResult {
                 !h.includes("CREATE_DATE"))
             );
           }
-          // For other columns, use the original logic but ensure the pattern is a word boundary
-          return (
-            h.includes(pattern) &&
-            (h === pattern ||
-              h.startsWith(pattern + " ") ||
-              h.endsWith(" " + pattern) ||
-              h.includes(" " + pattern + " "))
-          );
+          // For other columns, consider non-alphanumeric boundaries around the pattern.
+          // This handles headers like "AMOUNT(INR)", "TXN_AMOUNT", "AMOUNT-INR", etc.
+          const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const boundaryRegex = new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`);
+          return boundaryRegex.test(h);
         });
         if (matchIndex !== -1) {
           foundColumns[required as keyof RequiredColumns] = headers[matchIndex];
@@ -211,6 +223,7 @@ export function validateCSVColumns(headers: string[]): CSVValidationResult {
   const hasDebit = !!foundColumns.DEBIT;
   const hasCredit = !!foundColumns.CREDIT;
   const hasAmount = !!foundColumns.AMOUNT;
+  const hasDirection = !!foundColumns.DIRECTION;
 
   // Valid if we have DATE, DESCRIPTION, and either (DEBIT+CREDIT) or AMOUNT
   const isValid =
@@ -221,6 +234,7 @@ export function validateCSVColumns(headers: string[]): CSVValidationResult {
   if (!hasDescription) missingColumns.push("DESCRIPTION");
   if (!hasAmount && !hasDebit) missingColumns.push("DEBIT");
   if (!hasAmount && !hasCredit) missingColumns.push("CREDIT");
+  // Note: When using unified AMOUNT, DIRECTION is recommended but not strictly required
 
   return {
     isValid,

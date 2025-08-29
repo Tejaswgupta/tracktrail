@@ -169,8 +169,7 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
             </div>
             <div className="ml-3 flex-1 md:flex md:justify-between">
               <p className="text-sm text-blue-700">
-                AI analysis will process transactions in chunks of up to 16k
-                tokens to ensure optimal performance.
+                AI analysis will process transactions.
               </p>
             </div>
           </div>

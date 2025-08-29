@@ -23,6 +23,7 @@ export default function CSVColumnMapper({
       DEBIT: "",
       CREDIT: "",
       AMOUNT: "",
+      DIRECTION: suggested?.DIRECTION || "",
     };
 
     // Prefer single amount column if available, otherwise use debit/credit
@@ -170,6 +171,7 @@ export default function CSVColumnMapper({
                       AMOUNT: "",
                       DEBIT: prev.DEBIT || validationResult.headers[0] || "",
                       CREDIT: prev.CREDIT || validationResult.headers[1] || "",
+                      DIRECTION: "", // not applicable in separate debit/credit mode
                     }));
                   }}
                   className="text-blue-600"
@@ -287,6 +289,35 @@ export default function CSVColumnMapper({
                   <p className="text-xs text-gray-500 mt-1">
                     Note: Positive values will be treated as credits, negative
                     as debits
+                  </p>
+
+                  {/* Optional Direction column when using unified Amount */}
+                  <div className="grid grid-cols-3 gap-4 items-center mt-3">
+                    <div className="text-sm text-gray-600">DIRECTION (optional)</div>
+                    <div>
+                      <select
+                        value={mapping.DIRECTION || ""}
+                        onChange={(e) =>
+                          handleMappingChange("DIRECTION", e.target.value)
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">Select column...</option>
+                        {validationResult.headers.map((header) => (
+                          <option key={header} value={header}>
+                            {header}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {mapping.DIRECTION && (
+                        <span>Preview: {getPreviewValue(mapping.DIRECTION)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    If provided, DIRECTION should contain values like DR/CR, Debit/Credit, etc.
                   </p>
                 </div>
               )}

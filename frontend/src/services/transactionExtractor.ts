@@ -23,6 +23,8 @@ export interface ExtractionResult {
 }
 
 import type { ColumnMapping } from "@/utils/csvValidator";
+import { validateCSVColumns } from "@/utils/csvValidator";
+import { amlBackendClient } from "./amlBackendClient";
 import { parseAndConvertToISO } from "./dateParser";
 
 export const transactionExtractorService = {
@@ -69,6 +71,7 @@ export const transactionExtractorService = {
     columnMapping?: ColumnMapping
   ): Promise<ExtractionResult> {
     const fileType = this.getFileType(file.type);
+    console.log(`fileType`, fileType);
 
     switch (fileType) {
       case "csv":
@@ -140,6 +143,9 @@ export const transactionExtractorService = {
         AMOUNT: columnMapping.AMOUNT
           ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
           : -1,
+        DIRECTION: columnMapping.DIRECTION
+          ? headers.findIndex((h) => h.trim() === columnMapping.DIRECTION?.trim())
+          : -1,
       };
       console.log("Using column mapping:", columnIndices);
       console.log("Column mapping details:", {
@@ -153,6 +159,9 @@ export const transactionExtractorService = {
           : "not mapped",
         AMOUNT: columnMapping.AMOUNT
           ? `"${columnMapping.AMOUNT}" -> index ${columnIndices.AMOUNT}`
+          : "not mapped",
+        DIRECTION: columnMapping.DIRECTION
+          ? `"${columnMapping.DIRECTION}" -> index ${columnIndices.DIRECTION}`
           : "not mapped",
       });
 
@@ -196,6 +205,7 @@ export const transactionExtractorService = {
         DEBIT: 2,
         CREDIT: 3,
         AMOUNT: -1,
+        DIRECTION: -1,
       };
       console.log("Using default column mapping:", columnIndices);
     }
@@ -274,13 +284,25 @@ export const transactionExtractorService = {
         throw new Error(`Invalid amount: "${amountStr}"`);
       }
 
-      // Determine direction based on sign
-      if (parsedAmount > 0) {
-        amount = parsedAmount;
-        direction = "CR";
-      } else {
+      // If a direction column is mapped, prefer it
+      let directionFromCol: "DR" | "CR" | null = null;
+      if (columnIndices.DIRECTION !== undefined && columnIndices.DIRECTION >= 0) {
+        const rawDir = columns[columnIndices.DIRECTION]?.trim() || "";
+        directionFromCol = this.parseDirection(rawDir);
+      }
+
+      if (directionFromCol) {
+        direction = directionFromCol;
         amount = Math.abs(parsedAmount);
-        direction = "DR";
+      } else {
+        // Fall back to sign-based inference
+        if (parsedAmount > 0) {
+          amount = parsedAmount;
+          direction = "CR";
+        } else {
+          amount = Math.abs(parsedAmount);
+          direction = "DR";
+        }
       }
     } else if (columnIndices.DEBIT >= 0 && columnIndices.CREDIT >= 0) {
       // Separate debit/credit columns
@@ -418,7 +440,15 @@ export const transactionExtractorService = {
       const char = line[i];
 
       if (char === '"') {
-        inQuotes = !inQuotes;
+        // Handle escaped double quotes within a quoted field
+        const next = line[i + 1];
+        if (inQuotes && next === '"') {
+          current += '"';
+          i++; // Skip the escaped quote
+        } else {
+          // Toggle quote state; do not add the quote itself
+          inQuotes = !inQuotes;
+        }
       } else if (char === "," && !inQuotes) {
         columns.push(current);
         current = "";
@@ -428,7 +458,51 @@ export const transactionExtractorService = {
     }
 
     columns.push(current);
-    return columns.map((col) => col.replace(/^"|"$/g, ""));
+    // Trim, remove surrounding quotes, and unescape double quotes
+    return columns.map((col) => {
+      let v = col.trim();
+      if (v.startsWith('"') && v.endsWith('"')) {
+        v = v.slice(1, -1);
+      }
+      return v.replace(/""/g, '"').trim();
+    });
+  },
+
+  // Split CSV text into rows while respecting quoted fields that may contain newlines
+  splitCSVRows(csvText: string): string[] {
+    const rows: string[] = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < csvText.length; i++) {
+      const ch = csvText[i];
+      if (ch === '"') {
+        // Handle escaped quote within a quoted field
+        const next = csvText[i + 1];
+        if (inQuotes && next === '"') {
+          current += '"';
+          i++; // skip the escaped quote
+        } else {
+          inQuotes = !inQuotes;
+          current += ch;
+        }
+      } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+        rows.push(current);
+        current = "";
+        // swallow CRLF pair
+        if (ch === '\r' && csvText[i + 1] === '\n') {
+          i++;
+        }
+      } else {
+        current += ch;
+      }
+    }
+
+    if (current.length > 0) {
+      rows.push(current);
+    }
+
+    return rows.filter((l) => l.trim().length > 0);
   },
 
   async extractFromExcel(
@@ -454,30 +528,181 @@ export const transactionExtractorService = {
     accountId: string,
     entityId: string
   ): Promise<ExtractionResult> {
-    // For now, return a placeholder - would need a library like pdf-parse to extract text from PDFs
-    return {
-      transactions: [],
-      errors: ["PDF file processing not yet implemented"],
-      summary: {
-        totalTransactions: 0,
-        totalCredits: 0,
-        totalDebits: 0,
-        dateRange: { from: "", to: "" },
-      },
-    };
+    try {
+      // 1) Send PDF to backend for extraction
+      const formData = new FormData();
+      formData.append("file", file, file.name);
+
+      const baseUrl = amlBackendClient.getConfig().baseUrl;
+      console.log(`baseUrl`, baseUrl);
+      const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
+        method: "POST",
+        body: formData,
+        // Keep a generous timeout since PDF parsing may take longer
+        signal: AbortSignal.timeout(120000),
+      });
+
+      if (!response.ok) {
+        let errText = "";
+        try {
+          errText = await response.text();
+        } catch {}
+        throw new Error(
+          `PDF extraction failed (${response.status}): ${errText || response.statusText}`
+        );
+      }
+
+      // 2) Validate content-type and read CSV content returned by backend
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("text/csv")) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`Unexpected content-type: ${contentType}. Body: ${body}`);
+      }
+
+      let csvText = await response.text();
+      // Strip UTF-8 BOM if present
+      if (csvText.charCodeAt(0) === 0xfeff) {
+        csvText = csvText.slice(1);
+      }
+      // Split into lines while respecting quoted newlines
+      const lines = this.splitCSVRows(csvText);
+
+      console.log(`lines`, lines)
+
+      if (lines.length === 0) {
+        throw new Error("No CSV content returned from PDF extraction");
+      }
+
+      // 3) Parse headers and auto-detect required columns
+      const headers = this.parseCSVColumns(lines[0]);
+      const validation = validateCSVColumns(headers);
+
+      console.log(`headers`, headers)
+      console.log(`validation`, validation);
+
+      if (!validation.isValid) {
+        const missing = validation.missingColumns.join(", ");
+        return {
+          transactions: [],
+          errors: [
+            `Extracted CSV missing required columns: ${missing}. Headers: ${headers.join(", ")}`,
+          ],
+          summary: {
+            totalTransactions: 0,
+            totalCredits: 0,
+            totalDebits: 0,
+            dateRange: { from: "", to: "" },
+          },
+        };
+      }
+
+      // 4) Build column indices from detected mapping
+      const columnIndices: Record<string, number> = {
+        DATE: headers.findIndex(
+          (h) => h.trim() === validation.requiredColumns.DATE.trim()
+        ),
+        DESCRIPTION: headers.findIndex(
+          (h) => h.trim() === validation.requiredColumns.DESCRIPTION.trim()
+        ),
+        DEBIT:
+          validation.requiredColumns.DEBIT
+            ? headers.findIndex(
+                (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
+              )
+            : -1,
+        CREDIT:
+          validation.requiredColumns.CREDIT
+            ? headers.findIndex(
+                (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
+              )
+            : -1,
+        AMOUNT:
+          validation.requiredColumns.AMOUNT
+            ? headers.findIndex(
+                (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
+              )
+            : -1,
+        DIRECTION:
+          validation.requiredColumns.DIRECTION
+            ? headers.findIndex(
+                (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
+              )
+            : -1,
+      };
+
+      console.log(`columnIndices`, columnIndices);
+
+      // 5) Parse rows into transactions
+      const transactions: ExtractedTransaction[] = [];
+      const errors: string[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        try {
+          const tx = this.parseCSVLineWithMapping(
+            lines[i],
+            i + 1,
+            columnIndices,
+            i // original index (0-based here); display as 1-based
+          );
+          console.log(`tx`, tx);
+          if (tx) transactions.push(tx);
+        } catch (err) {
+          errors.push(
+            `Line ${i + 1}: ${err instanceof Error ? err.message : "Unknown error"}`
+          );
+        }
+      }
+
+      return this.buildExtractionResult(transactions, errors);
+    } catch (error) {
+      return {
+        transactions: [],
+        errors: [error instanceof Error ? error.message : "Unknown PDF extraction error"],
+        summary: {
+          totalTransactions: 0,
+          totalCredits: 0,
+          totalDebits: 0,
+          dateRange: { from: "", to: "" },
+        },
+      };
+    }
   },
 
   parseAmount(amountStr: string): number {
     if (!amountStr) return 0;
 
-    // Remove currency symbols, commas, and spaces
+    // Detect parentheses to indicate negative amounts, e.g., (123.45)
+    const isParenNegative = /\(.*\)/.test(amountStr);
+
+    // Remove currency symbols, commas, spaces, and parentheses for parsing
     const cleanAmount = amountStr
       .replace(/[₹$€£,\s]/g, "")
-      .replace(/[()]/g, "") // Remove parentheses (sometimes used for negative amounts)
+      .replace(/[()]/g, "")
       .trim();
 
-    const amount = parseFloat(cleanAmount);
-    return isNaN(amount) ? 0 : amount;
+    // Remove any remaining non-numeric characters except dot and minus
+    const numericOnly = cleanAmount.replace(/[^0-9.\-]/g, "");
+
+    const amount = parseFloat(numericOnly);
+    if (isNaN(amount)) return 0;
+    return isParenNegative ? -amount : amount;
+  },
+
+  parseDirection(value: string): "DR" | "CR" | null {
+    if (!value) return null;
+    const v = value.trim().toUpperCase();
+
+    // Normalize common variations
+    if (v === "DR" || v === "DEBIT" || v === "D" || v.includes("WITHDRAW")) {
+      return "DR";
+    }
+    if (v === "CR" || v === "CREDIT" || v === "C" || v.includes("DEPOSIT") || v.includes("RECEIV")) {
+      return "CR";
+    }
+    // Sometimes column contains values like "Dr"/"Cr" within a combined header; attempt to parse tokens
+    if (/(^|\b)DR(\b|$)/.test(v)) return "DR";
+    if (/(^|\b)CR(\b|$)/.test(v)) return "CR";
+    return null;
   },
 
   extractCounterparty(

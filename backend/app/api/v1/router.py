@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.analysis import router as analysis_router
+from app.api.v1.endpoints.pdf import router as pdf_router
 
 
 # Create the main API v1 router with version prefix
@@ -19,6 +20,18 @@ api_router = APIRouter(
         422: {"description": "Validation Error"},
         500: {"description": "Internal Server Error"},
         503: {"description": "Service Unavailable"}
+    }
+)
+
+# Include PDF extraction endpoints under v1
+api_router.include_router(
+    pdf_router,
+    prefix="/api/v1",
+    tags=["PDF Extraction"],
+    responses={
+        200: {"description": "PDF extracted successfully"},
+        415: {"description": "Unsupported Media Type"},
+        500: {"description": "Extraction failed"}
     }
 )
 
@@ -59,6 +72,10 @@ router_info = {
         "analysis": {
             "description": "Financial analysis endpoints", 
             "count": 7
+        },
+        "pdf_extraction": {
+            "description": "PDF extraction endpoints",
+            "count": 1
         }
     },
     "features": [
