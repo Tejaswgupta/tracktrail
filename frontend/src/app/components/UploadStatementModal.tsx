@@ -1,6 +1,7 @@
 "use client";
 
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
+import { transactionExtractorService } from "@/services/transactionExtractor";
 import { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
 import { useState } from "react";
 import BankSelector from "./BankSelector";
@@ -69,8 +70,7 @@ export default function UploadStatementModal({
               if (
                 mapping.DATE &&
                 mapping.DESCRIPTION &&
-                mapping.DEBIT &&
-                mapping.CREDIT
+                ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
               ) {
                 setColumnMapping({
                   DATE: mapping.DATE,
@@ -78,6 +78,7 @@ export default function UploadStatementModal({
                   DEBIT: mapping.DEBIT,
                   CREDIT: mapping.CREDIT,
                   AMOUNT: mapping.AMOUNT,
+                  DIRECTION: mapping.DIRECTION,
                 });
               }
             }
@@ -86,6 +87,44 @@ export default function UploadStatementModal({
           console.error("CSV validation error:", error);
           setError(
             error instanceof Error ? error.message : "Failed to validate CSV"
+          );
+        }
+      } else if (selectedFile.type === "application/pdf") {
+        // For PDFs, run a preview to get headers and suggested mapping
+        try {
+          console.log("Previewing PDF columns:", selectedFile.name);
+          const validation = await transactionExtractorService.previewPDFColumns(
+            selectedFile
+          );
+          console.log("PDF preview validation result:", validation);
+          setCsvValidation(validation);
+
+          if (!validation.isValid) {
+            console.log("PDF column detection incomplete, showing column mapper");
+            setShowColumnMapper(true);
+          } else if (validation.suggestedMapping) {
+            const mapping = validation.suggestedMapping;
+            if (
+              mapping.DATE &&
+              mapping.DESCRIPTION &&
+              ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
+            ) {
+              setColumnMapping({
+                DATE: mapping.DATE,
+                DESCRIPTION: mapping.DESCRIPTION,
+                DEBIT: mapping.DEBIT,
+                CREDIT: mapping.CREDIT,
+                AMOUNT: mapping.AMOUNT,
+                DIRECTION: mapping.DIRECTION,
+              });
+            }
+          }
+        } catch (error) {
+          console.error("PDF preview error:", error);
+          setError(
+            error instanceof Error
+              ? error.message
+              : "Failed to preview PDF columns"
           );
         }
       }
@@ -105,14 +144,14 @@ export default function UploadStatementModal({
       return;
     }
 
-    // For CSV files, check if column mapping is required
+    // For CSV/PDF files, check if column mapping is required when validation failed
     if (
-      file.type === "text/csv" &&
+      (file.type === "text/csv" || file.type === "application/pdf") &&
       csvValidation &&
       !csvValidation.isValid &&
       !columnMapping
     ) {
-      setError("Please map the CSV columns before uploading");
+      setError("Please map the columns before uploading");
       return;
     }
 
@@ -259,6 +298,7 @@ export default function UploadStatementModal({
             validationResult={csvValidation}
             onMappingComplete={handleColumnMappingComplete}
             onCancel={handleColumnMappingCancel}
+            initialMapping={columnMapping || undefined}
           />
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -457,29 +497,40 @@ export default function UploadStatementModal({
           </form>
         )}
 
-        {/* CSV Validation Success Message */}
-        {file?.type === "text/csv" &&
+        {/* Validation Success Message for CSV/PDF */}
+        {(file?.type === "text/csv" || file?.type === "application/pdf") &&
           csvValidation?.isValid &&
           !showColumnMapper && (
             <div className="rounded-md bg-green-50 p-4">
-              <div className="flex">
-                <svg
-                  className="h-5 w-5 text-green-400"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <div className="ml-3">
-                  <p className="text-sm text-green-800">
-                    CSV format validated successfully! All required columns
-                    found.
-                  </p>
+              <div className="flex items-start justify-between">
+                <div className="flex">
+                  <svg
+                    className="h-5 w-5 text-green-400"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <div className="ml-3">
+                    <p className="text-sm text-green-800">
+                      File format validated successfully! All required columns found.
+                    </p>
+                    <p className="text-xs text-green-700 mt-1">
+                      A column mapping was auto-applied. You can adjust it if needed.
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowColumnMapper(true)}
+                  className="ml-4 inline-flex items-center px-3 py-1.5 border border-green-300 rounded-md text-xs font-medium text-green-800 bg-white hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                >
+                  Change mapping
+                </button>
               </div>
             </div>
           )}

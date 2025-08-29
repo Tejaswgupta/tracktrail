@@ -22,7 +22,7 @@ export interface ExtractionResult {
   };
 }
 
-import type { ColumnMapping } from "@/utils/csvValidator";
+import type { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
 import { validateCSVColumns } from "@/utils/csvValidator";
 import { amlBackendClient } from "./amlBackendClient";
 import { parseAndConvertToISO } from "./dateParser";
@@ -80,7 +80,7 @@ export const transactionExtractorService = {
       case "xls":
         return this.extractFromExcel(file, accountId, entityId);
       case "pdf":
-        return this.extractFromPDF(file, accountId, entityId);
+        return this.extractFromPDF(file, accountId, entityId, columnMapping);
       default:
         throw new Error(`Unsupported file type: ${fileType}`);
     }
@@ -505,6 +505,61 @@ export const transactionExtractorService = {
     return rows.filter((l) => l.trim().length > 0);
   },
 
+  // Preview PDF extraction to obtain headers and suggested mapping before full upload
+  async previewPDFColumns(file: File): Promise<CSVValidationResult> {
+    // Reuse the backend PDF->CSV endpoint to get a CSV snapshot and validate headers
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+
+    const baseUrl = amlBackendClient.getConfig().baseUrl;
+    const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
+      method: "POST",
+      body: formData,
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (!response.ok) {
+      let errText = "";
+      try {
+        errText = await response.text();
+      } catch {}
+      throw new Error(
+        `PDF preview extraction failed (${response.status}): ${errText || response.statusText}`
+      );
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/csv")) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`Unexpected content-type from preview: ${contentType}. Body: ${body}`);
+    }
+
+    let csvText = await response.text();
+    if (csvText.charCodeAt(0) === 0xfeff) csvText = csvText.slice(1);
+    const lines = this.splitCSVRows(csvText);
+    if (lines.length === 0) throw new Error("No CSV content returned from PDF extraction");
+
+    const headers = this.parseCSVColumns(lines[0]);
+
+    // Build preview data (up to 5 rows)
+    const previewData: Record<string, string>[] = [];
+    const previewRows = Math.min(5, Math.max(0, lines.length - 1));
+    for (let i = 1; i <= previewRows; i++) {
+      const values = this.parseCSVColumns(lines[i] || "");
+      const row: Record<string, string> = {};
+      headers.forEach((h, idx) => {
+        row[h] = values[idx] || "";
+      });
+      previewData.push(row);
+    }
+
+    const validation = validateCSVColumns(headers);
+    return {
+      ...validation,
+      previewData,
+    };
+  },
+
   async extractFromExcel(
     file: File,
     accountId: string,
@@ -526,7 +581,8 @@ export const transactionExtractorService = {
   async extractFromPDF(
     file: File,
     accountId: string,
-    entityId: string
+    entityId: string,
+    columnMapping?: ColumnMapping
   ): Promise<ExtractionResult> {
     try {
       // 1) Send PDF to backend for extraction
@@ -573,62 +629,131 @@ export const transactionExtractorService = {
         throw new Error("No CSV content returned from PDF extraction");
       }
 
-      // 3) Parse headers and auto-detect required columns
+      // 3) Parse headers
       const headers = this.parseCSVColumns(lines[0]);
-      const validation = validateCSVColumns(headers);
-
       console.log(`headers`, headers)
-      console.log(`validation`, validation);
 
-      if (!validation.isValid) {
-        const missing = validation.missingColumns.join(", ");
-        return {
-          transactions: [],
-          errors: [
-            `Extracted CSV missing required columns: ${missing}. Headers: ${headers.join(", ")}`,
-          ],
-          summary: {
-            totalTransactions: 0,
-            totalCredits: 0,
-            totalDebits: 0,
-            dateRange: { from: "", to: "" },
-          },
+      // 4) Determine column indices either from provided mapping or via auto-detection
+      let columnIndices: Record<string, number> = {} as Record<string, number>;
+      if (columnMapping) {
+        // Use provided column mapping with exact string matching (same as CSV flow)
+        columnIndices = {
+          DATE: headers.findIndex((h) => h.trim() === columnMapping.DATE.trim()),
+          DESCRIPTION: headers.findIndex(
+            (h) => h.trim() === columnMapping.DESCRIPTION.trim()
+          ),
+          DEBIT: columnMapping.DEBIT
+            ? headers.findIndex((h) => h.trim() === columnMapping.DEBIT.trim())
+            : -1,
+          CREDIT: columnMapping.CREDIT
+            ? headers.findIndex((h) => h.trim() === columnMapping.CREDIT.trim())
+            : -1,
+          AMOUNT: columnMapping.AMOUNT
+            ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
+            : -1,
+          DIRECTION: columnMapping.DIRECTION
+            ? headers.findIndex((h) => h.trim() === columnMapping.DIRECTION?.trim())
+            : -1,
+        };
+
+        console.log("Using PDF column mapping:", columnIndices);
+        console.log("PDF column mapping details:", {
+          DATE: `"${columnMapping.DATE}" -> index ${columnIndices.DATE}`,
+          DESCRIPTION: `"${columnMapping.DESCRIPTION}" -> index ${columnIndices.DESCRIPTION}`,
+          DEBIT: columnMapping.DEBIT
+            ? `"${columnMapping.DEBIT}" -> index ${columnIndices.DEBIT}`
+            : "not mapped",
+          CREDIT: columnMapping.CREDIT
+            ? `"${columnMapping.CREDIT}" -> index ${columnIndices.CREDIT}`
+            : "not mapped",
+          AMOUNT: columnMapping.AMOUNT
+            ? `"${columnMapping.AMOUNT}" -> index ${columnIndices.AMOUNT}`
+            : "not mapped",
+          DIRECTION: columnMapping.DIRECTION
+            ? `"${columnMapping.DIRECTION}" -> index ${columnIndices.DIRECTION}`
+            : "not mapped",
+        });
+
+        // Validate that required columns were found
+        if (columnIndices.DATE === -1) {
+          throw new Error(
+            `Date column "${columnMapping.DATE}" not found in extracted headers: ${headers.join(", ")}`
+          );
+        }
+        if (columnIndices.DESCRIPTION === -1) {
+          throw new Error(
+            `Description column "${columnMapping.DESCRIPTION}" not found in extracted headers: ${headers.join(", ")}`
+          );
+        }
+        if (
+          columnIndices.AMOUNT === -1 &&
+          (columnIndices.DEBIT === -1 || columnIndices.CREDIT === -1)
+        ) {
+          const missingCols: string[] = [];
+          if (columnMapping.DEBIT && columnIndices.DEBIT === -1)
+            missingCols.push(`"${columnMapping.DEBIT}"`);
+          if (columnMapping.CREDIT && columnIndices.CREDIT === -1)
+            missingCols.push(`"${columnMapping.CREDIT}"`);
+          if (columnMapping.AMOUNT && columnIndices.AMOUNT === -1)
+            missingCols.push(`"${columnMapping.AMOUNT}"`);
+          throw new Error(
+            `Amount columns not found: ${missingCols.join(", ")}. Headers: ${headers.join(", ")}`
+          );
+        }
+      } else {
+        // Auto-detect using CSV validator
+        const validation = validateCSVColumns(headers);
+        console.log(`validation`, validation);
+
+        if (!validation.isValid) {
+          const missing = validation.missingColumns.join(", ");
+          return {
+            transactions: [],
+            errors: [
+              `Extracted CSV missing required columns: ${missing}. Headers: ${headers.join(", ")}`,
+            ],
+            summary: {
+              totalTransactions: 0,
+              totalCredits: 0,
+              totalDebits: 0,
+              dateRange: { from: "", to: "" },
+            },
+          };
+        }
+
+        columnIndices = {
+          DATE: headers.findIndex(
+            (h) => h.trim() === validation.requiredColumns.DATE.trim()
+          ),
+          DESCRIPTION: headers.findIndex(
+            (h) => h.trim() === validation.requiredColumns.DESCRIPTION.trim()
+          ),
+          DEBIT:
+            validation.requiredColumns.DEBIT
+              ? headers.findIndex(
+                  (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
+                )
+              : -1,
+          CREDIT:
+            validation.requiredColumns.CREDIT
+              ? headers.findIndex(
+                  (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
+                )
+              : -1,
+          AMOUNT:
+            validation.requiredColumns.AMOUNT
+              ? headers.findIndex(
+                  (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
+                )
+              : -1,
+          DIRECTION:
+            validation.requiredColumns.DIRECTION
+              ? headers.findIndex(
+                  (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
+                )
+              : -1,
         };
       }
-
-      // 4) Build column indices from detected mapping
-      const columnIndices: Record<string, number> = {
-        DATE: headers.findIndex(
-          (h) => h.trim() === validation.requiredColumns.DATE.trim()
-        ),
-        DESCRIPTION: headers.findIndex(
-          (h) => h.trim() === validation.requiredColumns.DESCRIPTION.trim()
-        ),
-        DEBIT:
-          validation.requiredColumns.DEBIT
-            ? headers.findIndex(
-                (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
-              )
-            : -1,
-        CREDIT:
-          validation.requiredColumns.CREDIT
-            ? headers.findIndex(
-                (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
-              )
-            : -1,
-        AMOUNT:
-          validation.requiredColumns.AMOUNT
-            ? headers.findIndex(
-                (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
-              )
-            : -1,
-        DIRECTION:
-          validation.requiredColumns.DIRECTION
-            ? headers.findIndex(
-                (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
-              )
-            : -1,
-      };
 
       console.log(`columnIndices`, columnIndices);
 

@@ -7,17 +7,31 @@ interface CSVColumnMapperProps {
   validationResult: CSVValidationResult;
   onMappingComplete: (mapping: ColumnMapping) => void;
   onCancel: () => void;
+  initialMapping?: ColumnMapping;
 }
 
 export default function CSVColumnMapper({
   validationResult,
   onMappingComplete,
   onCancel,
+  initialMapping,
 }: CSVColumnMapperProps) {
   const [mapping, setMapping] = useState<ColumnMapping>(() => {
-    // Initialize with suggested mapping if available
+    // If an initial mapping is provided (e.g., user previously selected or auto-applied), prefer it
+    if (initialMapping) {
+      return {
+        DATE: initialMapping.DATE || "",
+        DESCRIPTION: initialMapping.DESCRIPTION || "",
+        DEBIT: initialMapping.DEBIT || "",
+        CREDIT: initialMapping.CREDIT || "",
+        AMOUNT: initialMapping.AMOUNT || "",
+        DIRECTION: initialMapping.DIRECTION || "",
+      };
+    }
+
+    // Otherwise initialize with suggested mapping if available
     const suggested = validationResult.suggestedMapping;
-    const initial: ColumnMapping = {
+    const init: ColumnMapping = {
       DATE: suggested?.DATE || "",
       DESCRIPTION: suggested?.DESCRIPTION || "",
       DEBIT: "",
@@ -28,25 +42,25 @@ export default function CSVColumnMapper({
 
     // Prefer single amount column if available, otherwise use debit/credit
     if (suggested?.AMOUNT) {
-      initial.AMOUNT = suggested.AMOUNT;
+      init.AMOUNT = suggested.AMOUNT;
     } else if (suggested?.DEBIT || suggested?.CREDIT) {
-      initial.DEBIT = suggested?.DEBIT || "";
-      initial.CREDIT = suggested?.CREDIT || "";
+      init.DEBIT = suggested?.DEBIT || "";
+      init.CREDIT = suggested?.CREDIT || "";
     } else {
       // Default to debit/credit format if no suggestions
-      initial.DEBIT =
+      init.DEBIT =
         validationResult.headers.find(
           (h) =>
             h.toLowerCase().includes("debit") || h.toLowerCase().includes("dr")
         ) || "";
-      initial.CREDIT =
+      init.CREDIT =
         validationResult.headers.find(
           (h) =>
             h.toLowerCase().includes("credit") || h.toLowerCase().includes("cr")
         ) || "";
     }
 
-    return initial;
+    return init;
   });
 
   const handleMappingChange = (
@@ -86,11 +100,10 @@ export default function CSVColumnMapper({
     <div className="space-y-6">
       <div className="text-center">
         <h3 className="text-lg font-medium text-gray-900 mb-2">
-          Map CSV Columns
+          Map Columns
         </h3>
         <p className="text-sm text-gray-600">
-          Your CSV file doesn't match the expected format. Please map your
-          columns to the required fields.
+          Review or map columns to the required fields. You can choose between a single Amount column or separate Debit/Credit columns.
         </p>
       </div>
 
