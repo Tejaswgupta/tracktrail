@@ -460,8 +460,8 @@ export default function TransactionsTable({
                   key={statement.statement_id}
                   onClick={() => handleStatementToggle(statement.statement_id)}
                   className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${isSelected
-                      ? "bg-blue-100 text-blue-800 border border-blue-200"
-                      : "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200"
+                    ? "bg-blue-100 text-blue-800 border border-blue-200"
+                    : "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200"
                     }`}
                 >
                   <div className="flex items-center space-x-2">
@@ -561,11 +561,11 @@ export default function TransactionsTable({
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Description
                     </th>
-                    {statements.length > 1 && (
+                    {/* {statements.length > 1 && (
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Statement
                       </th>
-                    )}
+                    )} */}
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Type
                     </th>
@@ -603,7 +603,7 @@ export default function TransactionsTable({
                           </div>
                         )}
                       </td>
-                      {statements.length > 1 && (
+                      {/* {statements.length > 1 && (
                         <td className="px-6 py-4 text-sm text-gray-500">
                           <div className="max-w-xs truncate">
                             {statements.find(
@@ -611,12 +611,12 @@ export default function TransactionsTable({
                             )?.file_name || "Unknown"}
                           </div>
                         </td>
-                      )}
+                      )} */}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
                           className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${transaction.direction === "CR"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-red-100 text-red-800"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
                             }`}
                         >
                           {transaction.direction === "CR" ? "Credit" : "Debit"}
@@ -659,8 +659,8 @@ export default function TransactionsTable({
                       )}
                       <td
                         className={`px-6 py-4 whitespace-nowrap text-sm font-medium text-right ${transaction.direction === "CR"
-                            ? "text-green-600"
-                            : "text-red-600"
+                          ? "text-green-600"
+                          : "text-red-600"
                           }`}
                       >
                         {transaction.direction === "CR" ? "+" : "-"}
@@ -752,8 +752,8 @@ export default function TransactionsTable({
                               key={pageNum}
                               onClick={() => goToPage(pageNum)}
                               className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${currentPage === pageNum
-                                  ? "z-10 bg-blue-50 border-blue-500 text-blue-600"
-                                  : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50"
+                                ? "z-10 bg-blue-50 border-blue-500 text-blue-600"
+                                : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50"
                                 }`}
                             >
                               {pageNum}
