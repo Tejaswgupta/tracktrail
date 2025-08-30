@@ -12,13 +12,14 @@ This module provides REST API endpoints for various financial analysis services 
 """
 
 import logging
-from datetime import datetime
-from typing import Dict, Any
+from datetime import datetime, timezone
+from services.ai_llm_analysis import analyze_transactions
+
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import JSONResponse
 
-from app.models.requests import CashFlowRequest, CounterpartyTrendsRequest, MuleAccountRequest, CycleDetectionRequest, RapidMovementRequest, TimeTrendsRequest, TransferPatternRequest
+from app.models.requests import CashFlowRequest, CounterpartyTrendsRequest, MuleAccountRequest, CycleDetectionRequest, RapidMovementRequest, TimeTrendsRequest, TransferPatternRequest , AnalysisRequest
 from app.models.responses import AnalysisResponse, ErrorResponse
 from app.services.analysis_service import AnalysisService
 from app.services.database_service import get_database_service, DatabaseService
@@ -42,6 +43,181 @@ async def get_analysis_service(
         AnalysisService instance
     """
     return AnalysisService(database_service=database_service)
+
+@router.post(
+    "/analyze/ai-llm",
+    response_model=AnalysisResponse,
+    summary="AI LLM Analysis",
+    description="Perform AI LLM analysis for specified entities to identify patterns, frequencies, and anomalies",
+    responses={
+        200: {
+            "description": "AI LLM analysis completed successfully",
+            "model": AnalysisResponse
+        },
+        422: {
+            "description": "Request validation failed",
+            "model": ErrorResponse
+        },
+        404: {
+            "description": "One or more entities not found",
+            "model": ErrorResponse
+        },
+        500: {
+            "description": "Analysis processing failed",
+            "model": ErrorResponse
+        }
+    }
+)
+async def analyze_ai_llm(
+    request: AnalysisRequest,
+    database_service: DatabaseService = Depends(get_database_service)
+) -> JSONResponse:
+    """
+    Perform AI LLM analysis for specified entities.
+    
+    This endpoint analyzes transaction data to identify:
+    - Patterns and frequencies
+    - Anomalies and suspicious activity
+    - Risk indicators for suspicious transactions
+    
+    Args:
+        request: AI LLM analysis request with entity IDs and parameters
+        ai_llm_analysis_service: AI LLM analysis service dependency
+        
+    Returns:
+        JSONResponse: AI LLM analysis results with patterns and insights
+        
+    Raises:
+        HTTPException: For validation errors, entity not found, or analysis failures
+    """
+    start_time = datetime.now(timezone.utc)
+    
+    try:
+        logger.info(f"Starting AI LLM analysis for {len(request.entity_ids)} entities")
+        
+        # Validate that this is single entity analysis (based on requirements)
+        if len(request.entity_ids) > 1:
+            raise ValidationError("AI LLM analysis currently supports single entity analysis only")
+        
+
+        # Perform AI LLM analysis
+        transactions = await database_service.get_entity_transactions(
+            request.entity_ids,convert_to_polars=False,)
+        results = analyze_transactions(
+            transactions=transactions
+        )
+        
+        # Calculate processing time
+        end_time = datetime.now(timezone.utc)
+        processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
+        
+        # Build response metadata
+        metadata = {
+            "analysis_type": "ai_llm",
+            "entity_count": len(request.entity_ids),
+            "transaction_count": results.get("transaction_count", 0),
+            "processing_time_ms": processing_time_ms,
+            "parameters": request,
+            "date_range": results.get("date_range")
+        }
+        
+        # Determine success message based on results
+        if results.get("results", {}).get("ai_llm_transactions_found", False):
+            message = f"AI LLM analysis completed successfully. Found {results['results']['total_ai_llm_transactions']} AI LLM transactions."
+        else:
+            message = "AI LLM analysis completed. No AI LLM transactions found with specified criteria."
+        
+        # Build successful response
+        response = AnalysisResponse(
+            success=True,
+            message=message,
+            data=results,
+            metadata=metadata,
+            timestamp=end_time
+        )
+        
+        logger.info(f"AI LLM analysis completed successfully in {processing_time_ms}ms")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=response.model_dump(mode='json')
+        )
+        
+    except ValidationError as e:
+        logger.warning(f"AI LLM analysis validation error: {str(e)}")
+        error_response = ErrorResponse(
+            error_code="VALIDATION_ERROR",
+            message=str(e),
+            details={
+                "entity_ids": request.entity_ids,
+                "validation_type": "request_validation"
+            }
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=error_response.model_dump(mode='json')
+        )
+        
+    except EntityNotFoundError as e:
+        logger.warning(f"AI LLM analysis entity not found: {str(e)}")
+        error_response = ErrorResponse(
+            error_code="ENTITY_NOT_FOUND",
+            message=str(e),
+            details={
+                "entity_ids": request.entity_ids,
+                "analysis_type": "ai_llm"
+            }
+        )
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=error_response.model_dump(mode='json')
+        )
+        
+    except DatabaseError as e:
+        logger.error(f"AI LLM analysis database error: {str(e)}")
+        error_response = ErrorResponse(
+            error_code="DATABASE_ERROR",
+            message="Database operation failed. Please try again later.",
+            details={
+                "analysis_type": "ai_llm",
+                "entity_count": len(request.entity_ids)
+            }
+        )
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=error_response.model_dump(mode='json')
+        )
+        
+    except AnalysisError as e:
+        logger.error(f"AI LLM analysis processing error: {str(e)}")
+        error_response = ErrorResponse(
+            error_code="ANALYSIS_ERROR",
+            message="Analysis processing failed. Please check your request and try again.",
+            details={
+                "analysis_type": "ai_llm",
+                "entity_ids": request.entity_ids
+            }
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=error_response.model_dump(mode='json')
+        )
+        
+    except Exception as e:
+        logger.error(f"AI LLM analysis unexpected error: {str(e)}")
+        error_response = ErrorResponse(
+            error_code="UNEXPECTED_ERROR",
+            message="An unexpected error occurred. Please try again later.",
+            details={
+                "analysis_type": "ai_llm",
+                "entity_ids": request.entity_ids
+            }
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=error_response.model_dump(mode='json')
+        )
+        
 
 
 @router.post(

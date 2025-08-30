@@ -1,8 +1,41 @@
 "use client";
 
+import { amlBackendClient } from "@/services/amlBackendClient";
 import { transactionsService } from "@/services/database";
+import { AIResponse } from "@/types/amlBackend";
 import { Transaction } from "@/types/database";
 import { useEffect, useState } from "react";
+
+// Persistent client-side cache for AI analysis (no expiration)
+
+const buildCacheKey = (caseId: string, entityIds: string[]) => {
+  const sorted = Array.from(new Set(entityIds)).sort();
+  return `ai_llm_analysis:${caseId}:${sorted.join(",")}`;
+};
+
+const readCache = (key: string): AIResponse | null => {
+  try {
+    const raw = typeof window !== "undefined" ? localStorage.getItem(key) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { data: AIResponse; ts?: number };
+    // No TTL check: persist until explicitly cleared
+    return parsed.data;
+  } catch (e) {
+    console.warn("AI cache read failed:", e);
+    return null;
+  }
+};
+
+const writeCache = (key: string, data: AIResponse) => {
+  try {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(key, JSON.stringify({ data }));
+    }
+  } catch (e) {
+    // Ignore quota/security errors silently
+    console.warn("AI cache write failed:", e);
+  }
+};
 
 interface AIModeTabProps {
   caseId: string;
@@ -15,19 +48,16 @@ interface AMLFlag {
   severity: "low" | "medium" | "high";
 }
 
-interface AMLAnalysisResult {
-  summary: string;
-  flags: AMLFlag[];
-  recommendations: string[];
-}
+
 
 export default function AIModeTab({ caseId }: AIModeTabProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] =
-    useState<AMLAnalysisResult | null>(null);
+    useState<AIResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forceRerun, setForceRerun] = useState(false);
 
   useEffect(() => {
     const fetchTransactions = async () => {
@@ -47,38 +77,39 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
     fetchTransactions();
   }, [caseId]);
 
-  const analyzeWithAI = async () => {
-    //TODO: USe amlBackendClient instead of fetch
-
-    setAnalyzing(true);
-    setAnalysisResult(null);
+  const analyzeWithAI = async (force = false) => {
     setError(null);
+    setAnalyzing(true);
+    const entityIds = transactions.map((tx) => tx.entity_id);
+    const cacheKey = buildCacheKey(caseId, entityIds);
 
-    try {
-      const response = await fetch("/api/aml-analysis", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ caseId }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to analyze transactions");
+    // 1) Try cache first unless force re-run
+    if (!force) {
+      const cached = readCache(cacheKey);
+      if (cached) {
+        setAnalysisResult(cached);
+        setAnalyzing(false);
+        console.log("Using cached AI analysis");
+        return;
       }
+    }
 
-      setAnalysisResult(data.result);
+    // 2) Fallback to API and cache the result
+    try {
+      const result = await amlBackendClient.analyzeAIllm({
+        entity_ids: Array.from(new Set(entityIds)),
+      });
+      console.log(`API response`, result.data,)
+      setAnalysisResult(result.data);
+      writeCache(cacheKey, result.data);
+      console.log("AI analysis computed and cached");
     } catch (err) {
-      setError(
-        "Failed to analyze transactions with AI: " +
-          (err instanceof Error ? err.message : "Unknown error")
-      );
-      console.error("AI analysis error:", err);
+      setError("Failed to analyze transactions");
+      console.error("Error analyzing transactions:", err);
     } finally {
       setAnalyzing(false);
     }
+
   };
 
   const getSeverityColor = (severity: string) => {
@@ -176,14 +207,26 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
         </div>
 
         <div className="mt-6">
+          <div className="mb-2 flex items-center">
+            <input
+              id="force-rerun"
+              type="checkbox"
+              className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+              checked={forceRerun}
+              onChange={(e) => setForceRerun(e.target.checked)}
+              disabled={analyzing}
+            />
+            <label htmlFor="force-rerun" className="ml-2 text-sm text-gray-700">
+              Force re-run (ignore cache)
+            </label>
+          </div>
           <button
-            onClick={analyzeWithAI}
+            onClick={() => analyzeWithAI(forceRerun)}
             disabled={analyzing || transactions.length === 0}
-            className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-              analyzing || transactions.length === 0
-                ? "bg-gray-400 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            }`}
+            className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${analyzing || transactions.length === 0
+              ? "bg-gray-400 cursor-not-allowed"
+              : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              }`}
           >
             {analyzing ? (
               <>
@@ -256,10 +299,10 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
                         </p>
                       </div>
                     </div>
-                    {flag.transactions?.length > 0 && (
+                    {flag.transactions_ids?.length > 0 && (
                       <div className="mt-2">
                         <p className="text-xs text-gray-500">
-                          Related transactions: {flag.transactions.join(", ")}
+                          Related transactions: {flag.transactions_ids.join(", ")}
                         </p>
                       </div>
                     )}

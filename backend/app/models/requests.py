@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class AnalysisRequest(BaseModel):
-    """Base request model for all analysis endpoints."""
+    """Request model for analysis."""
     
     entity_ids: List[str] = Field(
         ..., 
@@ -29,14 +29,6 @@ class AnalysisRequest(BaseModel):
         None,
         description="End date for analysis (ISO format)"
     )
-    
-    @field_validator('entity_ids')
-    @classmethod
-    def validate_entity_ids(cls, v):
-        """Validate each entity ID format."""
-        if isinstance(v, list):
-            return [validate_entity_id(entity_id) for entity_id in v]
-        return validate_entity_id(v)
     
 
     class Config:

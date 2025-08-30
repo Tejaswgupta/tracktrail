@@ -90,6 +90,24 @@ export interface BackendTransaction {
   entity_id: string;
 }
 
+
+interface AMLFlag { 
+    type: string;
+    description: string;
+    transactions_ids: string[];
+    suspcious_participants: string[];
+    severity: "low" | "medium" | "high";
+}
+
+export interface AIResponse {
+
+summary: string;
+detailed_analysis: string;
+flags: AMLFlag[];
+recommendations: string[];
+
+}
+
 export interface CashFlowResult {
   results: {
     cash_transactions_found: boolean;

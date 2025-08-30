@@ -6,8 +6,10 @@
  */
 
 import type {
+  AIResponse,
   AMLError,
   AMLErrorCode,
+  BackendAnalysisRequest,
   BackendAnalysisResponse,
   BackendErrorResponse,
   CashFlowRequest,
@@ -160,6 +162,13 @@ export class AMLBackendClient {
     );
   }
 
+  async analyzeAIllm(params: BackendAnalysisRequest): Promise<BackendAnalysisResponse<AIResponse>> {
+    return this.makeRequest<AIResponse>(
+      "/api/v1/analyze/ai-llm",
+      params
+    );
+  }
+
   /**
    * Analyze cash flow patterns for specified entities
    */
@@ -298,3 +307,4 @@ export const amlBackendClient = new AMLBackendClient();
 // Export the error class and types
 export { AMLBackendError };
 export type { AMLBackendClientConfig };
+

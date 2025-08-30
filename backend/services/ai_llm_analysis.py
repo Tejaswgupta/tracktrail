@@ -21,6 +21,7 @@ import os
 import re
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
+import pandas as pd
 import tiktoken
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -44,8 +45,7 @@ if not logger.handlers:
 load_dotenv()
 
 
-# Typed result structures to mirror the TS interfaces
-Severity = Literal["low", "medium", "high"]
+
 
 
 # Initialize tokenizer. 'cl100k_base' is a good starting point for many models,
@@ -58,10 +58,9 @@ _tokenizer = tiktoken.get_encoding("cl100k_base")
 class AMLFlag(TypedDict):
     type: str
     description: str
-    # Keep key names to match the model's instructed schema
     transactions_ids: List[str]
     suspcious_participants: List[str]  # Note: kept as-is to mirror the original prompt key
-    severity: Severity
+    severity: Literal["low", "medium", "high"]
 
 
 class AMLAnalysisResult(TypedDict, total=False):
@@ -92,8 +91,9 @@ def estimate_tokens(text: str) -> int:
     return len(_tokenizer.encode(text))
 
 
-def chunk_transactions(transactions: List[Dict[str, Any]], max_tokens: int = 4000) -> List[List[Dict[str, Any]]]:
+def chunk_transactions(transactions: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
     """Split transactions into chunks constrained by max_tokens (using tiktoken for estimation)."""
+    max_tokens = 32000
     chunks: List[List[Dict[str, Any]]] = []
     current_chunk: List[Dict[str, Any]] = []
     current_tokens = 0
@@ -224,6 +224,88 @@ def analyze_transactions_chunk(transactions: List[Dict[str, Any]]) -> AMLAnalysi
         raise RuntimeError(f"Failed to analyze transactions: {e}")
 
 
+def _build_compile_summary_prompt(
+    results: List[AMLAnalysisResult], flags: List[AMLFlag]
+) -> str:
+    """Build a concise prompt for summarizing multiple chunk results.
+
+    The model should only produce `summary` and `detailed_analysis` fields.
+    """
+    simplified_flags = [
+        {
+            "type": f.get("type", ""),
+            "description": f.get("description", ""),
+            "severity": f.get("severity", "low"),
+        }
+        for f in flags
+    ]
+
+    chunk_summaries = [r.get("summary", "") for r in results if r.get("summary")]
+    chunk_details = [r.get("detailed_analysis", "") for r in results if r.get("detailed_analysis")]
+
+    context_json = json.dumps(
+        {
+            "flags": simplified_flags,
+            "chunk_summaries": chunk_summaries,
+            "chunk_detailed_analyses": chunk_details,
+        },
+        indent=2,
+        default=str,
+    )
+
+    prompt = f"""
+You are an Anti-Money Laundering (AML) expert. Given multiple partial analyses from previous chunks and the set of unique flags, produce a cohesive, non-redundant overarching view.
+
+Decision rules:
+- Do not invent new flags or evidence; only synthesize what's already present.
+- Be conservative and precise. Avoid speculation.
+- Prefer clarity and brevity while covering the key risks and rationale.
+
+Context (JSON):
+{context_json}
+
+Provide ONLY the following JSON with these two fields:
+```json
+{{
+  "summary": "Executive-level summary across all chunks and flags",
+  "detailed_analysis": "Consolidated detailed analysis explaining the key flags, their rationale, and cross-chunk relationships without duplication"
+}}
+```
+"""
+    return prompt
+
+
+def _summarize_compilation(results: List[AMLAnalysisResult], flags: List[AMLFlag]) -> Dict[str, str]:
+    """Call the LLM to summarize previous chunk responses into a global summary and detailed analysis."""
+    client = _get_openai_client()
+    prompt = _build_compile_summary_prompt(results, flags)
+
+    resp = client.chat.completions.create(
+        model="mistral-small-latest",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert AML analyst that synthesizes and summarizes multi-part analyses without adding new speculation."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.2,
+    )
+    result_text = resp.choices[0].message.content if resp.choices else None
+    logger.debug("Raw model summary result: %s", result_text)
+    if not result_text:
+        raise RuntimeError("No response from OpenAI for compilation summary")
+
+    parsed = _parse_model_json(result_text)
+    # Only return the text fields we care about; ignore flags/recommendations from this call
+    return {
+        "summary": parsed.get("summary", ""),
+        "detailed_analysis": parsed.get("detailed_analysis", ""),
+    }
+
+
 def compile_analysis_results(results: List[AMLAnalysisResult]) -> AMLAnalysisResult:
     """Combine multiple chunk results into a single comprehensive report."""
     compiled: AMLAnalysisResult = {
@@ -232,9 +314,22 @@ def compile_analysis_results(results: List[AMLAnalysisResult]) -> AMLAnalysisRes
         "recommendations": [],
     }
 
-    # Flatten and dedupe flags by (type + description)
+    # Consider only results that actually contain flags (filter out 'no suspicious activity' chunks)
+    flagged_results: List[AMLAnalysisResult] = [
+        r for r in results if r and isinstance(r.get("flags", []), list) and len(r.get("flags", [])) > 0  # type: ignore[call-arg]
+    ]
+
+    # If nothing is flagged across all chunks, return a concise non-suspicious summary
+    if len(flagged_results) == 0:
+        compiled["summary"] = "No suspicious activity detected across analyzed transactions."
+        compiled["detailed_analysis"] = ""
+        compiled["flags"] = []
+        compiled["recommendations"] = []
+        return compiled
+
+    # Flatten and dedupe flags by (type + description) from only flagged results
     all_flags: List[AMLFlag] = []
-    for r in results:
+    for r in flagged_results:
         if r and isinstance(r.get("flags", []), list):  # type: ignore[call-arg]
             all_flags.extend(r.get("flags", []))  # type: ignore[arg-type]
 
@@ -253,50 +348,61 @@ def compile_analysis_results(results: List[AMLAnalysisResult]) -> AMLAnalysisRes
 
     # Merge and dedupe recommendations
     recs: List[str] = []
-    for r in results:
+    for r in flagged_results:
         recs.extend(r.get("recommendations", []))  # type: ignore[arg-type]
     compiled["recommendations"] = sorted(set(recs))
 
     # Optionally combine summaries/detailed_analysis
-    summaries = [r.get("summary", "") for r in results if r.get("summary")]
+    summaries = [r.get("summary", "") for r in flagged_results if r.get("summary")]
     if summaries:
-        compiled["summary"] = " | ".join(summaries)
+        compiled["summary"] = "\n\n".join(summaries)
+    
+    compiled["detailed_analysis"] = "\n\n".join([r.get("detailed_analysis", "") for r in flagged_results if r.get("detailed_analysis")])
+
+    # If there are multiple flags, perform an additional LLM pass to synthesize a final cohesive summary
+    try:
+        if len(unique_flags) > 1:
+            logger.info("Multiple flags detected (%d). Summarizing compiled results with LLM...", len(unique_flags))
+            synthesized = _summarize_compilation(flagged_results, list(unique_flags))
+            if synthesized.get("summary"):
+                compiled["summary"] = synthesized["summary"]
+            if synthesized.get("detailed_analysis"):
+                compiled["detailed_analysis"] = synthesized["detailed_analysis"]
+    except Exception as e:
+        # Non-fatal: keep the concatenated summary if synthesis fails
+        logger.error("Failed to synthesize compilation summary: %s", e)
 
     return compiled
 
 
 def analyze_transactions(
-    transactions: List[Dict[str, Any]],
-    max_tokens: int = 32000,
+    transactions: pd.DataFrame,
 ) -> AMLAnalysisResult:
     """
-    Convenience helper:
-    - chunk the transactions
-    - analyze each chunk with the LLM
-    - compile results
+    Convenience helper (expects a pandas DataFrame):
+    - Optionally sort transactions by a detected date column
+    - Convert to list[dict]
+    - Chunk the transactions
+    - Analyze each chunk with the LLM
+    - Compile results
     """
-    if not transactions:
+    # Normalize input to list[dict]
+    records: List[Dict[str, Any]]
+
+    print('type of transactions', type(transactions))
+
+
+    if transactions is None:
         return {
             "summary": "No transactions found for analysis.",
             "flags": [],
             "recommendations": [],
         }
 
-    # Sort by date if present, otherwise leave order
-    try:
-        # Try common date keys
-        def date_key(tx: Dict[str, Any]):
-            for k in ("tx_date", "date", "timestamp", "created_at"):
-                if k in tx:
-                    return str(tx[k])
-            return ""
+    records = transactions.to_dict(orient="records")
 
-        transactions = sorted(transactions, key=date_key)
-    except Exception:
-        pass
-
-    chunks = chunk_transactions(transactions, max_tokens=max_tokens)
-    print([len(l) for l in chunks])
+    chunks = chunk_transactions(records)
+    logger.debug("Chunk sizes: %s", [len(l) for l in chunks])
     chunk_results: List[AMLAnalysisResult] = []
 
     for idx, chunk in enumerate(chunks, start=1):
@@ -326,10 +432,7 @@ __all__ = [
 
 
 if __name__ == '__main__':
-    import csv
-    with open('db.csv', 'r') as f:
-        reader = csv.DictReader(f)
-        data = list(reader)
-    print(len(data))
-    result = analyze_transactions(data)
-    print(result)
+    df = pd.read_csv('db.csv')
+    logger.debug(len(df))
+    result = analyze_transactions(df)
+    logger.debug(result)
