@@ -77,6 +77,22 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
     fetchTransactions();
   }, [caseId]);
 
+  // Attempt to restore cached analysis after transactions load
+  useEffect(() => {
+    try {
+      if (transactions.length === 0) return;
+      const entityIds = transactions.map((tx) => tx.entity_id);
+      const cacheKey = buildCacheKey(caseId, entityIds);
+      const cached = readCache(cacheKey);
+      if (cached) {
+        setAnalysisResult(cached);
+        console.log("Restored AI analysis from cache on load");
+      }
+    } catch (e) {
+      console.warn("Failed to restore cached AI analysis:", e);
+    }
+  }, [transactions, caseId]);
+
   const analyzeWithAI = async (force = false) => {
     setError(null);
     setAnalyzing(true);
