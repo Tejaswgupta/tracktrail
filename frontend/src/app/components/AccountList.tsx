@@ -22,9 +22,10 @@ interface Account {
 
 interface AccountListProps {
   entityId: string;
+  caseId?: string;
 }
 
-export default function AccountList({ entityId }: AccountListProps) {
+export default function AccountList({ entityId, caseId }: AccountListProps) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +154,7 @@ export default function AccountList({ entityId }: AccountListProps) {
             <AccountCard
               key={account.id}
               account={account}
+              caseId={caseId}
               onAccountDeleted={() => setRefreshTrigger((prev) => prev + 1)}
             />
           ))}
@@ -169,3 +171,4 @@ export default function AccountList({ entityId }: AccountListProps) {
     </div>
   );
 }
+

@@ -1,18 +1,28 @@
 "use client";
 
-import { statementsService, transactionsService } from "@/services/database";
-import { BankStatement, Transaction } from "@/types/database";
-import { useEffect, useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  caseTransactionsService,
+  statementsService,
+  transactionsService,
+} from "@/services/database";
+import { BankStatement, CaseTransaction, Transaction } from "@/types/database";
+import { useEffect, useMemo, useState } from "react";
+import NotesPanel from "./NotesPanel";
+
 
 interface TransactionsTableProps {
   accountId: string;
+  caseId?: string;
   onTransactionSelect?: (transaction: Transaction) => void;
 }
 
 export default function TransactionsTable({
   accountId,
+  caseId,
   onTransactionSelect,
 }: TransactionsTableProps) {
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [statements, setStatements] = useState<BankStatement[]>([]);
   const [selectedStatements, setSelectedStatements] = useState<string[]>([]);
@@ -26,6 +36,12 @@ export default function TransactionsTable({
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
+  const [flagsByTxId, setFlagsByTxId] = useState<
+    Record<string, CaseTransaction | null>
+  >({});
+  const [notesOpen, setNotesOpen] = useState(false);
+
+  const canCollaborate = useMemo(() => Boolean(caseId && user?.id), [caseId, user?.id]);
 
   useEffect(() => {
     loadData();
@@ -34,6 +50,61 @@ export default function TransactionsTable({
   useEffect(() => {
     loadTransactionsAndSummary();
   }, [accountId, selectedStatements, currentPage]);
+
+  // Load flags for the currently visible page when caseId is present
+  useEffect(() => {
+    const loadFlagsForVisibleTransactions = async () => {
+      if (!caseId || transactions.length === 0) {
+        setFlagsByTxId({});
+        return;
+      }
+      try {
+        const txIds = transactions.map((t) => t.transaction_id);
+        const flags = await caseTransactionsService.getFlagsForTransactions(
+          caseId,
+          txIds
+        );
+        const map: Record<string, CaseTransaction> = {};
+        flags.forEach((f) => {
+          map[f.transaction_id] = f;
+        });
+        setFlagsByTxId(map);
+      } catch (e) {
+        console.error("Failed to load transaction flags:", e);
+        // Don't set error for flags alone; keep table usable
+      }
+    };
+
+    loadFlagsForVisibleTransactions();
+  }, [caseId, transactions]);
+
+  const handleFlagChange = async (
+    transactionId: string,
+    value: "" | CaseTransaction["flag_type"]
+  ) => {
+    if (!caseId) return; // safety
+    try {
+      if (value === "") {
+        await caseTransactionsService.deleteFlagByTransaction(caseId, transactionId);
+        setFlagsByTxId((prev) => ({ ...prev, [transactionId]: null }));
+      } else {
+        if (!user?.id) {
+          alert("Please sign in to set flags.");
+          return;
+        }
+        const updated = await caseTransactionsService.upsertFlag({
+          caseId,
+          transactionId,
+          flag_type: value,
+          userId: user.id,
+        });
+        setFlagsByTxId((prev) => ({ ...prev, [transactionId]: updated }));
+      }
+    } catch (e) {
+      console.error("Failed to update flag:", e);
+      alert(e instanceof Error ? e.message : "Failed to update flag");
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -144,6 +215,22 @@ export default function TransactionsTable({
       month: "short",
       year: "numeric",
     });
+  };
+
+  const flagStyle = (flag?: CaseTransaction) => {
+    if (!flag) return "bg-gray-100 text-gray-600";
+    switch (flag.flag_type) {
+      case "Suspicious":
+        return "bg-amber-100 text-amber-800";
+      case "Evidence":
+        return "bg-purple-100 text-purple-800";
+      case "Related":
+        return "bg-blue-100 text-blue-800";
+      case "Under Review":
+        return "bg-gray-200 text-gray-800";
+      default:
+        return "bg-gray-100 text-gray-600";
+    }
   };
 
   const netFlow = summary.totalCredits - summary.totalDebits;
@@ -263,14 +350,12 @@ export default function TransactionsTable({
           <div className="flex items-center">
             <div className="flex-shrink-0">
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                  netFlow >= 0 ? "bg-green-100" : "bg-red-100"
-                }`}
+                className={`w-8 h-8 rounded-full flex items-center justify-center ${netFlow >= 0 ? "bg-green-100" : "bg-red-100"
+                  }`}
               >
                 <svg
-                  className={`w-4 h-4 ${
-                    netFlow >= 0 ? "text-green-600" : "text-red-600"
-                  }`}
+                  className={`w-4 h-4 ${netFlow >= 0 ? "text-green-600" : "text-red-600"
+                    }`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -291,9 +376,8 @@ export default function TransactionsTable({
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">Net Flow</p>
               <p
-                className={`text-lg font-semibold ${
-                  netFlow >= 0 ? "text-green-600" : "text-red-600"
-                }`}
+                className={`text-lg font-semibold ${netFlow >= 0 ? "text-green-600" : "text-red-600"
+                  }`}
               >
                 {netFlow >= 0 ? "+" : ""}
                 {formatAmount(netFlow)}
@@ -375,17 +459,15 @@ export default function TransactionsTable({
                 <button
                   key={statement.statement_id}
                   onClick={() => handleStatementToggle(statement.statement_id)}
-                  className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isSelected
+                  className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${isSelected
                       ? "bg-blue-100 text-blue-800 border border-blue-200"
                       : "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200"
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center space-x-2">
                     <div
-                      className={`w-2 h-2 rounded-full ${
-                        isSelected ? "bg-blue-600" : "bg-gray-400"
-                      }`}
+                      className={`w-2 h-2 rounded-full ${isSelected ? "bg-blue-600" : "bg-gray-400"
+                        }`}
                     />
                     <span className="truncate max-w-[200px]">
                       {statement.file_name}
@@ -425,15 +507,25 @@ export default function TransactionsTable({
             <h3 className="text-lg font-medium text-gray-900">
               Transaction History
             </h3>
-            {statements.length > 1 && (
-              <div className="text-sm text-gray-500">
-                {selectedStatements.length === statements.length
-                  ? `All ${statements.length} statements`
-                  : selectedStatements.length === 0
-                  ? "No statements selected"
-                  : `${selectedStatements.length} of ${statements.length} statements`}
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              {statements.length > 1 && (
+                <div className="text-sm text-gray-500">
+                  {selectedStatements.length === statements.length
+                    ? `All ${statements.length} statements`
+                    : selectedStatements.length === 0
+                      ? "No statements selected"
+                      : `${selectedStatements.length} of ${statements.length} statements`}
+                </div>
+              )}
+              {caseId && (
+                <button
+                  className="inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 text-gray-700"
+                  onClick={() => setNotesOpen(true)}
+                >
+                  Notes
+                </button>
+              )}
+            </div>
           </div>
         </div>
         {summary.transactionCount === 0 ? (
@@ -477,6 +569,11 @@ export default function TransactionsTable({
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Type
                     </th>
+                    {caseId && (
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Flag
+                      </th>
+                    )}
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Amount
                     </th>
@@ -489,9 +586,8 @@ export default function TransactionsTable({
                   {transactions.map((transaction) => (
                     <tr
                       key={transaction.transaction_id}
-                      className={`hover:bg-gray-50 ${
-                        onTransactionSelect ? "cursor-pointer" : ""
-                      }`}
+                      className={`hover:bg-gray-50 ${onTransactionSelect ? "cursor-pointer" : ""
+                        }`}
                       onClick={() => onTransactionSelect?.(transaction)}
                     >
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -518,27 +614,60 @@ export default function TransactionsTable({
                       )}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            transaction.direction === "CR"
+                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${transaction.direction === "CR"
                               ? "bg-green-100 text-green-800"
                               : "bg-red-100 text-red-800"
-                          }`}
+                            }`}
                         >
                           {transaction.direction === "CR" ? "Credit" : "Debit"}
                         </span>
                       </td>
+                      {caseId && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            {flagsByTxId[transaction.transaction_id] ? (
+                              <span
+                                className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${flagStyle(
+                                  flagsByTxId[transaction.transaction_id] || undefined
+                                )}`}
+                              >
+                                {flagsByTxId[transaction.transaction_id]?.flag_type}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 text-xs">-</span>
+                            )}
+                            <select
+                              className="text-xs border border-gray-300 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none"
+                              disabled={!canCollaborate}
+                              value={flagsByTxId[transaction.transaction_id]?.flag_type || ""}
+                              onChange={(e) =>
+                                handleFlagChange(
+                                  transaction.transaction_id,
+                                  (e.target.value as "" | CaseTransaction["flag_type"]) || ""
+                                )
+                              }
+                              title={canCollaborate ? "Set or clear flag" : "Sign in to set flags"}
+                            >
+                              <option value="">No flag</option>
+                              <option value="Suspicious">Suspicious</option>
+                              <option value="Evidence">Evidence</option>
+                              <option value="Related">Related</option>
+                              <option value="Under Review">Under Review</option>
+                            </select>
+                          </div>
+                        </td>
+                      )}
                       <td
-                        className={`px-6 py-4 whitespace-nowrap text-sm font-medium text-right ${
-                          transaction.direction === "CR"
+                        className={`px-6 py-4 whitespace-nowrap text-sm font-medium text-right ${transaction.direction === "CR"
                             ? "text-green-600"
                             : "text-red-600"
-                        }`}
+                          }`}
                       >
                         {transaction.direction === "CR" ? "+" : "-"}
-                        {formatAmount(transaction.amount)}
+                        {formatAmount(Math.abs(transaction.amount))}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                        {transaction.balance
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                        {typeof transaction.balance === "number"
                           ? formatAmount(transaction.balance)
                           : "-"}
                       </td>
@@ -622,11 +751,10 @@ export default function TransactionsTable({
                             <button
                               key={pageNum}
                               onClick={() => goToPage(pageNum)}
-                              className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                                currentPage === pageNum
+                              className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${currentPage === pageNum
                                   ? "z-10 bg-blue-50 border-blue-500 text-blue-600"
                                   : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50"
-                              }`}
+                                }`}
                             >
                               {pageNum}
                             </button>
@@ -660,6 +788,9 @@ export default function TransactionsTable({
           </>
         )}
       </div>
+      {caseId && (
+        <NotesPanel caseId={caseId} open={notesOpen} onClose={() => setNotesOpen(false)} />
+      )}
     </div>
   );
 }

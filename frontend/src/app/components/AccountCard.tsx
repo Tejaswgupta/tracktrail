@@ -22,11 +22,13 @@ interface Account {
 interface AccountCardProps {
   account: Account;
   onAccountDeleted?: () => void;
+  caseId?: string;
 }
 
 export default function AccountCard({
   account,
   onAccountDeleted,
+  caseId,
 }: AccountCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"statements" | "transactions">(
@@ -212,7 +214,7 @@ export default function AccountCard({
             {activeTab === "statements" ? (
               <StatementList accountId={account.id} />
             ) : (
-              <TransactionsTable accountId={account.id} />
+              <TransactionsTable accountId={account.id} caseId={caseId} />
             )}
           </div>
         </div>

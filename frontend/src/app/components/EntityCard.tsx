@@ -222,7 +222,7 @@ export default function EntityCard({
             <h5 className="text-sm font-medium text-gray-900 mb-3">
               Bank Accounts
             </h5>
-            <AccountList entityId={entity.entity_id} />
+            <AccountList entityId={entity.entity_id} caseId={caseId} />
           </div>
         </div>
       )}

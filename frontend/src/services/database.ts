@@ -61,6 +61,130 @@ export const casesService = {
   },
 };
 
+// Case Transactions (Flags) and Notes
+export const caseTransactionsService = {
+  async getFlagsForTransactions(
+    caseId: string,
+    transactionIds: string[]
+  ): Promise<import("@/types/database").CaseTransaction[]> {
+    if (!transactionIds || transactionIds.length === 0) return [];
+    const { data, error } = await supabase
+      .from("case_transactions")
+      .select("*")
+      .eq("case_id", caseId)
+      .in("transaction_id", transactionIds);
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getFlagForTransaction(
+    caseId: string,
+    transactionId: string
+  ): Promise<import("@/types/database").CaseTransaction | null> {
+    const { data, error } = await supabase
+      .from("case_transactions")
+      .select("*")
+      .eq("case_id", caseId)
+      .eq("transaction_id", transactionId)
+      .single();
+
+    if (error && error.code !== "PGRST116") throw error; // not found
+    return data || null;
+  },
+
+  async upsertFlag(params: {
+    caseId: string;
+    transactionId: string;
+    flag_type: import("@/types/database").CaseTransaction["flag_type"];
+    notes?: string;
+    userId: string;
+  }): Promise<import("@/types/database").CaseTransaction> {
+    const existing = await this.getFlagForTransaction(
+      params.caseId,
+      params.transactionId
+    );
+
+    if (existing) {
+      const { data, error } = await supabase
+        .from("case_transactions")
+        .update({
+          flag_type: params.flag_type,
+          notes: params.notes ?? null,
+          flagged_date: new Date().toISOString(),
+          flagged_by: params.userId,
+        })
+        .eq("case_transaction_id", existing.case_transaction_id)
+        .select("*")
+        .single();
+      if (error) throw error;
+      return data!;
+    } else {
+      const { data, error } = await supabase
+        .from("case_transactions")
+        .insert({
+          case_id: params.caseId,
+          transaction_id: params.transactionId,
+          flag_type: params.flag_type,
+          notes: params.notes ?? null,
+          flagged_date: new Date().toISOString(),
+          flagged_by: params.userId,
+        })
+        .select("*")
+        .single();
+      if (error) throw error;
+      return data!;
+    }
+  },
+
+  async deleteFlagByTransaction(
+    caseId: string,
+    transactionId: string
+  ): Promise<void> {
+    const { error } = await supabase
+      .from("case_transactions")
+      .delete()
+      .eq("case_id", caseId)
+      .eq("transaction_id", transactionId);
+    if (error) throw error;
+  },
+};
+
+export const caseNotesService = {
+  async getNotes(caseId: string) {
+    const { data, error } = await supabase
+      .from("case_notes")
+      .select("*")
+      .eq("case_id", caseId)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async addNote(params: {
+    caseId: string;
+    note_type: import("@/types/database").CaseNote["note_type"];
+    content: string;
+    attachments?: Record<string, any> | null;
+    userId: string;
+  }) {
+    const { data, error } = await supabase
+      .from("case_notes")
+      .insert({
+        case_id: params.caseId,
+        note_type: params.note_type,
+        content: params.content,
+        attachments: params.attachments ?? null,
+        created_at: new Date().toISOString(),
+        created_by: params.userId,
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return data;
+  },
+};
+
 // Entities
 export const entitiesService = {
   async getAll(): Promise<Entity[]> {
