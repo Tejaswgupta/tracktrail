@@ -1,10 +1,11 @@
 /**
  * AML Backend API Client Service
  *
- * This service provides a client interface for all backend AML analysis endpoints.
- * It handles authentication, error handling, retry logic, and data transformation.
+ * This service provides a consolidated client interface for all backend AML analysis endpoints.
+ * It uses axios for HTTP requests with retry logic, error handling, and data transformation.
  */
 
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import type {
   AIResponse,
   AMLError,
@@ -40,7 +41,7 @@ interface AMLBackendClientConfig {
 // Default configuration
 const DEFAULT_CONFIG: AMLBackendClientConfig = {
   baseUrl: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000",
-  timeout: 30000, // 30 seconds
+  timeout: 180000, // 3 minutes (matches your backend timeout requirements)
   maxRetries: 3,
   retryDelay: 1000, // 1 second
 };
@@ -74,13 +75,58 @@ class AMLBackendError extends Error implements AMLError {
 }
 
 /**
- * AML Backend API Client
+ * AML Backend API Client (Consolidated)
  */
 export class AMLBackendClient {
   private config: AMLBackendClientConfig;
+  private axiosInstance: AxiosInstance;
 
   constructor(config?: Partial<AMLBackendClientConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    
+    // Create axios instance with configuration
+    this.axiosInstance = axios.create({
+      baseURL: `${this.config.baseUrl}/api/v1`,
+      timeout: this.config.timeout,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    this.setupInterceptors();
+  }
+
+  /**
+   * Setup axios interceptors for logging and auth
+   */
+  private setupInterceptors(): void {
+    // Request interceptor
+    this.axiosInstance.interceptors.request.use(
+      (config) => {
+        // Add authentication if available
+        if (this.config.authToken) {
+          config.headers.Authorization = `Bearer ${this.config.authToken}`;
+        }
+        
+        console.log('AML API Request:', config.method?.toUpperCase(), config.url);
+        return config;
+      },
+      (error) => {
+        return Promise.reject(error);
+      }
+    );
+
+    // Response interceptor
+    this.axiosInstance.interceptors.response.use(
+      (response) => {
+        console.log('AML API Response:', response.status, response.config.url);
+        return response;
+      },
+      (error) => {
+        console.error('AML API Error:', error.response?.status, error.response?.data);
+        return Promise.reject(error);
+      }
+    );
   }
 
   /**
@@ -88,50 +134,33 @@ export class AMLBackendClient {
    */
   private async makeRequest<T>(
     endpoint: string,
-    data: any,
-    options: RequestInit = {}
+    data: any
   ): Promise<BackendAnalysisResponse<T>> {
-    const url = `${this.config.baseUrl}${endpoint}`;
-
-    const requestOptions: RequestInit = {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.config.authToken && {
-          Authorization: `Bearer ${this.config.authToken}`,
-        }),
-        ...options.headers,
-      },
-      body: JSON.stringify(data),
-      signal: AbortSignal.timeout(this.config.timeout),
-      ...options,
-    };
-
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       try {
-        const response = await fetch(url, requestOptions);
-
-        if (!response.ok) {
-          const errorData: BackendErrorResponse = await response.json();
-          throw new AMLBackendError(
-            errorData.error_code as AMLErrorCode,
-            errorData.message,
-            errorData.details
-          );
-        }
-
-        const result: BackendAnalysisResponse<T> = await response.json();
-        return result;
+        const response = await this.axiosInstance.post<BackendAnalysisResponse<T>>(endpoint, data);
+        return response.data;
       } catch (error) {
         lastError = error as Error;
+
+        // Handle axios errors
+        if (axios.isAxiosError(error)) {
+          if (error.response) {
+            const errorData: BackendErrorResponse = error.response.data;
+            throw new AMLBackendError(
+              errorData.error_code as AMLErrorCode,
+              errorData.message,
+              errorData.details
+            );
+          }
+        }
 
         // Don't retry on validation errors or client errors
         if (
           error instanceof AMLBackendError &&
-          (error.code === "VALIDATION_ERROR" ||
-            error.code === "ENTITY_NOT_FOUND")
+          (error.code === "VALIDATION_ERROR" || error.code === "ENTITY_NOT_FOUND")
         ) {
           throw error;
         }
@@ -162,47 +191,22 @@ export class AMLBackendClient {
     );
   }
 
+  // API Methods
+
   async analyzeAIllm(params: BackendAnalysisRequest): Promise<BackendAnalysisResponse<AIResponse>> {
-    return this.makeRequest<AIResponse>(
-      "/api/v1/analyze/ai-llm",
-      params
-    );
+    return this.makeRequest<AIResponse>("/analyze/ai-llm", params);
   }
 
-  /**
-   * Analyze cash flow patterns for specified entities
-   */
-  async analyzeCashFlow(
-    params: CashFlowRequest
-  ): Promise<BackendAnalysisResponse<CashFlowResult>> {
-    return this.makeRequest<CashFlowResult>(
-      "/api/v1/analyze/cash-flow",
-      params
-    );
+  async analyzeCashFlow(params: CashFlowRequest): Promise<BackendAnalysisResponse<CashFlowResult>> {
+    return this.makeRequest<CashFlowResult>("/analyze/cash-flow", params);
   }
 
-  /**
-   * Analyze counterparty trends for specified entities
-   */
-  async analyzeCounterpartyTrends(
-    params: CounterpartyTrendsRequest
-  ): Promise<BackendAnalysisResponse<CounterpartyTrendsResult>> {
-    return this.makeRequest<CounterpartyTrendsResult>(
-      "/api/v1/analyze/counterparty-trends",
-      params
-    );
+  async analyzeCounterpartyTrends(params: CounterpartyTrendsRequest): Promise<BackendAnalysisResponse<CounterpartyTrendsResult>> {
+    return this.makeRequest<CounterpartyTrendsResult>("/analyze/counterparty-trends", params);
   }
 
-  /**
-   * Detect mule accounts for specified entities
-   */
-  async analyzeMuleAccounts(
-    params: MuleAccountRequest
-  ): Promise<BackendAnalysisResponse<MuleAccountResult>> {
-    return this.makeRequest<MuleAccountResult>(
-      "/api/v1/analyze/mule-accounts",
-      params
-    );
+  async analyzeMuleAccounts(params: MuleAccountRequest): Promise<BackendAnalysisResponse<MuleAccountResult>> {
+    return this.makeRequest<MuleAccountResult>("/analyze/mule-accounts", params);
   }
 
   /**
@@ -210,87 +214,40 @@ export class AMLBackendClient {
    * - Single entity: Round trip detection
    * - Multiple entities: Network cycle detection
    */
-  async analyzeCycles(
-    params: CycleDetectionRequest
-  ): Promise<BackendAnalysisResponse<CycleDetectionResult>> {
-    return this.makeRequest<CycleDetectionResult>(
-      "/api/v1/analyze/cycles",
-      params
-    );
+  async analyzeCycles(params: CycleDetectionRequest): Promise<BackendAnalysisResponse<CycleDetectionResult>> {
+    return this.makeRequest<CycleDetectionResult>("/analyze/cycles", params);
   }
 
-  /**
-   * Analyze rapid movements for specified entities
-   */
-  async analyzeRapidMovements(
-    params: RapidMovementRequest
-  ): Promise<BackendAnalysisResponse<RapidMovementResult>> {
-    return this.makeRequest<RapidMovementResult>(
-      "/api/v1/analyze/rapid-movements",
-      params
-    );
+  async analyzeRapidMovements(params: RapidMovementRequest): Promise<BackendAnalysisResponse<RapidMovementResult>> {
+    return this.makeRequest<RapidMovementResult>("/analyze/rapid-movements", params);
   }
 
-  /**
-   * Analyze time trends for specified entities
-   */
-  async analyzeTimeTrends(
-    params: TimeTrendsRequest
-  ): Promise<BackendAnalysisResponse<TimeTrendsResult>> {
-    return this.makeRequest<TimeTrendsResult>(
-      "/api/v1/analyze/time-trends",
-      params
-    );
+  async analyzeTimeTrends(params: TimeTrendsRequest): Promise<BackendAnalysisResponse<TimeTrendsResult>> {
+    return this.makeRequest<TimeTrendsResult>("/analyze/time-trends", params);
   }
 
-  /**
-   * Analyze transfer patterns for specified entities
-   */
-  async analyzeTransferPatterns(
-    params: TransferPatternRequest
-  ): Promise<BackendAnalysisResponse<TransferPatternResult>> {
-    return this.makeRequest<TransferPatternResult>(
-      "/api/v1/analyze/transfer-patterns",
-      params
-    );
+  async analyzeTransferPatterns(params: TransferPatternRequest): Promise<BackendAnalysisResponse<TransferPatternResult>> {
+    return this.makeRequest<TransferPatternResult>("/analyze/transfer-patterns", params);
   }
 
-  /**
-   * Update authentication token
-   */
+  // Configuration and utility methods
+
   setAuthToken(token: string): void {
     this.config.authToken = token;
   }
 
-  /**
-   * Update configuration
-   */
   updateConfig(config: Partial<AMLBackendClientConfig>): void {
     this.config = { ...this.config, ...config };
   }
 
-  /**
-   * Get current configuration
-   */
   getConfig(): AMLBackendClientConfig {
     return { ...this.config };
   }
 
-  /**
-   * Health check for the backend service
-   */
   async healthCheck(): Promise<{ status: string; timestamp: string }> {
     try {
-      const response = await fetch(`${this.config.baseUrl}/health`, {
-        method: "GET",
-        signal: AbortSignal.timeout(5000), // 5 second timeout for health check
-      });
-
-      if (!response.ok) {
-        throw new Error(`Health check failed: ${response.status}`);
-      }
-
-      return await response.json();
+      const response = await this.axiosInstance.get("/health");
+      return response.data;
     } catch (error) {
       throw new AMLBackendError(
         "INTERNAL_ERROR",
@@ -307,4 +264,3 @@ export const amlBackendClient = new AMLBackendClient();
 // Export the error class and types
 export { AMLBackendError };
 export type { AMLBackendClientConfig };
-

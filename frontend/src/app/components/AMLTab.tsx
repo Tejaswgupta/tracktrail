@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import CashFlowAnalysisTab from "./aml/CashFlowAnalysisTab";
 import RapidMovementDetectionTab from "./aml/RapidMovementDetectionTab";
 import RoundTrippingDetectionTab from "./aml/RoundTrippingDetectionTab";
+import CircularTradingDetectionTab from "./aml/CircularTradingDetectionTab";
 
 interface AMLTabProps {
   caseId: string;
@@ -26,13 +27,11 @@ export default function AMLTab({ caseId }: AMLTabProps) {
   const [amlMetadata, setAmlMetadata] = useState<AMLMetadata | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeDetectionTab, setActiveDetectionTab] = useState<
-    | "smurfing"
+    | "circular_trading"
     | "round_tripping"
     | "rapid_movement"
-    | "transfer_pattern"
-    | "common_counterparty"
     | "cash_flow"
-  >("round_tripping");
+  >("circular_trading");
   const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
   const [entityDetails, setEntityDetails] = useState<EntityDetails[]>([]);
   const [analysisStarted, setAnalysisStarted] = useState(false);
@@ -53,7 +52,6 @@ export default function AMLTab({ caseId }: AMLTabProps) {
           setEntityDetails(entityDetailsMap);
         } catch (entityError) {
           console.error("Error fetching entity details:", entityError);
-          // Continue with just entity IDs if entity details fail
           setEntityDetails([]);
         }
 
@@ -88,6 +86,26 @@ export default function AMLTab({ caseId }: AMLTabProps) {
   };
 
   const detectionTabs = [
+    {
+      key: "circular_trading",
+      label: "Circular Trading",
+      description: "Detect money flowing in circular patterns between entities using advanced graph analysis",
+      icon: (
+        <svg
+          className="w-5 h-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+          />
+        </svg>
+      ),
+    },
     {
       key: "round_tripping",
       label: "Round Tripping",
@@ -128,12 +146,10 @@ export default function AMLTab({ caseId }: AMLTabProps) {
         </svg>
       ),
     },
-
     {
       key: "cash_flow",
       label: "Cash Flow",
-      description:
-        "Analyze cash transaction patterns and detect suspicious cash movements",
+      description: "Analyze cash transaction patterns and detect suspicious cash movements",
       icon: (
         <svg
           className="w-5 h-5"
@@ -276,11 +292,6 @@ export default function AMLTab({ caseId }: AMLTabProps) {
                 <span className="text-green-600 ml-1">(names loaded)</span>
               )}
             </p>
-            {loading && (
-              <p className="text-xs text-blue-600 mt-1">
-                Loading entity details...
-              </p>
-            )}
           </div>
           <div className="flex space-x-2">
             <button
@@ -301,8 +312,7 @@ export default function AMLTab({ caseId }: AMLTabProps) {
         {amlMetadata && amlMetadata.entityIds.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {entityDetails.length > 0
-              ? // Show entities with names when available
-                entityDetails.map((entity) => (
+              ? entityDetails.map((entity) => (
                   <label
                     key={entity.entity_id}
                     className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
@@ -328,8 +338,7 @@ export default function AMLTab({ caseId }: AMLTabProps) {
                     </div>
                   </label>
                 ))
-              : // Fallback to entity IDs when names aren't loaded yet
-                amlMetadata.entityIds.map((entityId) => (
+              : amlMetadata.entityIds.map((entityId) => (
                   <label
                     key={entityId}
                     className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
@@ -456,6 +465,14 @@ export default function AMLTab({ caseId }: AMLTabProps) {
           </div>
         ) : (
           <>
+            {activeDetectionTab === "circular_trading" && (
+              <CircularTradingDetectionTab
+                caseId={caseId}
+                amlMetadata={amlMetadata}
+                selectedEntityIds={selectedEntityIds}
+              />
+            )}
+            
             {activeDetectionTab === "round_tripping" && (
               <RoundTrippingDetectionTab
                 caseId={caseId}
