@@ -3,9 +3,7 @@
 import React, { useState } from 'react';
 import { useCircularTradingAnalysis } from '@/hooks/useCircularTradingAnalysis';
 import { CircularTradingGraph } from './CircularTradingGraph';
-import { CircularTradingControls } from './CircularTradingControls';  
-import { CircularTradingSummary } from './CircularTradingSummary';
-
+import { CircularTradingControls } from './CircularTradingControls';
 
 interface CircularTradingDetectionTabProps {
   caseId: string;
@@ -121,8 +119,6 @@ export default function CircularTradingDetectionTab({
           </div>
         ) : result ? (
           <div className="space-y-6">
-            <CircularTradingSummary result={result} />
-            
             <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
               <div className="xl:col-span-3">
                 <CircularTradingGraph
