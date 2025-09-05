@@ -50,30 +50,6 @@ class NetworkAnalysisResults:
     configuration_used: Dict[str, Any]
 
 
-def apply_entity_merging(transactions_df, entity_mappings):
-    """Apply entity merging rules to counterparty names"""
-    transactions_df["merged_counterparty"] = transactions_df["counterparty_merged"].map(
-        lambda x: entity_mappings.get(x, x)
-    )
-    return transactions_df
-
-
-def detect_multi_entity_cycles(graph, min_length=2, max_length=10):
-    """Detect Entity1 → Entity2 → Entity3 → Entity1 patterns"""
-    cycles = []
-    for cycle in nx.simple_cycles(graph):
-        if min_length <= len(cycle) <= max_length:
-            # Process multi-entity cycles
-            cycle_data = {
-                "path": cycle,
-                "cycle_type": "multi_entity" if len(cycle) > 2 else "round_trip",
-                "length": len(cycle),
-                "entities": cycle,  # All entities in the flow
-            }
-            cycles.append(cycle_data)
-    return cycles
-
-
 class NetworkCycleDetector:
     """
     Detects round trip patterns using graph algorithms and network analysis.
@@ -101,7 +77,6 @@ class NetworkCycleDetector:
         min_amount: float = 0.0,
         max_duration_days: int = 365,
         net_flow_threshold: float = 0.1,
-        entity_mappings: Optional[Dict[str, str]] = None,
     ) -> List[DetectedCycle]:
         """
         Uses NetworkX cycle detection to find all cycles within length bounds.
@@ -138,10 +113,6 @@ class NetworkCycleDetector:
             for i, cycle in enumerate(all_cycles[:10]):  # Show first 10
                 print(f"  Cycle {i + 1}: {cycle}")
             all_cycles = [c for c in all_cycles if len(set(c)) >= 3]
-            if entity_mappings:
-                all_cycles = [
-                    [entity_mappings.get(n, n) for n in c] for c in all_cycles
-                ]
             for cycle_path in all_cycles:
                 cycle_length = len(cycle_path)
 
