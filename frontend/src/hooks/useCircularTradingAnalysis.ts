@@ -1,7 +1,6 @@
 import { amlBackendClient } from "@/services/amlBackendClient";
 import { useCallback, useState } from "react";
 
-
 export interface CircularTradingNode {
   id: string;
   name: string;
@@ -88,7 +87,6 @@ function normalizeDate(dateStr: any): string {
   }
 }
 
-
 export function useCircularTradingAnalysis() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,14 +115,11 @@ export function useCircularTradingAnalysis() {
         entity_ids: entityIds,
         max_cycle_length: Math.min(parameters?.maxLength ?? 10, 10),
         min_amount_threshold: Math.max(parameters?.minAmount ?? 1000, 0),
-        // fixed to 168 hours
         time_window_hours: 168,
         net_flow_threshold: parameters?.netFlowThreshold ?? 0.1,
       };
 
-      console.log('Payload', JSON.stringify(payload, null, 2)); // ← keep this line for now
       const response = await amlBackendClient.analyzeCycles(payload);
-      console.log('Backend response:', response);
 
       // Validate response structure
       if (!response || typeof response !== 'object') {
@@ -170,19 +165,14 @@ export function useCircularTradingAnalysis() {
 }
 
 function transformBackendResponse(backendData: any, entityIds: string[]): CircularTradingResult {
-  console.log('Transforming backend response data:', backendData);
-
   // Handle null or undefined response
   if (!backendData?.results) {
-    console.warn('Backend data missing results structure');
     return createEmptyResult(entityIds);
   }
 
   const roundTrips = safeArray(backendData.results.round_trips);
   const networkCycles = safeArray(backendData.results.detected_cycles);
   const isMultiEntity = entityIds.length > 1;
-
-  console.log(`Processing ${roundTrips.length} round trips and ${networkCycles.length} network cycles`);
 
   let cycles: CircularTradingCycle[] = [];
 
@@ -241,8 +231,6 @@ function transformBackendResponse(backendData: any, entityIds: string[]): Circul
         };
       });
     }
-
-    console.log(`Successfully transformed ${cycles.length} cycles`);
   } catch (transformError) {
     console.error('Error transforming cycles:', transformError);
     cycles = [];
@@ -347,8 +335,6 @@ function transformBackendResponse(backendData: any, entityIds: string[]): Circul
         });
       }
     });
-
-    console.log(`Successfully built ${edges.length} edges`);
   } catch (edgeError) {
     console.error('Error building edges:', edgeError);
   }
@@ -373,12 +359,6 @@ function transformBackendResponse(backendData: any, entityIds: string[]): Circul
       reciprocity: getNumeric(backendData.results?.network_statistics?.reciprocity, cycles.length > 0 ? 1.0 : 0),
     },
   };
-
-  console.log('Transformation complete:', {
-    nodes: result.nodes.length,
-    edges: result.edges.length,
-    cycles: result.cycles.length
-  });
 
   return result;
 }
