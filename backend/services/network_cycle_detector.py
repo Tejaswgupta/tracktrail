@@ -112,7 +112,7 @@ class NetworkCycleDetector:
             print(f"🔍 DEBUG: Found {len(all_cycles)} raw cycles:")
             for i, cycle in enumerate(all_cycles[:10]):  # Show first 10
                 print(f"  Cycle {i + 1}: {cycle}")
-
+            all_cycles = [c for c in all_cycles if len(set(c)) >= 3]
             for cycle_path in all_cycles:
                 cycle_length = len(cycle_path)
 
@@ -236,6 +236,10 @@ class NetworkCycleDetector:
 
             if not transactions:
                 return None
+
+            # 🔧 PATCH: tag debit/credit direction on every tx
+            for tx in transactions:
+                tx["direction"] = "credit" if tx.get("amount", 0) > 0 else "debit"
 
             # Calculate temporal metrics
             if dates_in_cycle:
@@ -1151,9 +1155,9 @@ class NetworkCycleDetector:
             "cluster_labels": cluster_label_map,
             "cluster_statistics": cluster_statistics,
             "quality_metrics": quality_metrics,
-            "feature_names": list(next(iter(features.values())).keys())
-            if features
-            else [],
+            "feature_names": (
+                list(next(iter(features.values())).keys()) if features else []
+            ),
             "clustering_method": clustering_method,
         }
 
@@ -1227,9 +1231,9 @@ class NetworkCycleDetector:
         quality_metrics = {
             "n_clusters": len(set(labels)) - (1 if -1 in labels else 0),
             "noise_points": np.sum(labels == -1),
-            "noise_ratio": np.sum(labels == -1) / len(labels)
-            if len(labels) > 0
-            else 0.0,
+            "noise_ratio": (
+                np.sum(labels == -1) / len(labels) if len(labels) > 0 else 0.0
+            ),
         }
 
         # Calculate silhouette score if we have enough clusters and points
@@ -1339,7 +1343,9 @@ class NetworkCycleDetector:
                 node_features["last_cycle_date"] = cycle_dates.max().timestamp()
                 node_features["cycle_date_span"] = (
                     cycle_dates.max() - cycle_dates.min()
-                ).total_seconds() / (24 * 3600)  # Convert to days
+                ).total_seconds() / (
+                    24 * 3600
+                )  # Convert to days
             else:
                 node_features["first_cycle_date"] = 0.0
                 node_features["last_cycle_date"] = 0.0
@@ -1580,9 +1586,11 @@ class NetworkCycleDetector:
         involving_cycles = [c for c in cycles if entity in c.path]
         profile["cycle_involvement"] = {
             "total_cycles": len(involving_cycles),
-            "avg_confidence": np.mean([c.confidence_score for c in involving_cycles])
-            if involving_cycles
-            else 0,
+            "avg_confidence": (
+                np.mean([c.confidence_score for c in involving_cycles])
+                if involving_cycles
+                else 0
+            ),
             "cycle_types": {
                 "simple": len(
                     [c for c in involving_cycles if c.cycle_type == "simple"]
@@ -1606,11 +1614,9 @@ class NetworkCycleDetector:
 
         profile["risk_assessment"] = {
             "risk_score": min(1.0, risk_score),
-            "risk_level": "high"
-            if risk_score > 0.7
-            else "medium"
-            if risk_score > 0.3
-            else "low",
+            "risk_level": (
+                "high" if risk_score > 0.7 else "medium" if risk_score > 0.3 else "low"
+            ),
             "key_indicators": [],
         }
 
@@ -1671,9 +1677,11 @@ class NetworkCycleDetector:
         return {
             "density": nx.density(graph),
             "clustering_coefficient": nx.average_clustering(graph.to_undirected()),
-            "assortativity": nx.degree_assortativity_coefficient(graph)
-            if graph.number_of_edges() > 0
-            else 0,
+            "assortativity": (
+                nx.degree_assortativity_coefficient(graph)
+                if graph.number_of_edges() > 0
+                else 0
+            ),
             "reciprocity": nx.reciprocity(graph),
         }
 
@@ -2204,9 +2212,7 @@ class NetworkCycleDetector:
             "risk_level": (
                 "high"
                 if risk_score >= 0.7
-                else "medium"
-                if risk_score >= 0.4
-                else "low"
+                else "medium" if risk_score >= 0.4 else "low"
             ),
             "risk_factors": risk_factors,
         }
@@ -2352,9 +2358,9 @@ class NetworkCycleDetector:
                     "net_flow": cycle.net_flow,
                     "duration_days": cycle.duration_days,
                     "confidence_score": cycle.confidence_score,
-                    "transaction_count": len(cycle.transactions)
-                    if hasattr(cycle, "transactions")
-                    else 0,
+                    "transaction_count": (
+                        len(cycle.transactions) if hasattr(cycle, "transactions") else 0
+                    ),
                 }
                 for cycle in top_cycles
             ]
@@ -2368,7 +2374,9 @@ class NetworkCycleDetector:
                     analysis_results.anomaly_scores.items(),
                     key=lambda x: x[1],
                     reverse=True,
-                )[:20]  # Top 20 by anomaly score
+                )[
+                    :20
+                ]  # Top 20 by anomaly score
             ],
         }
 

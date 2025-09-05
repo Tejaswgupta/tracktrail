@@ -29,12 +29,15 @@ export default function AppHeader({
               <button
                 onClick={() => router.push("/")}
                 className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                aria-label="Go back to home"
+                title="Go back to home"
               >
                 <svg
                   className="w-5 h-5"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
+                  aria-hidden="true"
                 >
                   <path
                     strokeLinecap="round"
@@ -55,7 +58,7 @@ export default function AppHeader({
                 )}
               </div>
               {subtitle && (
-                <p className="text-sm text-gray-600 mt-1">{subtitle}</p>
+                <div className="text-sm text-gray-600 mt-1">{subtitle}</div>
               )}
             </div>
           </div>
