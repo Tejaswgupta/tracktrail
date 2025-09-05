@@ -836,13 +836,9 @@ async def detect_cycles(
             f"Parameters: max_length={request.max_cycle_length}, min_amount={request.min_amount_threshold}"
         )
 
-        # Determine analysis type based on entity count
-        if entity_count == 1:
-            analysis_type = "round_trips"
-            logger.info("Performing single entity round trip detection")
-        else:
-            analysis_type = "network_cycles"
-            logger.info("Performing multi-entity network cycle detection")
+        # 🔥 ALWAYS use network-cycle logic so we get ≥ 3-node cycles
+        analysis_type = "network_cycles"
+        logger.info("Performing network cycle detection (≥ 3-node cycles)")
 
         # GET ENTITY MAPPINGS - FIXED
         entity_mappings = {}

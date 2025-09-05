@@ -1,5 +1,6 @@
 import { amlBackendClient } from "@/services/amlBackendClient";
 import { useCallback, useState } from "react";
+import axios from "axios";
 
 export interface CircularTradingNode {
   id: string;
@@ -87,6 +88,15 @@ function normalizeDate(dateStr: any): string {
   }
 }
 
+async function fetchEntityMappings(entityIds: string[]): Promise<Record<string, string>> {
+  try {
+    const { data } = await axios.get('/api/v1/entity-merging', { params: { entity_ids: entityIds } });
+    return data.mappings ?? {};
+  } catch {
+    return {}; // fallback if endpoint doesn't exist yet
+  }
+}
+
 export function useCircularTradingAnalysis() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,19 +121,18 @@ export function useCircularTradingAnalysis() {
         throw new Error('At least one entity ID is required');
       }
 
-      // Cap time window at 168 hours (7 days) to avoid validation error
-      const maxDurationInHours = Math.min((parameters?.maxDurationDays || 7) * 24, 168);
-
-      const requestData = {
+      const payload = {
         entity_ids: entityIds,
-        max_cycle_length: Math.min(parameters?.maxLength || 10, 10),
-        min_amount_threshold: Math.max(parameters?.minAmount || 1000, 0),
-        time_window_hours: maxDurationInHours,
+        max_cycle_length: Math.min(parameters?.maxLength ?? 10, 10),
+        min_amount_threshold: Math.max(parameters?.minAmount ?? 1000, 0),
+        // fixed to 168 hours
+        time_window_hours: 168,
+        net_flow_threshold: parameters?.netFlowThreshold ?? 0.1,
+        entity_mappings: await fetchEntityMappings(entityIds),
       };
 
-      console.log('Requesting circular trading analysis:', requestData);
-      
-      const response = await amlBackendClient.analyzeCycles(requestData);
+      console.log('Payload', JSON.stringify(payload, null, 2)); // ← keep this line for now
+      const response = await amlBackendClient.analyzeCycles(payload);
       console.log('Backend response:', response);
 
       // Validate response structure
