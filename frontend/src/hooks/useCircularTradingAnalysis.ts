@@ -1,6 +1,6 @@
 import { amlBackendClient } from "@/services/amlBackendClient";
 import { useCallback, useState } from "react";
-import axios from "axios";
+
 
 export interface CircularTradingNode {
   id: string;
@@ -88,14 +88,6 @@ function normalizeDate(dateStr: any): string {
   }
 }
 
-async function fetchEntityMappings(entityIds: string[]): Promise<Record<string, string>> {
-  try {
-    const { data } = await axios.get('/api/v1/entity-merging', { params: { entity_ids: entityIds } });
-    return data.mappings ?? {};
-  } catch {
-    return {}; // fallback if endpoint doesn't exist yet
-  }
-}
 
 export function useCircularTradingAnalysis() {
   const [loading, setLoading] = useState(false);
@@ -128,7 +120,6 @@ export function useCircularTradingAnalysis() {
         // fixed to 168 hours
         time_window_hours: 168,
         net_flow_threshold: parameters?.netFlowThreshold ?? 0.1,
-        entity_mappings: await fetchEntityMappings(entityIds),
       };
 
       console.log('Payload', JSON.stringify(payload, null, 2)); // ← keep this line for now
