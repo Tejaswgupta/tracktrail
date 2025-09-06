@@ -10,6 +10,8 @@ interface MuleAnalysisParameters {
   periodicityTolerance: number;
   sensitivityMultiplier: number;
   patternSensitivity: 'low' | 'medium' | 'high';
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export function useMuleAccountAnalysis() {
@@ -29,23 +31,37 @@ export function useMuleAccountAnalysis() {
         throw new Error('At least one entity ID is required');
       }
 
+      if (entityIds.length > 1) {
+        throw new Error('Mule account detection only works with single entity');
+      }
+
+      const defaultDateFrom = new Date();
+      defaultDateFrom.setFullYear(defaultDateFrom.getFullYear() - 1);
+      
+      const defaultDateTo = new Date();
+
       const payload = {
         entity_ids: entityIds,
-        date_from: "2023-01-01T00:00:00Z",
-        date_to: "2023-12-31T23:59:59Z",
+        date_from: parameters.dateFrom || defaultDateFrom.toISOString(),
+        date_to: parameters.dateTo || defaultDateTo.toISOString(),
+        min_collection_transactions: parameters.minCollectionTransactions,
+        min_disbursement_amount_ratio: parameters.minDisbursementAmountRatio,
+        max_collection_period_days: parameters.maxCollectionPeriodDays,
         velocity_threshold: parameters.velocityThreshold,
+        periodicity_tolerance: parameters.periodicityTolerance,
+        sensitivity_multiplier: parameters.sensitivityMultiplier,
         pattern_sensitivity: parameters.patternSensitivity,
       };
 
       console.log('Sending mule analysis payload:', payload);
 
-      // Use the new API client instead of amlBackendClient
       const response = await analyzeMuleAccounts(payload);
       setResult(response);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Mule account analysis error:', err);
-      setError(err.message || 'Failed to analyze mule accounts');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to analyze mule accounts';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

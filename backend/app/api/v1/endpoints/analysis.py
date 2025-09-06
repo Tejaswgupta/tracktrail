@@ -14,19 +14,17 @@ This module provides REST API endpoints for various financial analysis services 
 """
 Analysis endpoints for the FastAPI financial analysis service.
 """
-
-import requests
 import logging
-import pandas as pd  # ADD THIS
+import pandas as pd
 from datetime import datetime, timezone
-from typing import List, Dict, Any  # ADD THIS
+from typing import List, Dict, Any
 from fastapi import (
     APIRouter,
     HTTPException,
     Depends,
     status,
     BackgroundTasks,
-)  # ADD BackgroundTasks
+)
 from fastapi.responses import JSONResponse
 
 from services.ai_llm_analysis import analyze_transactions
@@ -54,21 +52,18 @@ from services.mule_account_detector import MuleAccountDetector
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
 async def get_analysis_service(
-    database_service: DatabaseService = Depends(get_database_service)
+    database_service: DatabaseService = Depends(get_database_service),
 ) -> AnalysisService:
-    """
-    Dependency injection for AnalysisService.
-    
-    Args:
-        database_service: Database service dependency
-        
-    Returns:
-        AnalysisService instance
-    """
     return AnalysisService(database_service=database_service)
 
-# REMOVED: Entity mappings endpoint - it belongs in entity_merging.py
+
+async def get_entity_transactions(
+    entity_ids: List[str], db: DatabaseService
+) -> pd.DataFrame:
+    return await db.get_entity_transactions(entity_ids, convert_to_polars=False)
+
 
 @router.post(
     "/analyze/ai-llm",
@@ -94,45 +89,74 @@ async def get_analysis_service(
         }
     }
 )
-
-@router.post("/mule-accounts", response_model=Dict[str, Any])
-async def analyze_mule_accounts(
-    request: Dict[str, Any],
-    background_tasks: BackgroundTasks,
-
-):
-    """
-    Analyze entities for mule account patterns using the MuleAccountDetector.
-    """
+async def analyze_ai_llm(
+    request: AnalysisRequest,
+    database_service: DatabaseService = Depends(get_database_service)
+) -> JSONResponse:
+    start_time = datetime.now(timezone.utc)
     try:
-        entity_ids = request.get("entity_ids", [])
+        logger.info(f"Starting AI LLM analysis for {len(request.entity_ids)} entities")
+        if len(request.entity_ids) > 1:
+            raise ValidationError("AI LLM analysis currently supports single entity analysis only")
+        transactions = await database_service.get_entity_transactions(
+            request.entity_ids, convert_to_polars=False
+        )
+        if transactions.empty:
+            raise EntityNotFoundError(f"No transactions found for entities: {request.entity_ids}")
+        results = analyze_transactions(transactions=transactions)
+        end_time = datetime.now(timezone.utc)
+        processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
+        response_data = {
+            "success": True,
+            "data": {
+                "results": results,
+                "metadata": {
+                    "entities_analyzed": len(request.entity_ids),
+                    "transactions_analyzed": len(transactions),
+                    "processing_time_ms": processing_time_ms,
+                    "analysis_timestamp": end_time.isoformat()
+                }
+            },
+            "message": "AI LLM analysis completed successfully"
+        }
+        return JSONResponse(content=response_data)
+    except ValidationError as e:
+        logger.error(f"AI LLM analysis validation error: {str(e)}")
+        raise HTTPException(status_code=422, detail=str(e))
+    except EntityNotFoundError as e:
+        logger.error(f"AI LLM analysis entity error: {str(e)}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"AI LLM analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@router.post("/analyze/mule-accounts", response_model=Dict[str, Any])
+async def analyze_mule_accounts(
+    request: MuleAccountRequest,
+    background_tasks: BackgroundTasks,
+    database_service: DatabaseService = Depends(get_database_service)
+):
+    try:
+        entity_ids = request.entity_ids
         if not entity_ids:
             raise HTTPException(status_code=400, detail="Entity IDs are required")
-
-        # Extract parameters matching your UI controls
+        if len(entity_ids) > 1:
+            raise HTTPException(status_code=400, detail="Mule account detection only works with single entity")
         detector_config = {
-            'min_collection_transactions': request.get("min_collection_transactions", 5),
-            'min_disbursement_amount_ratio': request.get("min_disbursement_amount_ratio", 3.0),
-            'max_collection_period_days': request.get("max_collection_period_days", 30),
-            'velocity_threshold': request.get("velocity_threshold", 0.5),
-            'periodicity_tolerance': request.get("periodicity_tolerance", 2),
-            'sensitivity_multiplier': request.get("sensitivity_multiplier", 1.0),
-            'pattern_sensitivity': request.get("pattern_sensitivity", "medium"),
+            'min_collection_transactions': request.min_collection_transactions or 5,
+            'min_disbursement_amount_ratio': request.min_disbursement_amount_ratio or 3.0,
+            'max_collection_period_days': request.max_collection_period_days or 30,
+            'velocity_threshold': request.velocity_threshold or 0.5,
+            'periodicity_tolerance': request.periodicity_tolerance or 2,
+            'sensitivity_multiplier': request.sensitivity_multiplier or 1.0,
+            'pattern_sensitivity': request.pattern_sensitivity or "medium",
         }
-
-        # Import and use your MuleAccountDetector
-        
         detector = MuleAccountDetector()
-        # Update detector config with request parameters
         detector.config.update(detector_config)
-        
-        # Get transaction data for entities (you'll need to implement this)
-        transactions_df = await get_entity_transactions(entity_ids, db)
-        
-        # Run detection
+        transactions_df = await get_entity_transactions(entity_ids, database_service)
+        if transactions_df.empty:
+            raise HTTPException(status_code=404, detail="No transactions found for the specified entity")
         alerts = detector.detect_mule_patterns(transactions_df)
-        
-        # Convert alerts to API response format
         formatted_alerts = []
         for alert in alerts:
             formatted_alert = {
@@ -155,182 +179,31 @@ async def analyze_mule_accounts(
                     },
                     "suspicion_metrics": {
                         "lifetime_ratio": alert.disbursement_phase.get('net_flow_ratio', 0),
-                        "daily_ratio": 0.001,  # Extract from intervals_summary if available
-                        "monthly_ratio": 0.001  # Extract from intervals_summary if available
+                        "daily_ratio": 0.001,
+                        "monthly_ratio": 0.001
                     }
                 }
             }
             formatted_alerts.append(formatted_alert)
-
         result = {
             "alerts": formatted_alerts,
             "summary": {
                 "total_alerts": len(formatted_alerts),
-                "analysis_period": f"{transactions_df['DATE'].min()} to {transactions_df['DATE'].max()}" if not transactions_df.empty else "No data"
+                "analysis_period": f"{transactions_df['DATE'].min()} to {transactions_df['DATE'].max()}" if not transactions_df.empty else "No data",
+                "entity_analyzed": entity_ids[0],
+                "transactions_analyzed": len(transactions_df)
             }
         }
-
         return {
             "success": True,
             "data": result,
             "message": "Mule account analysis completed successfully"
         }
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Mule account analysis failed: {str(e)}")
-        return {
-            "success": False,
-            "data": None,
-            "message": f"Analysis failed: {str(e)}"
-        }
-async def analyze_ai_llm(
-    request: AnalysisRequest,
-    database_service: DatabaseService = Depends(get_database_service)
-) -> JSONResponse:
-    """
-    Perform AI LLM analysis for specified entities.
-    
-    This endpoint analyzes transaction data to identify:
-    - Patterns and frequencies
-    - Anomalies and suspicious activity
-    - Risk indicators for suspicious transactions
-    
-    Args:
-        request: AI LLM analysis request with entity IDs and parameters
-        ai_llm_analysis_service: AI LLM analysis service dependency
-        
-    Returns:
-        JSONResponse: AI LLM analysis results with patterns and insights
-        
-    Raises:
-        HTTPException: For validation errors, entity not found, or analysis failures
-    """
-    start_time = datetime.now(timezone.utc)
-    
-    try:
-        logger.info(f"Starting AI LLM analysis for {len(request.entity_ids)} entities")
-        
-        # Validate that this is single entity analysis (based on requirements)
-        if len(request.entity_ids) > 1:
-            raise ValidationError("AI LLM analysis currently supports single entity analysis only")
-        
-        # Perform AI LLM analysis
-        transactions = await database_service.get_entity_transactions(
-            request.entity_ids,convert_to_polars=False,)
-        results = analyze_transactions(
-            transactions=transactions
-        )
-        
-        # Calculate processing time
-        end_time = datetime.now(timezone.utc)
-        processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
-        
-        # Build response metadata
-        metadata = {
-            "analysis_type": "ai_llm",
-            "entity_count": len(request.entity_ids),
-            "transaction_count": results.get("transaction_count", 0),
-            "processing_time_ms": processing_time_ms,
-            "parameters": request,
-            "date_range": results.get("date_range")
-        }
-        
-        # Determine success message based on results
-        if results.get("results", {}).get("ai_llm_transactions_found", False):
-            message = f"AI LLM analysis completed successfully. Found {results['results']['total_ai_llm_transactions']} AI LLM transactions."
-        else:
-            message = "AI LLM analysis completed. No AI LLM transactions found with specified criteria."
-        
-        # Build successful response
-        response = AnalysisResponse(
-            success=True,
-            message=message,
-            data=results,
-            metadata=metadata,
-            timestamp=end_time
-        )
-        
-        logger.info(f"AI LLM analysis completed successfully in {processing_time_ms}ms")
-        
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content=response.model_dump(mode='json')
-        )
-        
-    except ValidationError as e:
-        logger.warning(f"AI LLM analysis validation error: {str(e)}")
-        error_response = ErrorResponse(
-            error_code="VALIDATION_ERROR",
-            message=str(e),
-            details={
-                "entity_ids": request.entity_ids,
-                "validation_type": "request_validation"
-            }
-        )
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content=error_response.model_dump(mode='json')
-        )
-        
-    except EntityNotFoundError as e:
-        logger.warning(f"AI LLM analysis entity not found: {str(e)}")
-        error_response = ErrorResponse(
-            error_code="ENTITY_NOT_FOUND",
-            message=str(e),
-            details={
-                "entity_ids": request.entity_ids,
-                "analysis_type": "ai_llm"
-            }
-        )
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=error_response.model_dump(mode='json')
-        )
-        
-    except DatabaseError as e:
-        logger.error(f"AI LLM analysis database error: {str(e)}")
-        error_response = ErrorResponse(
-            error_code="DATABASE_ERROR",
-            message="Database operation failed. Please try again later.",
-            details={
-                "analysis_type": "ai_llm",
-                "entity_count": len(request.entity_ids)
-            }
-        )
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content=error_response.model_dump(mode='json')
-        )
-        
-    except AnalysisError as e:
-        logger.error(f"AI LLM analysis processing error: {str(e)}")
-        error_response = ErrorResponse(
-            error_code="ANALYSIS_ERROR",
-            message="Analysis processing failed. Please check your request and try again.",
-            details={
-                "analysis_type": "ai_llm",
-                "entity_ids": request.entity_ids
-            }
-        )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=error_response.model_dump(mode='json')
-        )
-        
-    except Exception as e:
-        logger.error(f"AI LLM analysis unexpected error: {str(e)}")
-        error_response = ErrorResponse(
-            error_code="UNEXPECTED_ERROR",
-            message="An unexpected error occurred. Please try again later.",
-            details={
-                "analysis_type": "ai_llm",
-                "entity_ids": request.entity_ids
-            }
-        )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=error_response.model_dump(mode='json')
-        )
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
 @router.post(
@@ -386,18 +259,18 @@ async def analyze_cash_flow(
     try:
         logger.info(f"Starting cash flow analysis for {len(request.entity_ids)} entities")
         
-        # Validate that this is single entity analysis (based on requirements)
+       
         if len(request.entity_ids) > 1:
             raise ValidationError("Cash flow analysis currently supports single entity analysis only")
         
-        # Extract analysis parameters from request
+    
         analysis_params = {
-            'cash_keywords': request.cash_keywords or ['CASH', 'ATM', 'WITHDRAWAL', 'CHQ'],  # Default keywords
-            'threshold': request.threshold or 50000,  # Default large cash threshold
+            'cash_keywords': request.cash_keywords or ['CASH', 'ATM', 'WITHDRAWAL', 'CHQ'],  
+            'threshold': request.threshold or 50000,  
             'granularity': request.granularity
         }
         
-        # Perform cash flow analysis
+        
         results = await analysis_service.analyze_cash_flow(
             entity_ids=request.entity_ids,
             date_from=request.date_from,
@@ -405,11 +278,11 @@ async def analyze_cash_flow(
             **analysis_params
         )
         
-        # Calculate processing time
+        
         end_time = datetime.utcnow()
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        # Build response metadata
+       
         metadata = {
             "analysis_type": "cash_flow",
             "entity_count": len(request.entity_ids),
@@ -419,13 +292,13 @@ async def analyze_cash_flow(
             "date_range": results.get("date_range")
         }
         
-        # Determine success message based on results
+        
         if results.get("results", {}).get("cash_transactions_found", False):
             message = f"Cash flow analysis completed successfully. Found {results['results']['total_cash_transactions']} cash transactions."
         else:
             message = "Cash flow analysis completed. No cash transactions found with specified criteria."
         
-        # Build successful response
+       
         response = AnalysisResponse(
             success=True,
             message=message,
@@ -568,17 +441,17 @@ async def analyze_counterparty_trends(
     try:
         logger.info(f"Starting counterparty trends analysis for {len(request.entity_ids)} entities")
         
-        # Validate that this is single entity analysis (based on requirements)
+       
         if len(request.entity_ids) > 1:
             raise ValidationError("Counterparty trends analysis currently supports single entity analysis only")
         
-        # Extract analysis parameters from request
+       
         analysis_params = {
             'min_transactions': request.min_transaction_count,
-            'risk_threshold': 0.6,  # Default high-risk threshold
+            'risk_threshold': 0.6,  
         }
         
-        # Perform counterparty trends analysis
+        
         results = await analysis_service.analyze_counterparty_trends(
             entity_ids=request.entity_ids,
             date_from=request.date_from,
@@ -586,11 +459,11 @@ async def analyze_counterparty_trends(
             **analysis_params
         )
         
-        # Calculate processing time
+        
         end_time = datetime.utcnow()
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        # Build response metadata
+        
         metadata = {
             "analysis_type": "counterparty_trends",
             "entity_count": len(request.entity_ids),
@@ -600,7 +473,7 @@ async def analyze_counterparty_trends(
             "date_range": results.get("date_range")
         }
         
-        # Determine success message based on results
+        
         counterparty_count = results.get("results", {}).get("summary", {}).get("total_counterparties_analyzed", 0)
         high_risk_count = results.get("results", {}).get("summary", {}).get("high_risk_count", 0)
         
@@ -609,7 +482,7 @@ async def analyze_counterparty_trends(
         else:
             message = "Counterparty trends analysis completed. No counterparties found with sufficient transaction history."
         
-        # Build successful response
+        
         response = AnalysisResponse(
             success=True,
             message=message,
@@ -699,31 +572,6 @@ async def analyze_counterparty_trends(
             content=error_response.model_dump(mode='json')
         )
 
-
-@router.post(
-    "/analyze/mule-accounts",
-    response_model=AnalysisResponse,
-    summary="Mule Account Detection",
-    description="Perform mule account detection for specified entities to identify pass-through accounts and money laundering patterns",
-    responses={
-        200: {
-            "description": "Mule account detection completed successfully",
-            "model": AnalysisResponse
-        },
-        422: {
-            "description": "Request validation failed",
-            "model": ErrorResponse
-        },
-        404: {
-            "description": "One or more entities not found",
-            "model": ErrorResponse
-        },
-        500: {
-            "description": "Analysis processing failed",
-            "model": ErrorResponse
-        }
-    }
-)
 async def detect_mule_accounts(
     request: MuleAccountRequest,
     analysis_service: AnalysisService = Depends(get_analysis_service)
@@ -753,18 +601,18 @@ async def detect_mule_accounts(
     try:
         logger.info(f"Starting mule account detection for {len(request.entity_ids)} entities")
         
-        # Validate that this is single entity analysis (based on requirements)
+       
         if len(request.entity_ids) > 1:
             raise ValidationError("Mule account detection currently supports single entity analysis only")
         
-        # Extract analysis parameters from request
+        
         analysis_params = {
             'account_identifier': request.entity_ids[0],
             'velocity_threshold': request.velocity_threshold,
             'pattern_sensitivity': request.pattern_sensitivity
         }
         
-        # Map sensitivity to configuration multiplier
+        
         sensitivity_multipliers = {
             'low': 0.8,
             'medium': 1.0,
@@ -774,7 +622,7 @@ async def detect_mule_accounts(
             request.pattern_sensitivity, 1.0
         )
         
-        # Perform mule account detection
+       
         results = await analysis_service.detect_mule_accounts(
             entity_ids=request.entity_ids,
             date_from=request.date_from,
@@ -782,11 +630,11 @@ async def detect_mule_accounts(
             **analysis_params
         )
         
-        # Calculate processing time
+        
         end_time = datetime.utcnow()
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        # Build response metadata
+        
         metadata = {
             "analysis_type": "mule_accounts",
             "entity_count": len(request.entity_ids),
@@ -796,7 +644,7 @@ async def detect_mule_accounts(
             "date_range": results.get("date_range")
         }
         
-        # Determine success message based on results
+      
         alerts_count = results.get("results", {}).get("alerts_count", 0)
         high_confidence_alerts = results.get("results", {}).get("summary", {}).get("high_confidence_alerts", 0)
         
@@ -805,7 +653,7 @@ async def detect_mule_accounts(
         else:
             message = "Mule account detection completed. No mule account patterns detected."
         
-        # Build successful response
+        
         response = AnalysisResponse(
             success=True,
             message=message,
@@ -956,11 +804,11 @@ async def detect_cycles(
         entity_count = len(request.entity_ids)
         logger.info(f"Starting cycle detection for {entity_count} entities")
         
-        # ADD DATA VALIDATION - CRITICAL FIX
+       
         if not request.entity_ids or len(request.entity_ids) == 0:
             raise ValidationError("At least one entity ID required")
         
-        # Validate and limit parameters for performance
+      
         if request.max_cycle_length > 20:
             logger.warning("Max cycle length limited to 20 for performance")
             request.max_cycle_length = 20
@@ -968,51 +816,49 @@ async def detect_cycles(
         if request.min_amount_threshold < 0:
             raise ValidationError("Minimum amount threshold must be non-negative")
         
-        # Log request details for debugging
+        
         logger.info(f"Analysis request: {len(request.entity_ids)} entities")
         logger.info(f"Parameters: max_length={request.max_cycle_length}, min_amount={request.min_amount_threshold}")
         
-        # 🔥 ALWAYS use network-cycle logic so we get ≥ 3-node cycles
+       
         analysis_type = "network_cycles"
         logger.info("Performing network cycle detection (≥ 3-node cycles)")
         
-        # GET ENTITY MAPPINGS - FIXED
+        
         entity_mappings = {}
         logger.info("Entity mappings disabled - using original counterparty names")            
         
         analysis_params = {
-            'max_cycle_length': min(request.max_cycle_length, 20),  # Performance limit
+            'max_cycle_length': min(request.max_cycle_length, 20), 
             'min_amount_threshold': request.min_amount_threshold,
             'time_window_hours': request.time_window_hours,
-            # ADD ENTITY MERGING PARAMETERS
             'entity_mappings': entity_mappings,
             'apply_entity_merging': True
         }
         
-        # Add specific parameters based on analysis type
+        
         if entity_count == 1:
-            # Parameters for round trip detection
+            
             analysis_params.update({
-                'tolerance': 5.0,  # 5% amount tolerance
-                'days': min(30, request.time_window_hours // 24 if request.time_window_hours else 30),  # Limit days
+                'tolerance': 5.0,  
+                'days': min(30, request.time_window_hours // 24 if request.time_window_hours else 30),  
                 'min_amount': request.min_amount_threshold
             })
         else:
-            # Parameters for network cycle detection
+            
             analysis_params.update({
                 'min_length': 2,
-                'max_length': min(request.max_cycle_length, 10),  # Performance limit
+                'max_length': min(request.max_cycle_length, 10), 
                 'min_amount': request.min_amount_threshold,
                 'max_duration_days': min(365, request.time_window_hours // 24 if request.time_window_hours else 365),
                 'net_flow_threshold': 0.1,
-                # ADD MULTI-ENTITY CYCLE DETECTION
                 'detect_multi_entity_cycles': True,
                 'use_merged_entities': True
             })
         
         logger.info("Starting cycle detection analysis...")
         
-        # Perform cycle detection
+       
         results = await analysis_service.detect_cycles(
             entity_ids=request.entity_ids,
             date_from=request.date_from,
@@ -1020,11 +866,11 @@ async def detect_cycles(
             **analysis_params
         )
         
-        # Calculate processing time
+        
         end_time = datetime.utcnow()
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        # Build response metadata
+        
         metadata = {
             "analysis_type": analysis_type,
             "entity_count": entity_count,
@@ -1032,12 +878,12 @@ async def detect_cycles(
             "processing_time_ms": processing_time_ms,
             "parameters": analysis_params,
             "date_range": results.get("date_range"),
-            "entity_mappings_applied": len(entity_mappings)  # ADD THIS
+            "entity_mappings_applied": len(entity_mappings)  
         }
         
-        # Determine success message based on results and analysis type
+        
         if entity_count == 1:
-            # Round trip detection results
+            
             round_trips_found = results.get("results", {}).get("round_trips_found", False)
             total_round_trips = results.get("results", {}).get("total_round_trips", 0)
             
@@ -1046,7 +892,7 @@ async def detect_cycles(
             else:
                 message = "Round trip detection completed. No round trip patterns detected with current parameters."
         else:
-            # Network cycle detection results - ENHANCED MESSAGE
+            
             cycles_found = results.get("results", {}).get("cycles_found", 0)
             multi_entity_cycles = results.get("results", {}).get("multi_entity_cycles_found", 0)
             high_confidence_cycles = results.get("results", {}).get("high_confidence_cycles", 0)
@@ -1061,7 +907,7 @@ async def detect_cycles(
                 if len(entity_mappings) > 0:
                     message += f" Applied {len(entity_mappings)} entity merging rules."
         
-        # Build successful response
+        
         response = AnalysisResponse(
             success=True,
             message=message,
@@ -1205,19 +1051,19 @@ async def analyze_rapid_movements(
     try:
         logger.info(f"Starting rapid movement analysis for {len(request.entity_ids)} entities")
         
-        # Validate that this is single entity analysis (based on requirements)
+        
         if len(request.entity_ids) > 1:
             raise ValidationError("Rapid movement analysis currently supports single entity analysis only")
         
-        # Extract analysis parameters from request
+        
         analysis_params = {
-            'hours': request.time_threshold_minutes / 60.0,  # Convert minutes to hours
+            'hours': request.time_threshold_minutes / 60.0,  
             'tolerance': request.tolerance_percentage,
             'min_amount': request.amount_threshold,
-            'show_visualization': False  # API mode, no visualization
+            'show_visualization': False  
         }
         
-        # Perform rapid movement analysis
+        
         results = await analysis_service.analyze_rapid_movements(
             entity_ids=request.entity_ids,
             date_from=request.date_from,
@@ -1225,11 +1071,11 @@ async def analyze_rapid_movements(
             **analysis_params
         )
         
-        # Calculate processing time
+        
         end_time = datetime.utcnow()
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        # Build response metadata
+        
         metadata = {
             "analysis_type": "rapid_movements",
             "entity_count": len(request.entity_ids),
@@ -1239,7 +1085,7 @@ async def analyze_rapid_movements(
             "date_range": results.get("date_range")
         }
         
-        # Determine success message based on results
+        
         rapid_movements_found = results.get("results", {}).get("rapid_movements_found", False)
         total_movements = results.get("results", {}).get("total_rapid_movements", 0)
         repeated_pairs = results.get("results", {}).get("repeated_pairs_count", 0)
@@ -1252,7 +1098,7 @@ async def analyze_rapid_movements(
         else:
             message = "Rapid movement analysis completed. No rapid money movements detected with current parameters."
         
-        # Build successful response
+       
         response = AnalysisResponse(
             success=True,
             message=message,
@@ -1398,18 +1244,18 @@ async def analyze_time_trends(
     try:
         logger.info(f"Starting time trends analysis for {len(request.entity_ids)} entities")
         
-        # Validate that this is single entity analysis (based on requirements)
+        
         if len(request.entity_ids) > 1:
             raise ValidationError("Time trends analysis currently supports single entity analysis only")
         
-        # Extract analysis parameters from request
+       
         analysis_params = {
             'time_granularity': request.aggregation_period,
             'include_seasonality': request.include_seasonality,
             'trend_method': request.trend_detection_method
         }
         
-        # Perform time trends analysis
+        
         results = await analysis_service.analyze_time_trends(
             entity_ids=request.entity_ids,
             date_from=request.date_from,
@@ -1417,11 +1263,11 @@ async def analyze_time_trends(
             **analysis_params
         )
         
-        # Calculate processing time
+        
         end_time = datetime.utcnow()
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        # Build response metadata
+       
         metadata = {
             "analysis_type": "time_trends",
             "entity_count": len(request.entity_ids),
@@ -1431,7 +1277,7 @@ async def analyze_time_trends(
             "date_range": results.get("date_range")
         }
         
-        # Determine success message based on results
+        
         analysis_data = results.get("results", {})
         data_summary = analysis_data.get("data_summary", {})
         trend_analysis = analysis_data.get("trend_analysis", {})
@@ -1448,7 +1294,7 @@ async def analyze_time_trends(
         else:
             message = "Time trends analysis completed. Insufficient data for temporal pattern analysis."
         
-        # Build successful response
+       
         response = AnalysisResponse(
             success=True,
             message=message,
@@ -1592,23 +1438,23 @@ async def analyze_transfer_patterns(
     try:
         logger.info(f"Starting transfer pattern analysis for {len(request.entity_ids)} entities")
         
-        # Validate that this is multiple entity analysis (based on requirements)
+        
         if len(request.entity_ids) < 2:
             raise ValidationError("Transfer pattern analysis requires multiple entities (minimum 2)")
         
-        # Extract analysis parameters from request
+        
         analysis_params = {
-            'time_window': 7,  # Default 7 days window
-            'percentage_match': 90,  # Default 90% amount match
-            'deviance': 10,  # Default 10% deviance
-            'min_amount': 1000,  # Default minimum amount
-            'min_occurrences': 2,  # Default minimum pattern occurrences
+            'time_window': 7,  
+            'percentage_match': 90,  
+            'deviance': 10, 
+            'min_amount': 1000,  
+            'min_occurrences': 2,  
             'pattern_types': request.pattern_types,
             'network_depth': request.network_depth,
             'min_pattern_strength': request.min_pattern_strength
         }
         
-        # Perform transfer pattern analysis
+        
         results = await analysis_service.analyze_transfer_patterns(
             entity_ids=request.entity_ids,
             date_from=request.date_from,
@@ -1616,11 +1462,11 @@ async def analyze_transfer_patterns(
             **analysis_params
         )
         
-        # Calculate processing time
+        
         end_time = datetime.utcnow()
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        # Build response metadata
+        
         metadata = {
             "analysis_type": "transfer_patterns",
             "entity_count": len(request.entity_ids),
@@ -1630,7 +1476,7 @@ async def analyze_transfer_patterns(
             "date_range": results.get("date_range")
         }
         
-        # Determine success message based on results
+        
         patterns_found = results.get("results", {}).get("transfer_patterns_found", False)
         total_patterns = results.get("results", {}).get("total_patterns", 0)
         
@@ -1639,7 +1485,7 @@ async def analyze_transfer_patterns(
         else:
             message = "Transfer pattern analysis completed. No repeated transfer patterns detected with current parameters."
         
-        # Build successful response
+        
         response = AnalysisResponse(
             success=True,
             message=message,
