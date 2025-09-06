@@ -6,7 +6,6 @@ Coordinates between database operations and existing analysis modules.
 import logging
 import os
 
-# Import existing analysis services
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
@@ -40,7 +39,6 @@ class AnalysisService:
     def __init__(self, database_service: Optional[DatabaseService] = None):
         self.database_service = database_service
 
-        # Initialize analysis modules
         self.counterparty_analyzer = CounterpartyTrendAnalyzer()
         self.mule_detector = MuleAccountDetector()
         self.network_detector = NetworkCycleDetector()
@@ -79,7 +77,6 @@ class AnalysisService:
         try:
             db_service = await self._get_database_service()
 
-            # Fetch transaction data
             df = await db_service.get_entity_transactions(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -87,14 +84,12 @@ class AnalysisService:
                 convert_to_polars=convert_to_polars,
             )
 
-            # Validate we have data
             if (convert_to_polars and len(df) == 0) or (
                 not convert_to_polars and df.empty
             ):
                 logger.warning(f"No transactions found for entities: {entity_ids}")
                 return df
 
-            # Transform data format for analysis services
             if convert_to_polars:
                 df = self._prepare_polars_data(df)
             else:
@@ -104,7 +99,7 @@ class AnalysisService:
             return df
 
         except (ValidationError, EntityNotFoundError) as e:
-            # Re-raise validation and entity errors
+
             raise
         except Exception as e:
             logger.error(f"Data preparation failed: {str(e)}")
@@ -121,10 +116,9 @@ class AnalysisService:
             Prepared Polars DataFrame with standardized columns
         """
         try:
-            # Ensure required columns exist and are properly typed
+
             required_columns = ["DATE", "DEBIT", "CREDIT", "DESCRIPTION"]
 
-            # Add missing columns with default values
             for col in required_columns:
                 if col not in df.columns:
                     if col == "DATE":
@@ -134,7 +128,6 @@ class AnalysisService:
                     else:
                         df = df.with_columns(pl.lit("").alias(col))
 
-            # Ensure proper data types
             df = df.with_columns(
                 [
                     pl.col("DATE").cast(pl.Datetime),
@@ -144,11 +137,9 @@ class AnalysisService:
                 ]
             )
 
-            # Add counterparty column if not present (placeholder for now)
             if "counterparty" not in df.columns:
                 df = df.with_columns(pl.lit("").alias("counterparty"))
 
-            # Sort by date first, then by original_index to preserve order for same-date transactions
             sort_columns = ["DATE"]
             if "original_index" in df.columns:
                 sort_columns.append("original_index")
@@ -171,7 +162,7 @@ class AnalysisService:
             Prepared Pandas DataFrame with standardized columns
         """
         try:
-            # Ensure required columns exist
+
             required_columns = ["DATE", "DEBIT", "CREDIT", "DESCRIPTION"]
 
             for col in required_columns:
@@ -183,17 +174,14 @@ class AnalysisService:
                     else:
                         df[col] = ""
 
-            # Ensure proper data types
             df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
             df["DEBIT"] = pd.to_numeric(df["DEBIT"], errors="coerce").fillna(0.0)
             df["CREDIT"] = pd.to_numeric(df["CREDIT"], errors="coerce").fillna(0.0)
             df["DESCRIPTION"] = df["DESCRIPTION"].astype(str).fillna("")
 
-            # Add counterparty column if not present
             if "counterparty" not in df.columns:
                 df["counterparty"] = ""
 
-            # Sort by date first, then by original_index to preserve order for same-date transactions
             sort_columns = ["DATE"]
             if "original_index" in df.columns:
                 sort_columns.append("original_index")
@@ -231,7 +219,6 @@ class AnalysisService:
         try:
             logger.info(f"Starting cash flow analysis for {len(entity_ids)} entities")
 
-            # Fetch and prepare data (use Pandas for cash flow analysis)
             df = await self._fetch_and_prepare_data(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -242,7 +229,6 @@ class AnalysisService:
             if df.empty:
                 return self._empty_analysis_result("cash_flow", entity_ids)
 
-            # Perform cash flow analysis
             results = self._perform_cash_flow_analysis(df, **kwargs)
 
             return self._format_analysis_result(
@@ -262,13 +248,12 @@ class AnalysisService:
     def _perform_cash_flow_analysis(self, df: pd.DataFrame, **kwargs) -> Dict[str, Any]:
         """Extract core cash flow analysis logic"""
         try:
-            # Cash transaction detection
+
             cash_keywords = kwargs.get(
                 "cash_keywords", ["CASH", "ATM", "WITHDRAWAL", "CHQ"]
             )
             threshold = kwargs.get("threshold", 50000)
 
-            # Find cash transactions
             pattern = "|".join(cash_keywords)
             cash_mask = df["DESCRIPTION"].str.contains(pattern, case=False, na=False)
             cash_txns = df[cash_mask].copy()
@@ -280,28 +265,23 @@ class AnalysisService:
                     "message": "No cash transactions found with specified keywords",
                 }
 
-            # Calculate metrics
             total_cash_out = cash_txns["DEBIT"].fillna(0).sum()
             total_cash_in = cash_txns["CREDIT"].fillna(0).sum()
 
-            # Large cash transactions
             large_cash = cash_txns[
                 (cash_txns["DEBIT"] > threshold) | (cash_txns["CREDIT"] > threshold)
             ]
 
-            # Frequency analysis
             cash_txns["Month"] = cash_txns["DATE"].dt.to_period("M")
             monthly_freq = cash_txns.groupby("Month").size()
-            # Convert PeriodIndex keys to strings for JSON serialization
+
             monthly_freq_dict = {
                 str(k): int(v) for k, v in monthly_freq.to_dict().items()
             }
 
-            # Day of week pattern
             cash_txns["DayOfWeek"] = cash_txns["DATE"].dt.day_name()
             dow_freq = cash_txns["DayOfWeek"].value_counts()
 
-            # Amount patterns
             cash_amounts = pd.concat(
                 [cash_txns["DEBIT"].dropna(), cash_txns["CREDIT"].dropna()]
             )
@@ -346,18 +326,17 @@ class AnalysisService:
                 },
             }
 
-            # Add large transaction details if any
             if len(large_cash) > 0:
                 records = large_cash[
                     ["DATE", "DESCRIPTION", "DEBIT", "CREDIT"]
                 ].to_dict("records")
-                # Ensure DATE fields are ISO strings for JSON serialization
+
                 for r in records:
                     date_val = r.get("DATE")
                     if isinstance(date_val, (pd.Timestamp, datetime)):
                         r["DATE"] = date_val.isoformat()
                     elif date_val is not None:
-                        # Fallback: coerce to string
+
                         r["DATE"] = str(date_val)
                 results["large_transactions"] = records
 
@@ -391,7 +370,6 @@ class AnalysisService:
                 f"Starting counterparty trend analysis for {len(entity_ids)} entities"
             )
 
-            # Fetch and prepare data (use Pandas for counterparty analysis)
             df = await self._fetch_and_prepare_data(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -402,7 +380,6 @@ class AnalysisService:
             if df.empty:
                 return self._empty_analysis_result("counterparty_trends", entity_ids)
 
-            # Perform counterparty trend analysis
             min_transactions = kwargs.get("min_transactions", 3)
             counterparty_results = (
                 self.counterparty_analyzer.analyze_counterparty_trends(
@@ -412,12 +389,10 @@ class AnalysisService:
                 )
             )
 
-            # Generate insights
             insights = self.counterparty_analyzer.generate_counterparty_insights(
                 counterparty_results
             )
 
-            # Get high-risk counterparties
             high_risk_threshold = kwargs.get("risk_threshold", 0.6)
             high_risk_counterparties = (
                 self.counterparty_analyzer.get_high_risk_counterparties(
@@ -498,7 +473,6 @@ class AnalysisService:
                 f"Starting mule account detection for {len(entity_ids)} entities"
             )
 
-            # Fetch and prepare data (use Pandas for mule detection)
             df = await self._fetch_and_prepare_data(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -509,12 +483,10 @@ class AnalysisService:
             if df.empty:
                 return self._empty_analysis_result("mule_accounts", entity_ids)
 
-            # Perform mule account detection
             account_identifier = kwargs.get(
                 "account_identifier", entity_ids[0] if entity_ids else None
             )
 
-            # Apply sensitivity multiplier if provided
             sensitivity_multiplier = kwargs.get("sensitivity_multiplier", 1.0)
             if sensitivity_multiplier != 1.0:
                 self.mule_detector.config["sensitivity_multiplier"] = (
@@ -525,7 +497,6 @@ class AnalysisService:
                 df=df, account_identifier=account_identifier
             )
 
-            # Format results
             formatted_alerts = []
             for alert in mule_alerts:
                 formatted_alerts.append(
@@ -621,7 +592,7 @@ class AnalysisService:
     ) -> Dict[str, Any]:
         """Detect simple round trips for single entity using round_trip.py logic"""
         try:
-            # Fetch and prepare data (use Polars for round trip analysis)
+
             df = await self._fetch_and_prepare_data(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -632,12 +603,10 @@ class AnalysisService:
             if len(df) == 0:
                 return self._empty_analysis_result("round_trips", entity_ids)
 
-            # Extract parameters
-            tolerance = kwargs.get("tolerance", 5.0)  # 5% tolerance
-            days = kwargs.get("days", 30)  # 30 days window
-            min_amount = kwargs.get("min_amount", 1000)  # Minimum amount
+            tolerance = kwargs.get("tolerance", 5.0)
+            days = kwargs.get("days", 30)
+            min_amount = kwargs.get("min_amount", 1000)
 
-            # Perform round trip detection
             results = self._find_round_trips(df, tolerance, days, min_amount)
 
             return self._format_analysis_result(
@@ -659,7 +628,6 @@ class AnalysisService:
         try:
             logger.info(f"Starting round trip detection on {len(df)} transactions")
 
-            # First try with counterparty_merged column
             counterparty_column = None
             if "counterparty_merged" in df.columns:
                 counterparty_column = "counterparty_merged"
@@ -673,7 +641,6 @@ class AnalysisService:
                 if results["round_trips_found"]:
                     return results
 
-            # Emergency detection: extract counterparties from description
             logger.info("Starting emergency detection - parsing descriptions")
             return self._emergency_round_trip_detection(df, tolerance, days, min_amount)
 
@@ -782,13 +749,11 @@ class AnalysisService:
         try:
             results = []
 
-            # Convert to pandas for easier string manipulation
             df_pandas = df.to_pandas()
             logger.info(
                 f"Starting emergency detection on {len(df_pandas)} transactions"
             )
 
-            # Extract potential counterparties from descriptions
             counterparties = set()
             if "DESCRIPTION" in df_pandas.columns:
                 for desc in df_pandas["DESCRIPTION"].dropna():
@@ -800,7 +765,6 @@ class AnalysisService:
                         ):
                             counterparties.add(word)
 
-            # Add common variations
             counterparties.update(
                 ["ALPHA", "ALPHA TRADING", "ALPHA TRADERS", "ALPHA TRADING COMPANY"]
             )
@@ -810,7 +774,7 @@ class AnalysisService:
             )
 
             for cp in counterparties:
-                # Find transactions mentioning this counterparty
+
                 if "DESCRIPTION" not in df_pandas.columns:
                     continue
                 mask = df_pandas["DESCRIPTION"].str.contains(cp, case=False, na=False)
@@ -903,7 +867,7 @@ class AnalysisService:
     ) -> Dict[str, Any]:
         """Detect network cycles for multiple entities using NetworkCycleDetector"""
         try:
-            # Fetch and prepare data (use Pandas for network analysis)
+
             df = await self._fetch_and_prepare_data(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -914,19 +878,16 @@ class AnalysisService:
             if df.empty:
                 return self._empty_analysis_result("network_cycles", entity_ids)
 
-            # Build transaction network graph
             import networkx as nx
 
             graph = self._build_transaction_graph(df)
 
-            # Extract parameters
             min_length = kwargs.get("min_length", 2)
             max_length = kwargs.get("max_length", 10)
             min_amount = kwargs.get("min_amount", 0.0)
             max_duration_days = kwargs.get("max_duration_days", 365)
             net_flow_threshold = kwargs.get("net_flow_threshold", 0.1)
 
-            # Detect cycles
             detected_cycles = self.network_detector.detect_network_cycles(
                 graph=graph,
                 min_length=min_length,
@@ -936,20 +897,16 @@ class AnalysisService:
                 net_flow_threshold=net_flow_threshold,
             )
 
-            # Calculate centrality metrics
             centrality_metrics = self.network_detector.calculate_centrality_metrics(
                 graph
             )
 
-            # Identify hub entities
             hub_entities = self.network_detector.identify_hub_entities(
                 graph, centrality_metrics=centrality_metrics
             )
 
-            # Get entity relationship insights
             entity_insights = self._analyze_entity_relationships(graph)
 
-            # Format results
             formatted_cycles = []
             for cycle in detected_cycles:
                 formatted_cycles.append(
@@ -975,7 +932,6 @@ class AnalysisService:
                     }
                 )
 
-            # Calculate high confidence cycles
             high_confidence_cycles = [
                 c for c in detected_cycles if c.confidence_score > 0.7
             ]
@@ -986,9 +942,7 @@ class AnalysisService:
                 results={
                     "detected_cycles": formatted_cycles,
                     "cycles_found": len(detected_cycles),
-                    "cycles_count": len(
-                        detected_cycles
-                    ),  # Keep for backward compatibility
+                    "cycles_count": len(detected_cycles),
                     "high_confidence_cycles": len(high_confidence_cycles),
                     "network_statistics": {
                         "nodes": graph.number_of_nodes(),
@@ -1020,10 +974,8 @@ class AnalysisService:
 
             graph = nx.DiGraph()
 
-            # First, create a mapping of entity names to entity IDs for counterparty resolution
             entity_name_mapping = self._create_entity_name_mapping(df)
 
-            # Group transactions by entity to build relationships
             entity_groups = df.groupby("entity_id")
 
             for entity_id, entity_df in entity_groups:
@@ -1031,47 +983,42 @@ class AnalysisService:
                     "entity_name", f"Entity_{entity_id}"
                 )
 
-                # Add entity as a node
                 if not graph.has_node(entity_id):
                     graph.add_node(
                         entity_id,
                         name=entity_name,
                         entity_type=entity_df.iloc[0].get("entity_type", "Unknown"),
-                        node_type="entity",  # Mark as actual entity
+                        node_type="entity",
                         total_debits=0,
                         total_credits=0,
                         transaction_count=0,
                     )
 
-                # Process each transaction for this entity
                 for _, row in entity_df.iterrows():
                     counterparty = row.get("counterparty", "").strip()
                     amount = row.get("amount", 0)
                     is_debit = row.get("DEBIT", 0) > 0
                     is_credit = row.get("CREDIT", 0) > 0
 
-                    # Update entity node statistics
                     if is_debit:
                         graph.nodes[entity_id]["total_debits"] += amount
                     if is_credit:
                         graph.nodes[entity_id]["total_credits"] += amount
                     graph.nodes[entity_id]["transaction_count"] += 1
 
-                    # Create edges based on counterparty relationships
                     if counterparty and counterparty != "":
-                        # Try to resolve counterparty to an actual entity
+
                         counterparty_entity_id = self._resolve_counterparty_to_entity(
                             counterparty, entity_name_mapping
                         )
 
                         if counterparty_entity_id:
-                            # Counterparty is an actual entity in our dataset
+
                             target_node_id = counterparty_entity_id
                             target_node_type = "entity"
 
-                            # Add the counterparty entity node if not exists
                             if not graph.has_node(target_node_id):
-                                # Find the entity data for this counterparty
+
                                 counterparty_data = df[
                                     df["entity_id"] == counterparty_entity_id
                                 ].iloc[0]
@@ -1089,11 +1036,10 @@ class AnalysisService:
                                     transaction_count=0,
                                 )
                         else:
-                            # Counterparty is external (not in our entity dataset)
+
                             target_node_id = f"external_{hash(counterparty) % 10000}"
                             target_node_type = "external"
 
-                            # Add external counterparty node if not exists
                             if not graph.has_node(target_node_id):
                                 graph.add_node(
                                     target_node_id,
@@ -1105,17 +1051,15 @@ class AnalysisService:
                                     transaction_count=0,
                                 )
 
-                        # Determine edge direction based on transaction type
                         if is_debit:
-                            # Money flows from entity to counterparty
+
                             source, target = entity_id, target_node_id
                         else:
-                            # Money flows from counterparty to entity
+
                             source, target = target_node_id, entity_id
 
-                        # Add or update edge
                         if graph.has_edge(source, target):
-                            # Update existing edge
+
                             graph[source][target]["transactions"].append(
                                 {
                                     "amount": amount,
@@ -1137,7 +1081,7 @@ class AnalysisService:
                             graph[source][target]["total_amount"] += amount
                             graph[source][target]["transaction_count"] += 1
                         else:
-                            # Add new edge
+
                             graph.add_edge(
                                 source,
                                 target,
@@ -1166,7 +1110,6 @@ class AnalysisService:
                                 ),
                             )
 
-            # Count resolved vs external relationships
             entity_nodes = [
                 n for n, d in graph.nodes(data=True) if d["node_type"] == "entity"
             ]
@@ -1199,7 +1142,6 @@ class AnalysisService:
         try:
             entity_mapping = {}
 
-            # Get unique entities from the dataset
             unique_entities = df[["entity_id", "entity_name"]].drop_duplicates()
 
             for _, row in unique_entities.iterrows():
@@ -1207,11 +1149,10 @@ class AnalysisService:
                 entity_name = row["entity_name"]
 
                 if pd.notna(entity_name) and entity_name.strip():
-                    # Normalize the entity name for matching
+
                     normalized_name = self._normalize_entity_name(entity_name)
                     entity_mapping[normalized_name] = entity_id
 
-                    # Also add the original name
                     entity_mapping[entity_name.strip()] = entity_id
 
             logger.debug(
@@ -1236,10 +1177,8 @@ class AnalysisService:
         if not name:
             return ""
 
-        # Convert to lowercase and remove extra spaces
         normalized = name.strip().lower()
 
-        # Remove common suffixes/prefixes that might vary
         suffixes_to_remove = [
             " ltd",
             " limited",
@@ -1259,7 +1198,6 @@ class AnalysisService:
             if normalized.endswith(suffix):
                 normalized = normalized[: -len(suffix)].strip()
 
-        # Remove special characters and extra spaces
         import re
 
         normalized = re.sub(r"[^\w\s]", " ", normalized)
@@ -1283,16 +1221,13 @@ class AnalysisService:
         if not counterparty or not entity_mapping:
             return None
 
-        # Try exact match first
         if counterparty in entity_mapping:
             return entity_mapping[counterparty]
 
-        # Try normalized match
         normalized_counterparty = self._normalize_entity_name(counterparty)
         if normalized_counterparty in entity_mapping:
             return entity_mapping[normalized_counterparty]
 
-        # Try fuzzy matching for similar names
         return self._fuzzy_match_entity(normalized_counterparty, entity_mapping)
 
     def _fuzzy_match_entity(
@@ -1316,7 +1251,7 @@ class AnalysisService:
             best_score = 0
 
             for entity_name in entity_mapping.keys():
-                # Calculate similarity
+
                 similarity = SequenceMatcher(None, counterparty, entity_name).ratio()
 
                 if similarity > best_score and similarity >= threshold:
@@ -1345,7 +1280,7 @@ class AnalysisService:
             Dictionary with entity relationship insights
         """
         try:
-            # Separate entity and external nodes
+
             entity_nodes = [
                 n for n, d in graph.nodes(data=True) if d.get("node_type") == "entity"
             ]
@@ -1353,7 +1288,6 @@ class AnalysisService:
                 n for n, d in graph.nodes(data=True) if d.get("node_type") == "external"
             ]
 
-            # Count different types of relationships
             entity_to_entity_edges = []
             entity_to_external_edges = []
             external_to_entity_edges = []
@@ -1369,7 +1303,6 @@ class AnalysisService:
                 elif source_type == "external" and target_type == "entity":
                     external_to_entity_edges.append((source, target, edge_data))
 
-            # Calculate total amounts for each relationship type
             internal_flow = sum(
                 edge[2]["total_amount"] for edge in entity_to_entity_edges
             )
@@ -1380,7 +1313,6 @@ class AnalysisService:
                 edge[2]["total_amount"] for edge in external_to_entity_edges
             )
 
-            # Find most connected entities (internal connections only)
             entity_connections = {}
             for entity in entity_nodes:
                 internal_connections = 0
@@ -1389,12 +1321,10 @@ class AnalysisService:
                         internal_connections += 1
                 entity_connections[entity] = internal_connections
 
-            # Sort by connection count
             most_connected = sorted(
                 entity_connections.items(), key=lambda x: x[1], reverse=True
             )[:5]
 
-            # Calculate resolution rate
             total_counterparty_edges = (
                 len(entity_to_external_edges)
                 + len(external_to_entity_edges)
@@ -1470,7 +1400,6 @@ class AnalysisService:
                 f"Starting rapid movement analysis for {len(entity_ids)} entities"
             )
 
-            # Fetch and prepare data (use Pandas for rapid movement analysis)
             df = await self._fetch_and_prepare_data(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -1481,12 +1410,10 @@ class AnalysisService:
             if df.empty:
                 return self._empty_analysis_result("rapid_movements", entity_ids)
 
-            # Extract parameters
-            hours = kwargs.get("hours", 24)  # Time window in hours
-            tolerance = kwargs.get("tolerance", 5.0)  # Amount tolerance percentage
-            min_amount = kwargs.get("min_amount", 1000)  # Minimum amount
+            hours = kwargs.get("hours", 24)
+            tolerance = kwargs.get("tolerance", 5.0)
+            min_amount = kwargs.get("min_amount", 1000)
 
-            # Perform rapid movement detection
             rapid_patterns = self._detect_rapid_movements(
                 df, hours, tolerance, min_amount
             )
@@ -1510,55 +1437,47 @@ class AnalysisService:
     ) -> Dict[str, Any]:
         """Extract rapid movement detection logic from rapid_movement.py"""
         try:
-            # Sort by date first, then by original_index to preserve order for same-date transactions
+
             sort_columns = ["DATE"]
             if "original_index" in df.columns:
                 sort_columns.append("original_index")
             df_sorted = df.sort_values(by=sort_columns).reset_index(drop=True)
             rapid_patterns = []
 
-            # Track matched transactions
             matched_in_transactions = set()
             matched_out_transactions = set()
 
             for i in range(len(df_sorted) - 1):
                 curr = df_sorted.iloc[i]
 
-                # Skip if already matched
                 if i in matched_in_transactions:
                     continue
 
-                # Look for incoming credit transactions above minimum amount
                 if pd.notna(curr["CREDIT"]) and curr["CREDIT"] >= min_amount:
                     best_match = None
                     best_match_index = None
                     best_amount_diff = float("inf")
 
-                    # Find best matching OUT transaction within time window
                     for j in range(i + 1, min(i + 20, len(df_sorted))):
                         next_txn = df_sorted.iloc[j]
 
-                        # Skip if already matched
                         if j in matched_out_transactions:
                             continue
 
-                        # Check for outgoing debit transactions
                         if pd.notna(next_txn["DEBIT"]):
-                            # Calculate time difference in hours (must be positive)
+
                             time_diff = (
                                 next_txn["DATE"] - curr["DATE"]
                             ).total_seconds() / 3600
 
-                            # Check if debit happens after credit and within time window
                             if time_diff <= hours:
-                                # Calculate amount difference as percentage
+
                                 amount_diff = (
                                     abs(curr["CREDIT"] - next_txn["DEBIT"])
                                     / curr["CREDIT"]
                                     * 100
                                 )
 
-                                # Check if amount difference is within tolerance and is best so far
                                 if (
                                     amount_diff <= tolerance
                                     and amount_diff < best_amount_diff
@@ -1567,7 +1486,6 @@ class AnalysisService:
                                     best_match_index = j
                                     best_amount_diff = amount_diff
 
-                    # Record best match if found
                     if best_match is not None:
                         matched_in_transactions.add(i)
                         matched_out_transactions.add(best_match_index)
@@ -1591,7 +1509,6 @@ class AnalysisService:
                             }
                         )
 
-            # Analyze repeated party pairs
             repeated_pairs = []
             if rapid_patterns:
                 patterns_df = pd.DataFrame(rapid_patterns)
@@ -1648,7 +1565,6 @@ class AnalysisService:
         try:
             logger.info(f"Starting time trend analysis for {len(entity_ids)} entities")
 
-            # Fetch and prepare data (use Pandas for time analysis)
             df = await self._fetch_and_prepare_data(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -1659,10 +1575,8 @@ class AnalysisService:
             if df.empty:
                 return self._empty_analysis_result("time_trends", entity_ids)
 
-            # Extract parameters
             time_granularity = kwargs.get("time_granularity", "daily")
 
-            # Perform time-based analysis
             analysis_results = self.time_analyzer.analyze_transaction_trends(
                 df=df,
                 date_column="DATE",
@@ -1709,7 +1623,6 @@ class AnalysisService:
                 f"Starting transfer pattern analysis for {len(entity_ids)} entities"
             )
 
-            # Fetch and prepare data (use Pandas for transfer pattern analysis)
             df = await self._fetch_and_prepare_data(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -1720,16 +1633,12 @@ class AnalysisService:
             if df.empty:
                 return self._empty_analysis_result("transfer_patterns", entity_ids)
 
-            # Extract parameters
-            time_window = kwargs.get("time_window", 7)  # Days
-            percentage_match = kwargs.get("percentage_match", 90)  # Percentage
-            deviance = kwargs.get("deviance", 10)  # Percentage deviance
-            min_amount = kwargs.get("min_amount", 1000)  # Minimum amount
-            min_occurrences = kwargs.get(
-                "min_occurrences", 2
-            )  # Minimum pattern occurrences
+            time_window = kwargs.get("time_window", 7)
+            percentage_match = kwargs.get("percentage_match", 90)
+            deviance = kwargs.get("deviance", 10)
+            min_amount = kwargs.get("min_amount", 1000)
+            min_occurrences = kwargs.get("min_occurrences", 2)
 
-            # Perform transfer pattern analysis
             transfer_patterns = self._find_transfer_patterns(
                 df, time_window, percentage_match, deviance, min_amount, min_occurrences
             )
@@ -1766,7 +1675,6 @@ class AnalysisService:
                     "patterns": [],
                 }
 
-            # Sort by date first, then by original_index to preserve order for same-date transactions
             sort_columns = ["DATE"]
             if "original_index" in df.columns:
                 sort_columns.append("original_index")
@@ -1814,12 +1722,10 @@ class AnalysisService:
                         candidate_debits["DATE"] - credit_date
                     ).dt.days
 
-                    # Score matches
                     candidate_debits["match_score"] = (
                         1 - candidate_debits["amount_diff"] / credit_amount
                     ) * 0.7 + (1 - candidate_debits["date_diff"] / time_window) * 0.3
 
-                    # Select best match
                     best_match = candidate_debits.loc[
                         candidate_debits["match_score"].idxmax()
                     ]
@@ -1849,7 +1755,6 @@ class AnalysisService:
                     "patterns": [],
                 }
 
-            # Group patterns and find repeated ones
             patterns_df = pd.DataFrame(potential_patterns)
             pattern_groups = patterns_df.groupby(["source", "destination"])
 
@@ -2047,14 +1952,14 @@ class AnalysisService:
 
             elif analysis_type == "counterparty_trends":
                 high_risk = results.get("high_risk_counterparties", [])
-                for cp in high_risk[:3]:  # Top 3 high-risk counterparties
+                for cp in high_risk[:3]:
                     risk_indicators.append(
                         f"High-risk counterparty: {cp.get('name', 'Unknown')} (score: {cp.get('risk_score', 0):.2f})"
                     )
 
             elif analysis_type == "mule_accounts":
                 alerts = results.get("mule_alerts", [])
-                for alert in alerts[:3]:  # Top 3 alerts
+                for alert in alerts[:3]:
                     risk_indicators.append(
                         f"Mule account pattern: {alert.get('pattern_type', 'Unknown')} (confidence: {alert.get('confidence_score', 0):.2f})"
                     )
@@ -2082,7 +1987,6 @@ class AnalysisService:
         return risk_indicators
 
 
-# Global analysis service instance
 analysis_service = AnalysisService()
 
 

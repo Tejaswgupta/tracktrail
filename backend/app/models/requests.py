@@ -193,6 +193,40 @@ class MuleAccountRequest(AnalysisRequest):
         "medium", description="Detection sensitivity level (low, medium, high)"
     )
 
+    min_collection_transactions: int = Field(
+        5,
+        alias="minCollectionTransactions",
+        ge=1,
+        description="Minimum number of collection transactions to consider",
+    )
+    min_disbursement_amount_ratio: float = Field(
+        3.0,
+        alias="minDisbursementAmountRatio",
+        ge=0.5,
+        description="Minimum ratio of disbursement amount to collection amount",
+    )
+    max_collection_period_days: int = Field(
+        30,
+        alias="maxCollectionPeriodDays",
+        ge=7,
+        le=365,
+        description="Maximum period (days) for collection transactions",
+    )
+    periodicity_tolerance: int = Field(
+        2,
+        alias="periodicityTolerance",
+        ge=1,
+        le=7,
+        description="Tolerance for periodicity in days",
+    )
+    sensitivity_multiplier: float = Field(
+        1.0,
+        alias="sensitivityMultiplier",
+        ge=0.5,
+        le=2.0,
+        description="Multiplier to adjust detection sensitivity",
+    )
+
     @field_validator("pattern_sensitivity")
     @classmethod
     def validate_sensitivity(cls, v):
@@ -202,47 +236,20 @@ class MuleAccountRequest(AnalysisRequest):
         return v
 
     class Config:
+        allow_population_by_field_name = True
         schema_extra = {
             "example": {
                 "entity_ids": ["550e8400-e29b-41d4-a716-446655440000"],
                 "date_from": "2024-01-01T00:00:00Z",
                 "date_to": "2024-12-31T23:59:59Z",
-                "velocity_threshold": 10000.0,
+                "velocity_threshold": 0.5,
                 "pattern_sensitivity": "medium",
-            },
-            "examples": {
-                "standard_detection": {
-                    "summary": "Standard mule account detection",
-                    "description": "Standard sensitivity mule account detection with default thresholds",
-                    "value": {
-                        "entity_ids": ["550e8400-e29b-41d4-a716-446655440000"],
-                        "date_from": "2024-01-01T00:00:00Z",
-                        "date_to": "2024-12-31T23:59:59Z",
-                        "velocity_threshold": 10000.0,
-                        "pattern_sensitivity": "medium",
-                    },
-                },
-                "high_sensitivity": {
-                    "summary": "High sensitivity detection",
-                    "description": "High sensitivity detection for catching subtle mule patterns",
-                    "value": {
-                        "entity_ids": ["550e8400-e29b-41d4-a716-446655440000"],
-                        "velocity_threshold": 5000.0,
-                        "pattern_sensitivity": "high",
-                    },
-                },
-                "large_amounts": {
-                    "summary": "Large amount mule detection",
-                    "description": "Detection focused on high-value transactions",
-                    "value": {
-                        "entity_ids": ["550e8400-e29b-41d4-a716-446655440000"],
-                        "date_from": "2024-06-01T00:00:00Z",
-                        "date_to": "2024-12-31T23:59:59Z",
-                        "velocity_threshold": 50000.0,
-                        "pattern_sensitivity": "low",
-                    },
-                },
-            },
+                "minCollectionTransactions": 5,
+                "minDisbursementAmountRatio": 3.0,
+                "maxCollectionPeriodDays": 30,
+                "periodicityTolerance": 2,
+                "sensitivityMultiplier": 1.0,
+            }
         }
 
 
@@ -260,7 +267,7 @@ class CycleDetectionRequest(AnalysisRequest):
     time_window_hours: Optional[int] = Field(
         24,
         ge=1,
-        le=168,  # 1 week
+        le=168,
         description="Time window for cycle detection in hours",
     )
 
@@ -329,7 +336,7 @@ class RapidMovementRequest(AnalysisRequest):
     time_threshold_minutes: Optional[int] = Field(
         60,
         ge=1,
-        le=1440,  # 24 hours
+        le=1440,
         description="Time threshold for rapid movement detection in minutes",
     )
     amount_threshold: Optional[float] = Field(
@@ -367,7 +374,7 @@ class RapidMovementRequest(AnalysisRequest):
                     "description": "Detect movements within the same business day",
                     "value": {
                         "entity_ids": ["550e8400-e29b-41d4-a716-446655440000"],
-                        "time_threshold_minutes": 480,  # 8 hours
+                        "time_threshold_minutes": 480,
                         "amount_threshold": 5000.0,
                         "tolerance_percentage": 10.0,
                     },

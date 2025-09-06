@@ -13,7 +13,6 @@ import polars as pl
 from app.core.database import db_manager
 from app.core.exceptions import DatabaseError, EntityNotFoundError, ValidationError
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -53,34 +52,30 @@ class DatabaseService:
             DatabaseError: If database operation fails
         """
         try:
-            # Validate input parameters
+
             if not entity_ids:
                 raise ValidationError("Entity IDs list cannot be empty")
 
-            if len(entity_ids) > 50:  # Based on requirements
+            if len(entity_ids) > 50:
                 raise ValidationError("Maximum 50 entities allowed per request")
 
-            # Validate date range
             if date_from and date_to and date_from > date_to:
                 raise ValidationError("Start date cannot be after end date")
 
-            # Validate entity IDs format (assuming UUID format)
             for entity_id in entity_ids:
                 if not isinstance(entity_id, str) or len(entity_id.strip()) == 0:
                     raise ValidationError(f"Invalid entity ID format: {entity_id}")
 
             logger.info(f"Fetching transactions for {len(entity_ids)} entities")
 
-            # Fetch transactions using database manager
             df = await self.db_manager.get_entity_transactions(
                 entity_ids=entity_ids, date_from=date_from, date_to=date_to
             )
 
-            # Convert to Polars if requested (for analysis services)
             if convert_to_polars and not df.empty:
                 df = pl.from_pandas(df)
             elif convert_to_polars and df.empty:
-                # Return empty Polars DataFrame with expected schema
+
                 df = pl.DataFrame()
 
             logger.info(
@@ -89,7 +84,7 @@ class DatabaseService:
             return df
 
         except (ValidationError, EntityNotFoundError) as e:
-            # Re-raise validation and entity errors as-is
+
             raise
         except Exception as e:
             logger.error(f"Failed to fetch entity transactions: {str(e)}")
@@ -110,7 +105,7 @@ class DatabaseService:
             DatabaseError: If database operation fails
         """
         try:
-            # Validate entity ID format
+
             if not isinstance(entity_id, str) or len(entity_id.strip()) == 0:
                 raise ValidationError(f"Invalid entity ID format: {entity_id}")
 
@@ -167,29 +162,25 @@ class DatabaseService:
             DatabaseError: If database operation fails
         """
         try:
-            # Validate input parameters
+
             if not entity_ids:
                 raise ValidationError("Entity IDs list cannot be empty")
 
-            if len(entity_ids) > 50:  # Based on requirements
+            if len(entity_ids) > 50:
                 raise ValidationError("Maximum 50 entities allowed per request")
 
-            # Validate entity IDs format
             for entity_id in entity_ids:
                 if not isinstance(entity_id, str) or len(entity_id.strip()) == 0:
                     raise ValidationError(f"Invalid entity ID format: {entity_id}")
 
             logger.info(f"Fetching metadata for {len(entity_ids)} entities")
 
-            # Get metadata using database manager
             metadata = await self.db_manager.get_entity_metadata(entity_ids)
 
-            # Enhance metadata with validation information
             missing_entities = metadata.get("missing_entities", [])
             if missing_entities:
                 logger.warning(f"Missing entities found: {missing_entities}")
 
-            # Add additional metadata
             metadata.update(
                 {
                     "validation_status": {
@@ -235,12 +226,10 @@ class DatabaseService:
             DatabaseError: If database operation fails
         """
         try:
-            # Validate input parameters
+
             if not entity_ids:
                 raise ValidationError("Entity IDs list cannot be empty")
 
-            # For now, we'll fetch the data and count it
-            # In a production system, this could be optimized with a COUNT query
             df = await self.get_entity_transactions(
                 entity_ids=entity_ids,
                 date_from=date_from,
@@ -251,19 +240,16 @@ class DatabaseService:
             if df.empty:
                 return {entity_id: 0 for entity_id in entity_ids}
 
-            # Count transactions per entity
-            # Assuming there's an entity_id column in the transactions
             if "entity_id" in df.columns:
                 counts = df.groupby("entity_id").size().to_dict()
             else:
-                # If no entity_id column, return total count for all entities
+
                 total_count = len(df)
                 counts = {
                     entity_id: total_count // len(entity_ids)
                     for entity_id in entity_ids
                 }
 
-            # Ensure all requested entities are in the result
             for entity_id in entity_ids:
                 if entity_id not in counts:
                     counts[entity_id] = 0
@@ -289,7 +275,6 @@ class DatabaseService:
         try:
             health_status = await self.db_manager.health_check()
 
-            # Enhance health status with service-level information
             health_status.update(
                 {
                     "service_name": "database_service",
@@ -310,7 +295,6 @@ class DatabaseService:
             raise DatabaseError(f"Database health check failed: {str(e)}")
 
 
-# Global database service instance
 database_service = DatabaseService()
 
 

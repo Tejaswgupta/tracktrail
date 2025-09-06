@@ -14,7 +14,6 @@ import logging
 from collections import defaultdict
 import numpy as np
 
-# sklearn imports for clustering
 from sklearn.cluster import DBSCAN, KMeans, SpectralClustering
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import silhouette_score
@@ -30,7 +29,7 @@ class DetectedCycle:
     net_flow: float
     duration_days: int
     confidence_score: float
-    cycle_type: str  # 'simple', 'complex', 'hub-mediated'
+    cycle_type: str
     cycle_length: int
     first_transaction_date: datetime
     last_transaction_date: datetime
@@ -102,35 +101,30 @@ class NetworkCycleDetector:
         detected_cycles = []
 
         try:
-            # Find all simple cycles using Johnson's algorithm
-            # Note: NetworkX simple_cycles can be memory intensive for large graphs
+
             all_cycles = list(nx.simple_cycles(graph))
 
             self.logger.info(f"Found {len(all_cycles)} raw cycles")
 
-            # Debug: Print all raw cycles for debugging
             print(f"🔍 DEBUG: Found {len(all_cycles)} raw cycles:")
-            for i, cycle in enumerate(all_cycles[:10]):  # Show first 10
+            for i, cycle in enumerate(all_cycles[:10]):
                 print(f"  Cycle {i + 1}: {cycle}")
             all_cycles = [c for c in all_cycles if len(set(c)) >= 3]
             for cycle_path in all_cycles:
                 cycle_length = len(cycle_path)
 
-                # Filter by length constraints
                 if cycle_length < min_length or cycle_length > max_length:
                     continue
 
-                # Analyze the cycle
                 cycle_analysis = self._analyze_cycle(graph, cycle_path)
 
                 if cycle_analysis is None:
                     continue
 
-                # Apply filtering constraints
                 if not self._passes_cycle_filters(
                     cycle_analysis, min_amount, max_duration_days, net_flow_threshold
                 ):
-                    # Debug: Show why cycle was filtered out
+
                     print(f"🚫 DEBUG: Cycle {cycle_path} filtered out:")
                     print(
                         f"   Total amount: {cycle_analysis['total_amount']} (min: {min_amount})"
@@ -148,7 +142,6 @@ class NetworkCycleDetector:
                         )
                     continue
 
-                # Create DetectedCycle object
                 detected_cycle = DetectedCycle(
                     path=cycle_path,
                     transactions=cycle_analysis["transactions"],
@@ -164,7 +157,6 @@ class NetworkCycleDetector:
 
                 detected_cycles.append(detected_cycle)
 
-            # Sort cycles by confidence score (descending)
             detected_cycles.sort(key=lambda x: x.confidence_score, reverse=True)
 
             self.logger.info(
@@ -196,13 +188,12 @@ class NetworkCycleDetector:
             amounts_in_cycle = []
             dates_in_cycle = []
 
-            # Analyze each edge in the cycle
             for i in range(len(cycle_path)):
                 source = cycle_path[i]
                 target = cycle_path[(i + 1) % len(cycle_path)]
 
                 if not graph.has_edge(source, target):
-                    # Cycle is invalid if any edge is missing
+
                     return None
 
                 edge_data = graph[source][target]
@@ -211,7 +202,6 @@ class NetworkCycleDetector:
                 if not edge_transactions:
                     continue
 
-                # Get the most recent transaction for this edge
                 latest_tx = max(
                     edge_transactions, key=lambda x: x.get("date", datetime.min)
                 )
@@ -237,11 +227,9 @@ class NetworkCycleDetector:
             if not transactions:
                 return None
 
-            # 🔧 PATCH: tag debit/credit direction on every tx
             for tx in transactions:
                 tx["direction"] = "credit" if tx.get("amount", 0) > 0 else "debit"
 
-            # Calculate temporal metrics
             if dates_in_cycle:
                 dates_in_cycle = pd.to_datetime(dates_in_cycle)
                 first_date = dates_in_cycle.min()
@@ -252,15 +240,12 @@ class NetworkCycleDetector:
                 last_date = datetime.min
                 duration_days = 0
 
-            # Calculate net flow (ideally should be close to zero for true round trips)
             net_flow = self._calculate_net_flow(cycle_path, transactions)
 
-            # Calculate confidence score
             confidence_score = self._calculate_confidence_score(
                 amounts_in_cycle, net_flow, duration_days, len(cycle_path)
             )
 
-            # Determine cycle type
             cycle_type = self._classify_cycle_type(graph, cycle_path, amounts_in_cycle)
 
             return {
@@ -299,15 +284,12 @@ class NetworkCycleDetector:
         outgoing_amount = 0.0
         incoming_amount = 0.0
 
-        # Calculate what the starting entity sends out and receives back
         for tx in transactions:
             if tx["source"] == starting_entity:
                 outgoing_amount += tx["amount"]
             elif tx["target"] == starting_entity:
                 incoming_amount += tx["amount"]
 
-        # Net flow = what goes out - what comes back
-        # Positive = net outflow, Negative = net inflow, ~0 = balanced round trip
         return outgoing_amount - incoming_amount
 
     def _calculate_confidence_score(
@@ -334,22 +316,18 @@ class NetworkCycleDetector:
 
         score = 1.0
 
-        # Penalize high net flow (perfect round trips have low net flow)
         if sum(amounts) > 0:
             net_flow_ratio = abs(net_flow) / sum(amounts)
             score *= max(0.0, 1.0 - net_flow_ratio)
 
-        # Penalize very long durations (suspicious round trips are often quick)
         if duration_days > 30:
             duration_penalty = min(0.5, duration_days / 365)
             score *= 1.0 - duration_penalty
 
-        # Slight preference for shorter cycles (more direct round trips)
         if cycle_length > 3:
             length_penalty = min(0.2, (cycle_length - 3) * 0.05)
             score *= 1.0 - length_penalty
 
-        # Boost score for consistent amounts (typical of structured round trips)
         if len(amounts) > 1:
             amount_variance = pd.Series(amounts).var()
             amount_mean = pd.Series(amounts).mean()
@@ -386,50 +364,37 @@ class NetworkCycleDetector:
         score = 0.0
         total_amount = sum(amounts)
 
-        # 1. ROUND TRIP EFFICIENCY (30% weight)
-        # Perfect round trips have minimal net flow
         if total_amount > 0:
             net_flow_ratio = abs(net_flow) / total_amount
-            round_trip_score = max(
-                0.0, 1.0 - (net_flow_ratio * 2)
-            )  # Penalize >50% loss
+            round_trip_score = max(0.0, 1.0 - (net_flow_ratio * 2))
             score += round_trip_score * 0.30
 
-        # 2. VELOCITY SUSPICION (25% weight)
-        # Money laundering often happens quickly to avoid detection
         if duration_days <= 1:
-            velocity_score = 1.0  # Same day = highly suspicious
+            velocity_score = 1.0
         elif duration_days <= 7:
-            velocity_score = 0.8  # Within a week = suspicious
+            velocity_score = 0.8
         elif duration_days <= 30:
-            velocity_score = 0.5  # Within a month = moderate
+            velocity_score = 0.5
         else:
-            velocity_score = max(
-                0.0, 1.0 - (duration_days / 365)
-            )  # Longer = less suspicious
+            velocity_score = max(0.0, 1.0 - (duration_days / 365))
         score += velocity_score * 0.25
 
-        # 3. STRUCTURING INDICATORS (20% weight)
         structuring_score = self._detect_structuring_patterns(amounts, transactions)
         score += structuring_score * 0.20
 
-        # 4. LAYERING COMPLEXITY (15% weight)
-        # More complex paths can indicate sophisticated layering
         if cycle_length == 2:
-            complexity_score = 0.3  # Direct back-and-forth (less sophisticated)
+            complexity_score = 0.3
         elif cycle_length <= 4:
-            complexity_score = 1.0  # Optimal complexity for layering
+            complexity_score = 1.0
         elif cycle_length <= 6:
-            complexity_score = 0.7  # Complex but manageable
+            complexity_score = 0.7
         else:
-            complexity_score = 0.4  # Too complex, might be legitimate business
+            complexity_score = 0.4
         score += complexity_score * 0.15
 
-        # 5. AMOUNT CONSISTENCY (10% weight)
-        # Structured operations often use consistent amounts
         if len(amounts) > 1:
             amount_cv = pd.Series(amounts).std() / pd.Series(amounts).mean()
-            consistency_score = max(0.0, 1.0 - amount_cv)  # Lower CV = more consistent
+            consistency_score = max(0.0, 1.0 - amount_cv)
             score += consistency_score * 0.10
 
         return max(0.0, min(1.0, score))
@@ -452,8 +417,7 @@ class NetworkCycleDetector:
 
         score = 0.0
 
-        # Check for amounts just under common reporting thresholds
-        reporting_thresholds = [10000, 5000, 3000]  # Common CTR and internal thresholds
+        reporting_thresholds = [10000, 5000, 3000]
 
         for threshold in reporting_thresholds:
             near_threshold_count = sum(
@@ -462,14 +426,12 @@ class NetworkCycleDetector:
             if near_threshold_count > 0:
                 score += (near_threshold_count / len(amounts)) * 0.5
 
-        # Check for round numbers (humans prefer round numbers in structuring)
         round_number_count = sum(
             1 for amt in amounts if amt % 100 == 0 or amt % 1000 == 0
         )
-        if round_number_count > len(amounts) * 0.7:  # >70% are round numbers
+        if round_number_count > len(amounts) * 0.7:
             score += 0.3
 
-        # Check for repeated exact amounts (sign of coordination)
         from collections import Counter
 
         amount_counts = Counter(amounts)
@@ -498,7 +460,7 @@ class NetworkCycleDetector:
         if cycle_length == 2:
             return "simple"
         elif cycle_length <= 4:
-            # Check if any node in the cycle is a hub
+
             self.calculate_centrality_metrics(graph)
             hub_entities = self.identify_hub_entities(graph, threshold=0.1)
 
@@ -529,15 +491,13 @@ class NetworkCycleDetector:
         Returns:
             True if cycle passes all filters
         """
-        # Check minimum amount
+
         if cycle_analysis["total_amount"] < min_amount:
             return False
 
-        # Check duration constraint
         if cycle_analysis["duration_days"] > max_duration_days:
             return False
 
-        # Check net flow constraint
         if cycle_analysis["total_amount"] > 0:
             net_flow_ratio = (
                 abs(cycle_analysis["net_flow"]) / cycle_analysis["total_amount"]
@@ -568,13 +528,12 @@ class NetworkCycleDetector:
         centrality_metrics = {}
 
         try:
-            # Calculate different centrality measures
+
             betweenness = nx.betweenness_centrality(graph)
             closeness = nx.closeness_centrality(graph)
             in_degree = dict(graph.in_degree())
             out_degree = dict(graph.out_degree())
 
-            # Normalize degree centrality
             max_possible_degree = graph.number_of_nodes() - 1
 
             for node in graph.nodes():
@@ -590,7 +549,6 @@ class NetworkCycleDetector:
                     / max(1, max_possible_degree),
                 }
 
-            # Calculate eigenvector centrality (if graph is strongly connected)
             try:
                 if nx.is_strongly_connected(graph):
                     eigenvector = nx.eigenvector_centrality(graph, max_iter=1000)
@@ -599,12 +557,12 @@ class NetworkCycleDetector:
                             node, 0.0
                         )
                 else:
-                    # Use PageRank as alternative for non-strongly connected graphs
+
                     pagerank = nx.pagerank(graph)
                     for node in centrality_metrics:
                         centrality_metrics[node]["pagerank"] = pagerank.get(node, 0.0)
             except (nx.NetworkXError, nx.PowerIterationFailedConvergence):
-                # Fallback: set eigenvector/pagerank to 0 for all nodes
+
                 for node in centrality_metrics:
                     centrality_metrics[node]["eigenvector"] = 0.0
                     centrality_metrics[node]["pagerank"] = 0.0
@@ -645,7 +603,7 @@ class NetworkCycleDetector:
         hub_entities = []
 
         for node, metrics in centrality_metrics.items():
-            # Consider multiple centrality measures for hub identification
+
             is_hub = (
                 metrics.get("betweenness", 0) >= threshold
                 or metrics.get("total_degree", 0) >= graph.number_of_nodes() * threshold
@@ -656,7 +614,6 @@ class NetworkCycleDetector:
             if is_hub:
                 hub_entities.append(node)
 
-        # Sort by combined centrality score
         def combined_centrality_score(node: str) -> float:
             metrics = centrality_metrics[node]
             return (
@@ -703,7 +660,6 @@ class NetworkCycleDetector:
         synchronized_cycles = []
         temporal_clusters = []
 
-        # Extract cycle timestamps
         cycle_timestamps = []
         valid_cycles = []
 
@@ -725,16 +681,13 @@ class NetworkCycleDetector:
                 "burst_patterns": [],
             }
 
-        # Convert to pandas datetime for easier manipulation
         cycle_timestamps = pd.to_datetime(cycle_timestamps)
 
-        # Group cycles by time proximity
         time_groups = defaultdict(list)
 
         for i, cycle in enumerate(valid_cycles):
             cycle_time = cycle_timestamps[i]
 
-            # Round to nearest time window
             time_key = cycle_time.replace(
                 minute=0, second=0, microsecond=0
             ) + timedelta(
@@ -743,7 +696,6 @@ class NetworkCycleDetector:
 
             time_groups[time_key].append(cycle)
 
-        # Identify synchronized cycles (multiple cycles in same time window)
         for time_key, group_cycles in time_groups.items():
             if len(group_cycles) > 1:
                 synchronized_cycles.extend(group_cycles)
@@ -763,17 +715,14 @@ class NetworkCycleDetector:
                     }
                 )
 
-        # Calculate temporal statistics
         temporal_stats = self._calculate_temporal_statistics(
             cycle_timestamps, valid_cycles
         )
 
-        # Detect periodic patterns
         periodic_patterns = self._detect_periodic_patterns(
             cycle_timestamps, valid_cycles
         )
 
-        # Detect burst patterns (high activity in short periods)
         burst_patterns = self._detect_burst_patterns(
             cycle_timestamps, valid_cycles, time_window_hours
         )
@@ -815,31 +764,26 @@ class NetworkCycleDetector:
             "monthly_distribution": {},
         }
 
-        # Hourly distribution
         hourly_counts = timestamps.hour.value_counts().sort_index()
         stats["hourly_distribution"] = {
             str(hour): count for hour, count in hourly_counts.items()
         }
 
-        # Daily distribution (day of week)
         daily_counts = timestamps.day_name().value_counts()
         stats["daily_distribution"] = {
             day: count for day, count in daily_counts.items()
         }
 
-        # Weekly distribution (week number)
         weekly_counts = timestamps.isocalendar().week.value_counts().sort_index()
         stats["weekly_distribution"] = {
             f"week_{week}": count for week, count in weekly_counts.items()
         }
 
-        # Monthly distribution
         monthly_counts = timestamps.to_period("M").value_counts().sort_index()
         stats["monthly_distribution"] = {
             str(month): count for month, count in monthly_counts.items()
         }
 
-        # Calculate inter-arrival times
         if len(timestamps) > 1:
             sorted_timestamps = timestamps.sort_values()
             inter_arrival_times = sorted_timestamps.diff().dropna()
@@ -872,11 +816,8 @@ class NetworkCycleDetector:
 
         patterns = []
 
-        # Check for daily patterns (same hour of day)
         hourly_counts = timestamps.hour.value_counts()
-        peak_hours = hourly_counts[
-            hourly_counts >= 3
-        ].index.tolist()  # At least 3 occurrences
+        peak_hours = hourly_counts[hourly_counts >= 3].index.tolist()
 
         for hour in peak_hours:
             hour_cycles = [
@@ -888,15 +829,12 @@ class NetworkCycleDetector:
                     "description": f"Recurring activity at hour {hour}:00",
                     "frequency": len(hour_cycles),
                     "hour": hour,
-                    "cycles": [c.path for c in hour_cycles[:5]],  # Sample of cycles
+                    "cycles": [c.path for c in hour_cycles[:5]],
                 }
             )
 
-        # Check for weekly patterns (same day of week)
         daily_counts = timestamps.day_name().value_counts()
-        peak_days = daily_counts[
-            daily_counts >= 2
-        ].index.tolist()  # At least 2 occurrences
+        peak_days = daily_counts[daily_counts >= 2].index.tolist()
 
         for day in peak_days:
             day_cycles = [
@@ -910,28 +848,23 @@ class NetworkCycleDetector:
                     "description": f"Recurring activity on {day}s",
                     "frequency": len(day_cycles),
                     "day_of_week": day,
-                    "cycles": [c.path for c in day_cycles[:5]],  # Sample of cycles
+                    "cycles": [c.path for c in day_cycles[:5]],
                 }
             )
 
-        # Check for regular intervals
         if len(timestamps) > 2:
             sorted_timestamps = timestamps.sort_values()
             intervals = sorted_timestamps.diff().dropna()
 
-            # Look for common intervals (within 1 hour tolerance)
             interval_hours = intervals.total_seconds() / 3600
 
-            # Group similar intervals
             from collections import Counter
 
-            rounded_intervals = [
-                round(h) for h in interval_hours if 1 <= h <= 168
-            ]  # 1 hour to 1 week
+            rounded_intervals = [round(h) for h in interval_hours if 1 <= h <= 168]
             interval_counts = Counter(rounded_intervals)
 
             for interval_h, count in interval_counts.items():
-                if count >= 2:  # At least 2 occurrences of this interval
+                if count >= 2:
                     patterns.append(
                         {
                             "pattern_type": "interval",
@@ -967,10 +900,7 @@ class NetworkCycleDetector:
         bursts = []
         sorted_timestamps = timestamps.sort_values()
 
-        # Define burst criteria
-        min_cycles_for_burst = max(
-            3, len(timestamps) // 10
-        )  # At least 3 or 10% of total
+        min_cycles_for_burst = max(3, len(timestamps) // 10)
         burst_window = timedelta(hours=time_window_hours)
 
         i = 0
@@ -978,7 +908,6 @@ class NetworkCycleDetector:
             window_start = sorted_timestamps[i]
             window_end = window_start + burst_window
 
-            # Count cycles in this window
             cycles_in_window = []
             j = i
             while j < len(sorted_timestamps) and sorted_timestamps[j] <= window_end:
@@ -987,14 +916,12 @@ class NetworkCycleDetector:
                 )
                 j += 1
 
-            # Check if this constitutes a burst
             if len(cycles_in_window) >= min_cycles_for_burst:
                 total_volume = sum(c.total_amount for c in cycles_in_window)
                 avg_confidence = sum(
                     c.confidence_score for c in cycles_in_window
                 ) / len(cycles_in_window)
 
-                # Get unique entities involved
                 entities_involved = set()
                 for cycle in cycles_in_window:
                     entities_involved.update(cycle.path)
@@ -1008,20 +935,15 @@ class NetworkCycleDetector:
                         "total_volume": total_volume,
                         "average_confidence": avg_confidence,
                         "entities_count": len(entities_involved),
-                        "entities_involved": list(entities_involved)[
-                            :10
-                        ],  # Limit for readability
-                        "intensity": len(cycles_in_window)
-                        / time_window_hours,  # Cycles per hour
+                        "entities_involved": list(entities_involved)[:10],
+                        "intensity": len(cycles_in_window) / time_window_hours,
                     }
                 )
 
-                # Skip ahead to avoid overlapping bursts
                 i = j
             else:
                 i += 1
 
-        # Sort bursts by intensity (cycles per hour)
         bursts.sort(key=lambda x: x["intensity"], reverse=True)
 
         return bursts
@@ -1048,7 +970,6 @@ class NetworkCycleDetector:
         for node in graph.nodes():
             score = 0.0
 
-            # Score based on centrality (high centrality = higher anomaly potential)
             metrics = centrality_metrics.get(node, {})
             centrality_score = (
                 metrics.get("betweenness", 0) * 0.4
@@ -1058,19 +979,17 @@ class NetworkCycleDetector:
             )
             score += centrality_score * 0.5
 
-            # Score based on cycle participation
             cycle_participation = sum(1 for cycle in cycles if node in cycle.path)
             if len(cycles) > 0:
                 participation_ratio = cycle_participation / len(cycles)
                 score += participation_ratio * 0.3
 
-            # Score based on transaction volume
             node_data = graph.nodes[node]
             total_volume = node_data.get("total_outgoing", 0) + node_data.get(
                 "total_incoming", 0
             )
             if total_volume > 0:
-                # Normalize by graph's total volume
+
                 graph_total_volume = sum(
                     data.get("total_amount", 0) for _, _, data in graph.edges(data=True)
                 )
@@ -1108,28 +1027,23 @@ class NetworkCycleDetector:
 
         self.logger.info(f"Starting entity clustering using {clustering_method}")
 
-        # Extract features for clustering
         features = self._extract_entity_features(graph, cycles, centrality_metrics)
 
         if not features:
             return {"clusters": {}, "cluster_labels": {}, "cluster_statistics": {}}
 
-        # Prepare feature matrix
         entity_names = list(features.keys())
         feature_matrix = np.array(
             [list(features[entity].values()) for entity in entity_names]
         )
 
-        # Standardize features
         scaler = StandardScaler()
         feature_matrix_scaled = scaler.fit_transform(feature_matrix)
 
-        # Apply clustering algorithm
         cluster_labels = self._apply_clustering_algorithm(
             feature_matrix_scaled, clustering_method, n_clusters
         )
 
-        # Organize results
         clusters = defaultdict(list)
         cluster_label_map = {}
 
@@ -1138,12 +1052,10 @@ class NetworkCycleDetector:
             clusters[label].append(entity)
             cluster_label_map[entity] = label
 
-        # Calculate cluster statistics
         cluster_statistics = self._calculate_cluster_statistics(
             clusters, features, graph, cycles
         )
 
-        # Calculate clustering quality metrics
         quality_metrics = self._calculate_clustering_quality(
             feature_matrix_scaled, cluster_labels
         )
@@ -1176,28 +1088,27 @@ class NetworkCycleDetector:
             Array of cluster labels
         """
         if method == "dbscan":
-            # DBSCAN - density-based clustering
-            eps = 0.5  # Distance threshold
-            min_samples = max(2, int(len(feature_matrix) * 0.05))  # 5% of data points
+
+            eps = 0.5
+            min_samples = max(2, int(len(feature_matrix) * 0.05))
 
             clusterer = DBSCAN(eps=eps, min_samples=min_samples)
             labels = clusterer.fit_predict(feature_matrix)
 
         elif method == "kmeans":
-            # K-means clustering
+
             if n_clusters is None:
-                # Estimate optimal number of clusters using elbow method
+
                 n_clusters = min(8, max(2, int(np.sqrt(len(feature_matrix) / 2))))
 
             clusterer = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
             labels = clusterer.fit_predict(feature_matrix)
 
         elif method == "spectral":
-            # Spectral clustering
+
             if n_clusters is None:
                 n_clusters = min(8, max(2, int(np.sqrt(len(feature_matrix) / 2))))
 
-            # Adjust parameters for small datasets
             n_neighbors = (
                 min(3, len(feature_matrix) - 1) if len(feature_matrix) > 1 else 1
             )
@@ -1236,14 +1147,13 @@ class NetworkCycleDetector:
             ),
         }
 
-        # Calculate silhouette score if we have enough clusters and points
         if (
             quality_metrics["n_clusters"] > 1
             and len(feature_matrix) > quality_metrics["n_clusters"]
             and quality_metrics["noise_ratio"] < 1.0
         ):
             try:
-                # Filter out noise points for silhouette calculation
+
                 non_noise_mask = labels != -1
                 if np.sum(non_noise_mask) > 1:
                     silhouette = silhouette_score(
@@ -1281,7 +1191,6 @@ class NetworkCycleDetector:
         for node in graph.nodes():
             node_features = {}
 
-            # Centrality-based features
             metrics = centrality_metrics.get(node, {})
             node_features["betweenness_centrality"] = metrics.get("betweenness", 0.0)
             node_features["closeness_centrality"] = metrics.get("closeness", 0.0)
@@ -1290,14 +1199,12 @@ class NetworkCycleDetector:
             node_features["out_degree"] = metrics.get("out_degree", 0)
             node_features["total_degree"] = metrics.get("total_degree", 0)
 
-            # Cycle participation features
             cycle_participation = sum(1 for cycle in cycles if node in cycle.path)
             node_features["cycle_participation_count"] = cycle_participation
             node_features["cycle_participation_ratio"] = cycle_participation / max(
                 1, len(cycles)
             )
 
-            # Transaction volume features
             node_data = graph.nodes[node]
             node_features["total_outgoing_volume"] = node_data.get(
                 "total_outgoing", 0.0
@@ -1310,7 +1217,6 @@ class NetworkCycleDetector:
                 + node_features["total_incoming_volume"]
             )
 
-            # Transaction count features
             node_features["outgoing_transaction_count"] = len(
                 list(graph.successors(node))
             )
@@ -1322,16 +1228,14 @@ class NetworkCycleDetector:
                 + node_features["incoming_transaction_count"]
             )
 
-            # Network position features
             try:
-                # Calculate clustering coefficient (local connectivity)
+
                 node_features["clustering_coefficient"] = nx.clustering(
                     graph.to_undirected(), node
                 )
             except:
                 node_features["clustering_coefficient"] = 0.0
 
-            # Temporal features (if cycles have temporal data)
             cycle_dates = []
             for cycle in cycles:
                 if node in cycle.path and hasattr(cycle, "first_transaction_date"):
@@ -1343,9 +1247,7 @@ class NetworkCycleDetector:
                 node_features["last_cycle_date"] = cycle_dates.max().timestamp()
                 node_features["cycle_date_span"] = (
                     cycle_dates.max() - cycle_dates.min()
-                ).total_seconds() / (
-                    24 * 3600
-                )  # Convert to days
+                ).total_seconds() / (24 * 3600)
             else:
                 node_features["first_cycle_date"] = 0.0
                 node_features["last_cycle_date"] = 0.0
@@ -1377,21 +1279,17 @@ class NetworkCycleDetector:
             kmeans.fit(feature_matrix)
             inertias.append(kmeans.inertia_)
 
-        # Simple elbow detection - find the point with maximum curvature
         if len(inertias) >= 3:
-            # Calculate second derivative to find elbow
+
             second_derivatives = []
             for i in range(1, len(inertias) - 1):
                 second_deriv = inertias[i - 1] - 2 * inertias[i] + inertias[i + 1]
                 second_derivatives.append(second_deriv)
 
             if second_derivatives:
-                elbow_idx = (
-                    np.argmax(second_derivatives) + 1
-                )  # +1 because we start from index 1
+                elbow_idx = np.argmax(second_derivatives) + 1
                 return k_range[elbow_idx]
 
-        # Default to middle value if elbow detection fails
         return k_range[len(k_range) // 2]
 
     def _calculate_cluster_statistics(
@@ -1429,7 +1327,6 @@ class NetworkCycleDetector:
                 "external_connections": 0,
             }
 
-            # Calculate average centrality metrics
             centrality_sums = defaultdict(float)
             for entity in entities:
                 entity_features = features.get(entity, {})
@@ -1444,7 +1341,6 @@ class NetworkCycleDetector:
             for metric, total in centrality_sums.items():
                 stats["avg_centrality"][metric] = total / len(entities)
 
-            # Calculate total volume
             for entity in entities:
                 entity_features = features.get(entity, {})
                 stats["total_volume"] += entity_features.get(
@@ -1454,12 +1350,10 @@ class NetworkCycleDetector:
                     "total_incoming_volume", 0.0
                 )
 
-            # Count cycle involvement
             for cycle in cycles:
                 if any(entity in cycle.path for entity in entities):
                     stats["cycle_involvement"] += 1
 
-            # Count internal vs external connections
             entity_set = set(entities)
             for entity in entities:
                 for neighbor in graph.neighbors(entity):
@@ -1468,7 +1362,6 @@ class NetworkCycleDetector:
                     else:
                         stats["external_connections"] += 1
 
-            # Calculate cluster cohesion (internal connections / total possible internal connections)
             max_internal = len(entities) * (len(entities) - 1)
             stats["cohesion"] = stats["internal_connections"] / max(1, max_internal)
 
@@ -1487,7 +1380,6 @@ class NetworkCycleDetector:
         """Generate risk indicators based on network analysis."""
         indicators = []
 
-        # High centrality concentration
         centrality_scores = [
             m.get("betweenness", 0) for m in centrality_metrics.values()
         ]
@@ -1501,9 +1393,8 @@ class NetworkCycleDetector:
                 }
             )
 
-        # Rapid round trips
         rapid_cycles = [c for c in cycles if c.duration_days <= 1]
-        if len(rapid_cycles) > len(cycles) * 0.3:  # More than 30% are rapid
+        if len(rapid_cycles) > len(cycles) * 0.3:
             indicators.append(
                 {
                     "type": "rapid_round_trips",
@@ -1513,7 +1404,6 @@ class NetworkCycleDetector:
                 }
             )
 
-        # Large volume cycles
         if cycles:
             avg_cycle_volume = np.mean([c.total_amount for c in cycles])
             large_cycles = [c for c in cycles if c.total_amount > avg_cycle_volume * 3]
@@ -1527,10 +1417,9 @@ class NetworkCycleDetector:
                     }
                 )
 
-        # Synchronized patterns
         if temporal_patterns:
             sync_score = temporal_patterns.get("synchronization_score", 0)
-            if sync_score > 0.2:  # More than 20% synchronized
+            if sync_score > 0.2:
                 indicators.append(
                     {
                         "type": "synchronized_activity",
@@ -1558,7 +1447,6 @@ class NetworkCycleDetector:
             "risk_assessment": {},
         }
 
-        # Transaction summary
         in_edges = list(graph.in_edges(entity, data=True))
         out_edges = list(graph.out_edges(entity, data=True))
 
@@ -1582,7 +1470,6 @@ class NetworkCycleDetector:
             ),
         }
 
-        # Cycle involvement
         involving_cycles = [c for c in cycles if entity in c.path]
         profile["cycle_involvement"] = {
             "total_cycles": len(involving_cycles),
@@ -1604,7 +1491,6 @@ class NetworkCycleDetector:
             },
         }
 
-        # Risk assessment
         metrics = centrality_metrics.get(entity, {})
         risk_score = (
             metrics.get("betweenness", 0) * 0.4
@@ -1620,7 +1506,6 @@ class NetworkCycleDetector:
             "key_indicators": [],
         }
 
-        # Add specific risk indicators
         if metrics.get("betweenness", 0) > 0.1:
             profile["risk_assessment"]["key_indicators"].append(
                 "High betweenness centrality - acts as bridge"
@@ -1645,7 +1530,7 @@ class NetworkCycleDetector:
         """Analyze distribution of cycle lengths."""
         distribution = defaultdict(int)
         for cycle in cycles:
-            length = len(cycle.path) - 1  # Subtract 1 because start/end are same
+            length = len(cycle.path) - 1
             distribution[length] += 1
         return dict(distribution)
 
@@ -1696,7 +1581,6 @@ class NetworkCycleDetector:
             "flow_concentration": 0,
         }
 
-        # Calculate total flow and average transaction size
         all_amounts = []
         for _, _, data in graph.edges(data=True):
             for tx in data.get("transactions", []):
@@ -1706,7 +1590,7 @@ class NetworkCycleDetector:
 
         if all_amounts:
             patterns["avg_transaction_size"] = np.mean(all_amounts)
-            # Flow concentration (Gini coefficient approximation)
+
             sorted_amounts = sorted(all_amounts)
             n = len(sorted_amounts)
             patterns["flow_concentration"] = (
@@ -1726,7 +1610,6 @@ class NetworkCycleDetector:
         """Generate investigation recommendations based on analysis."""
         recommendations = []
 
-        # High-priority entities
         high_centrality_entities = [
             entity
             for entity, metrics in centrality_metrics.items()
@@ -1743,7 +1626,6 @@ class NetworkCycleDetector:
                 }
             )
 
-        # High-confidence cycles
         high_confidence_cycles = [c for c in cycles if c.confidence_score > 0.8]
         if high_confidence_cycles:
             recommendations.append(
@@ -1755,7 +1637,6 @@ class NetworkCycleDetector:
                 }
             )
 
-        # Synchronized patterns
         if (
             temporal_patterns
             and temporal_patterns.get("synchronization_score", 0) > 0.3
@@ -1769,7 +1650,6 @@ class NetworkCycleDetector:
                 }
             )
 
-        # Clustering insights
         if clustering_results:
             clusters = clustering_results.get("clusters", {})
             large_clusters = [c for c in clusters.values() if len(c) > 5]
@@ -1783,7 +1663,6 @@ class NetworkCycleDetector:
                     }
                 )
 
-        # Performance recommendations
         if graph.number_of_nodes() > 500:
             recommendations.append(
                 {
@@ -1822,7 +1701,6 @@ class NetworkCycleDetector:
             "volume_metrics": {},
         }
 
-        # Basic network metrics
         stats["basic_metrics"] = {
             "total_nodes": graph.number_of_nodes(),
             "total_edges": graph.number_of_edges(),
@@ -1837,10 +1715,9 @@ class NetworkCycleDetector:
             ),
         }
 
-        # Connectivity metrics
         if graph.number_of_nodes() > 0:
             try:
-                # Calculate average shortest path length for largest component
+
                 if nx.is_weakly_connected(graph):
                     undirected_graph = graph.to_undirected()
                     stats["connectivity_metrics"]["average_shortest_path_length"] = (
@@ -1853,7 +1730,7 @@ class NetworkCycleDetector:
                         undirected_graph
                     )
                 else:
-                    # Use largest weakly connected component
+
                     largest_wcc = max(nx.weakly_connected_components(graph), key=len)
                     subgraph = graph.subgraph(largest_wcc).to_undirected()
 
@@ -1872,7 +1749,6 @@ class NetworkCycleDetector:
                         stats["connectivity_metrics"]["diameter"] = 0
                         stats["connectivity_metrics"]["radius"] = 0
 
-                # Calculate clustering coefficient
                 undirected_graph = graph.to_undirected()
                 stats["connectivity_metrics"]["average_clustering_coefficient"] = (
                     nx.average_clustering(undirected_graph)
@@ -1886,7 +1762,6 @@ class NetworkCycleDetector:
                     "average_clustering_coefficient": 0.0,
                 }
 
-        # Cycle metrics
         stats["cycle_metrics"] = {
             "total_cycles_detected": len(cycles),
             "cycle_types": {
@@ -1903,16 +1778,13 @@ class NetworkCycleDetector:
         }
 
         if cycles:
-            # Cycle length distribution
-            cycle_lengths = [
-                len(set(cycle.path)) - 1 for cycle in cycles
-            ]  # Unique entities
+
+            cycle_lengths = [len(set(cycle.path)) - 1 for cycle in cycles]
             for length in set(cycle_lengths):
                 stats["cycle_metrics"]["cycle_length_distribution"][length] = (
                     cycle_lengths.count(length)
                 )
 
-            # Average metrics
             stats["cycle_metrics"]["average_cycle_confidence"] = sum(
                 cycle.confidence_score for cycle in cycles
             ) / len(cycles)
@@ -1923,7 +1795,6 @@ class NetworkCycleDetector:
                 cycle.duration_days for cycle in cycles
             ) / len(cycles)
 
-        # Centrality summary
         if centrality_metrics:
             centrality_values = {
                 "betweenness": [
@@ -1954,7 +1825,6 @@ class NetworkCycleDetector:
                         "median": np.median(values),
                     }
 
-        # Temporal metrics
         if cycles:
             cycle_dates = []
             for cycle in cycles:
@@ -1976,7 +1846,6 @@ class NetworkCycleDetector:
                     / max(1, (cycle_dates.max() - cycle_dates.min()).days),
                 }
 
-        # Volume metrics
         total_graph_volume = 0.0
         volume_distribution = []
 
@@ -2029,7 +1898,6 @@ class NetworkCycleDetector:
             "recommendations": [],
         }
 
-        # Executive summary
         summary["executive_summary"] = {
             "total_entities_analyzed": graph.number_of_nodes(),
             "total_transactions_analyzed": graph.number_of_edges(),
@@ -2038,7 +1906,6 @@ class NetworkCycleDetector:
             "analysis_timestamp": datetime.now().isoformat(),
         }
 
-        # Identify high-risk entities
         high_risk_entities = []
         if anomaly_scores:
             high_risk_threshold = 0.7
@@ -2049,9 +1916,8 @@ class NetworkCycleDetector:
             ]
             summary["executive_summary"]["high_risk_entities"] = len(high_risk_entities)
 
-        # Key findings
         if cycles:
-            # Most complex cycles
+
             complex_cycles = [c for c in cycles if len(set(c.path)) > 3]
             if complex_cycles:
                 summary["key_findings"].append(
@@ -2063,7 +1929,6 @@ class NetworkCycleDetector:
                     }
                 )
 
-            # High-confidence cycles
             high_confidence_cycles = [c for c in cycles if c.confidence_score >= 0.8]
             if high_confidence_cycles:
                 summary["key_findings"].append(
@@ -2075,13 +1940,10 @@ class NetworkCycleDetector:
                     }
                 )
 
-            # Large volume cycles
             total_cycle_volume = sum(cycle.total_amount for cycle in cycles)
             if total_cycle_volume > 0:
                 large_volume_cycles = [
-                    c
-                    for c in cycles
-                    if c.total_amount >= total_cycle_volume * 0.1  # 10% of total volume
+                    c for c in cycles if c.total_amount >= total_cycle_volume * 0.1
                 ]
                 if large_volume_cycles:
                     summary["key_findings"].append(
@@ -2096,7 +1958,6 @@ class NetworkCycleDetector:
                         }
                     )
 
-        # Suspicious patterns
         if temporal_patterns and temporal_patterns.get("synchronized_cycles"):
             summary["suspicious_patterns"].append(
                 {
@@ -2109,7 +1970,7 @@ class NetworkCycleDetector:
             )
 
         if clustering_results and clustering_results.get("clusters"):
-            # Identify suspicious clusters
+
             suspicious_clusters = []
             for cluster_id, cluster_stats in clustering_results.get(
                 "cluster_statistics", {}
@@ -2138,7 +1999,6 @@ class NetworkCycleDetector:
                     }
                 )
 
-        # Entity analysis
         hub_entities = self.identify_hub_entities(
             graph, centrality_metrics=centrality_metrics
         )
@@ -2146,14 +2006,13 @@ class NetworkCycleDetector:
         summary["entity_analysis"] = {
             "hub_entities": {
                 "count": len(hub_entities),
-                "entities": hub_entities[:10],  # Top 10 hubs
+                "entities": hub_entities[:10],
                 "description": "Entities that facilitate multiple transactions and round trips",
             },
             "high_centrality_entities": [],
             "frequent_cycle_participants": [],
         }
 
-        # High centrality entities
         if centrality_metrics:
             high_centrality = [
                 (entity, metrics.get("betweenness", 0) + metrics.get("pagerank", 0))
@@ -2166,11 +2025,10 @@ class NetworkCycleDetector:
                 for entity, score in high_centrality[:10]
             ]
 
-        # Frequent cycle participants
         if cycles:
             entity_cycle_counts = defaultdict(int)
             for cycle in cycles:
-                for entity in set(cycle.path):  # Unique entities in cycle
+                for entity in set(cycle.path):
                     entity_cycle_counts[entity] += 1
 
             frequent_participants = sorted(
@@ -2182,7 +2040,6 @@ class NetworkCycleDetector:
                 for entity, count in frequent_participants
             ]
 
-        # Risk assessment
         risk_factors = []
         risk_score = 0.0
 
@@ -2203,7 +2060,7 @@ class NetworkCycleDetector:
             risk_factors.append("Significant temporal synchronization in transactions")
             risk_score += 0.3
 
-        if len(hub_entities) > graph.number_of_nodes() * 0.1:  # More than 10% are hubs
+        if len(hub_entities) > graph.number_of_nodes() * 0.1:
             risk_factors.append("High concentration of hub entities")
             risk_score += 0.2
 
@@ -2217,7 +2074,6 @@ class NetworkCycleDetector:
             "risk_factors": risk_factors,
         }
 
-        # Recommendations
         recommendations = []
 
         if len(cycles) > 0:
@@ -2235,7 +2091,7 @@ class NetworkCycleDetector:
                     "priority": "high",
                     "action": "review_high_risk_entities",
                     "description": f"Conduct detailed review of {len(high_risk_entities)} high-risk entities",
-                    "entities": high_risk_entities[:5],  # Top 5 for immediate action
+                    "entities": high_risk_entities[:5],
                 }
             )
 
@@ -2297,22 +2153,17 @@ class NetworkCycleDetector:
             "recommendations": [],
         }
 
-        # Generate pattern summary
         pattern_summary = self.generate_pattern_summary(
-            # Note: We would need the graph here, but it's not stored in NetworkAnalysisResults
-            # This is a design limitation that should be addressed
-            graph=nx.DiGraph(),  # Placeholder
+            graph=nx.DiGraph(),
             cycles=analysis_results.detected_cycles,
             centrality_metrics=analysis_results.centrality_metrics,
             anomaly_scores=analysis_results.anomaly_scores,
         )
 
-        # Populate report sections
         report["executive_summary"] = pattern_summary["executive_summary"]
         report["risk_assessment"] = pattern_summary["risk_assessment"]
         report["recommendations"] = pattern_summary["recommendations"]
 
-        # Network overview
         report["network_overview"] = {
             "total_entities": len(analysis_results.centrality_metrics),
             "hub_entities_count": len(analysis_results.hub_entities),
@@ -2320,7 +2171,6 @@ class NetworkCycleDetector:
             "network_statistics": analysis_results.network_statistics,
         }
 
-        # Cycle analysis
         cycles_by_type = defaultdict(list)
         for cycle in analysis_results.detected_cycles:
             cycles_by_type[cycle.cycle_type].append(cycle)
@@ -2343,7 +2193,7 @@ class NetworkCycleDetector:
         }
 
         if include_detailed_cycles:
-            # Include top cycles by confidence score
+
             top_cycles = sorted(
                 analysis_results.detected_cycles,
                 key=lambda x: x.confidence_score,
@@ -2365,7 +2215,6 @@ class NetworkCycleDetector:
                 for cycle in top_cycles
             ]
 
-        # Entity analysis
         report["entity_analysis"] = {
             "hub_entities": analysis_results.hub_entities,
             "high_anomaly_entities": [
@@ -2374,14 +2223,12 @@ class NetworkCycleDetector:
                     analysis_results.anomaly_scores.items(),
                     key=lambda x: x[1],
                     reverse=True,
-                )[
-                    :20
-                ]  # Top 20 by anomaly score
+                )[:20]
             ],
         }
 
         if include_entity_details:
-            # Add detailed centrality information
+
             report["entity_analysis"]["centrality_details"] = {
                 entity: metrics
                 for entity, metrics in analysis_results.centrality_metrics.items()
@@ -2413,10 +2260,9 @@ class NetworkCycleDetector:
             "time_clustering_score": 0.0,
         }
 
-        # Get all outgoing connections from central entity
         outgoing_edges = list(graph.out_edges(central_entity, data=True))
 
-        if len(outgoing_edges) < 3:  # Need at least 3 connections for smurfing
+        if len(outgoing_edges) < 3:
             return analysis
 
         smurf_candidates = []
@@ -2429,13 +2275,11 @@ class NetworkCycleDetector:
             if not transactions:
                 continue
 
-            # Check if target behaves like a smurf (small, consistent amounts)
             target_amounts = [tx.get("amount", 0) for tx in transactions]
             target_volume = sum(target_amounts)
 
-            # Smurf characteristics: multiple small transactions under thresholds
             under_threshold = sum(1 for amt in target_amounts if amt < 10000)
-            if under_threshold > 0 and target_volume < 50000:  # Small total volume
+            if under_threshold > 0 and target_volume < 50000:
                 smurf_candidates.append(
                     {
                         "entity": target,
@@ -2449,12 +2293,11 @@ class NetworkCycleDetector:
                 total_volume += target_volume
                 all_amounts.extend(target_amounts)
 
-                # Collect timestamps for temporal analysis
                 for tx in transactions:
                     if tx.get("date"):
                         all_timestamps.append(tx["date"])
 
-        if len(smurf_candidates) >= 3:  # Minimum for smurfing network
+        if len(smurf_candidates) >= 3:
             analysis["is_potential_smurf_hub"] = True
             analysis["smurf_accounts"] = smurf_candidates
             analysis["total_smurf_volume"] = total_volume
@@ -2462,19 +2305,17 @@ class NetworkCycleDetector:
                 sum(all_amounts) / len(all_amounts) if all_amounts else 0
             )
 
-            # Calculate coordination score based on amount consistency
             if all_amounts:
                 amount_cv = pd.Series(all_amounts).std() / pd.Series(all_amounts).mean()
                 analysis["coordination_score"] = max(0.0, 1.0 - amount_cv)
 
-            # Calculate temporal clustering (are transactions coordinated in time?)
             if all_timestamps:
                 timestamps = pd.to_datetime(all_timestamps)
-                # Check if transactions cluster within short time windows
+
                 time_diffs = timestamps.sort_values().diff().dropna()
                 short_intervals = sum(
                     1 for diff in time_diffs if diff.total_seconds() < 3600
-                )  # Within 1 hour
+                )
                 analysis["time_clustering_score"] = (
                     short_intervals / len(time_diffs) if len(time_diffs) > 0 else 0
                 )
@@ -2503,14 +2344,12 @@ class NetworkCycleDetector:
             "velocity_score": 0.0,
         }
 
-        # Get incoming and outgoing transactions
         incoming_edges = list(graph.in_edges(entity, data=True))
         outgoing_edges = list(graph.out_edges(entity, data=True))
 
         if not incoming_edges or not outgoing_edges:
             return analysis
 
-        # Collect all transactions with timestamps
         incoming_txs = []
         outgoing_txs = []
 
@@ -2527,19 +2366,16 @@ class NetworkCycleDetector:
         if not incoming_txs or not outgoing_txs:
             return analysis
 
-        # Sort by timestamp
         incoming_txs.sort(key=lambda x: x["date"])
         outgoing_txs.sort(key=lambda x: x["date"])
 
         rapid_sequences = []
         dwell_times = []
 
-        # Find rapid in-out sequences
         for in_tx in incoming_txs:
             in_time = pd.to_datetime(in_tx["date"])
             in_amount = in_tx.get("amount", 0)
 
-            # Look for outgoing transactions shortly after
             for out_tx in outgoing_txs:
                 out_time = pd.to_datetime(out_tx["date"])
                 out_amount = out_tx.get("amount", 0)
@@ -2548,12 +2384,12 @@ class NetworkCycleDetector:
                     time_diff_hours = (out_time - in_time).total_seconds() / 3600
 
                     if time_diff_hours <= time_threshold_hours:
-                        # Check if amounts are similar (potential layering)
+
                         amount_similarity = 1.0 - abs(in_amount - out_amount) / max(
                             in_amount, out_amount
                         )
 
-                        if amount_similarity > 0.8:  # 80% similar amounts
+                        if amount_similarity > 0.8:
                             rapid_sequences.append(
                                 {
                                     "in_amount": in_amount,
@@ -2571,7 +2407,6 @@ class NetworkCycleDetector:
             analysis["rapid_sequences"] = rapid_sequences
             analysis["avg_dwell_time_hours"] = sum(dwell_times) / len(dwell_times)
 
-            # Calculate velocity score (lower dwell time = higher velocity = more suspicious)
             max_dwell = max(dwell_times)
             analysis["velocity_score"] = 1.0 - (
                 analysis["avg_dwell_time_hours"] / max(max_dwell, time_threshold_hours)
@@ -2597,23 +2432,20 @@ class NetworkCycleDetector:
             "coordination_indicators": [],
         }
 
-        # Analyze each entity for various patterns
         for entity in graph.nodes():
-            # Check for smurfing hub behavior
+
             smurf_analysis = self._detect_smurfing_network(graph, entity)
             if smurf_analysis["is_potential_smurf_hub"]:
                 patterns["smurfing_networks"].append(
                     {"hub_entity": entity, "analysis": smurf_analysis}
                 )
 
-            # Check for rapid movement patterns
             rapid_analysis = self._detect_rapid_movement_pattern(graph, entity)
             if rapid_analysis["has_rapid_movement"]:
                 patterns["rapid_movement_entities"].append(
                     {"entity": entity, "analysis": rapid_analysis}
                 )
 
-            # Check for threshold avoidance in outgoing transactions
             outgoing_edges = list(graph.out_edges(entity, data=True))
             all_amounts = []
             for _, _, edge_data in outgoing_edges:
