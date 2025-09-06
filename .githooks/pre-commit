@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run ruff on staged Python files under backend/
+set -euo pipefail
+
+# Collect staged files (Added, Copied, Modified)
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM)
+
+if [ ${#staged[@]} -eq 0 ]; then
+  # nothing staged
+  exit 0
+fi
+
+# Filter for Python files in backend/
+files=()
+for f in "${staged[@]}"; do
+  case "$f" in
+    backend/*.py)
+      files+=("$f")
+      ;;
+  esac
+done
+
+if [ ${#files[@]} -eq 0 ]; then
+  # no backend python files staged
+  exit 0
+fi
+
+if ! command -v ruff >/dev/null 2>&1; then
+  echo "ruff is not installed. Install it (e.g. 'pip install ruff') or ensure it's on PATH." >&2
+  exit 1
+fi
+
+echo "Running ruff --fix on staged backend Python files..."
+# Try to auto-fix issues (formatting & fixes). If ruff fixes files, restage them.
+ruff check --fix "${files[@]}"
+rc=$?
+if [ $rc -ne 0 ]; then
+  echo "ruff could not fully fix all issues. Run 'ruff check ${files[*]}' or fix locally." >&2
+  # still attempt to add any files that were modified by ruff
+  git add -- "${files[@]}" || true
+  exit $rc
+fi
+
+# Restage files in case ruff modified them
+git add -- "${files[@]}"
+echo "ruff fixed/checked staged backend files and changes were restaged."
+exit 0
