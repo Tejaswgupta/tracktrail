@@ -1,0 +1,4 @@
+gstin,period,output_tax,itc_availed,credit_utilized,cash_paid,itc_reversed
+GSTIN4,2023-01,300,3000,2000,100,500
+GSTIN4,2023-02,800,1000,800,0,0
+GSTIN4,2023-03,200,0,200,0,0

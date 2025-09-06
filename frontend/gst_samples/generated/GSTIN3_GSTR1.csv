@@ -1,0 +1,4 @@
+supplier_gstin,recipient_gstin,invoice_no,invoice_date,igst_amount,cgst_amount,sgst_amount
+GSTIN3,GSTIN5,INV004,2023-01-30,3000,1500,1500
+GSTIN3,GSTIN5,INV008,2023-02-15,2500,0,0
+GSTIN3,GSTIN5,INV013,2023-03-10,3500,0,0
