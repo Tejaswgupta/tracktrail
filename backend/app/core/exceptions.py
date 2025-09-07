@@ -9,12 +9,12 @@ from fastapi import HTTPException, status
 
 class APIException(Exception):
     """Base exception class for all API-related errors."""
-    
+
     def __init__(
         self,
         message: str,
         error_code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ):
         self.message = message
         self.error_code = error_code or self.__class__.__name__
@@ -24,7 +24,7 @@ class APIException(Exception):
 
 class ValidationError(APIException):
     """Raised when request validation fails."""
-    
+
     def __init__(
         self,
         message: str = "Request validation failed",
@@ -37,7 +37,7 @@ class ValidationError(APIException):
 
 class EntityNotFoundError(APIException):
     """Raised when requested entity does not exist."""
-    
+
     def __init__(
         self,
         message: str = "Entity not found",
@@ -50,7 +50,7 @@ class EntityNotFoundError(APIException):
 
 class DatabaseError(APIException):
     """Raised when database operations fail."""
-    
+
     def __init__(
         self,
         message: str = "Database operation failed",
@@ -63,7 +63,7 @@ class DatabaseError(APIException):
 
 class AnalysisError(APIException):
     """Raised when analysis processing fails."""
-    
+
     def __init__(
         self,
         message: str = "Analysis processing failed",
@@ -76,7 +76,7 @@ class AnalysisError(APIException):
 
 class ServiceUnavailableError(APIException):
     """Raised when service is temporarily unavailable."""
-    
+
     def __init__(
         self,
         message: str = "Service temporarily unavailable",
@@ -89,7 +89,7 @@ class ServiceUnavailableError(APIException):
 
 class RateLimitError(APIException):
     """Raised when rate limit is exceeded."""
-    
+
     def __init__(
         self,
         message: str = "Rate limit exceeded",
@@ -102,18 +102,14 @@ class RateLimitError(APIException):
 
 class AuthenticationError(APIException):
     """Raised when authentication fails."""
-    
-    def __init__(
-        self,
-        message: str = "Authentication failed",
-        **kwargs
-    ):
+
+    def __init__(self, message: str = "Authentication failed", **kwargs):
         super().__init__(message, "AUTHENTICATION_ERROR", {}, **kwargs)
 
 
 class AuthorizationError(APIException):
     """Raised when authorization fails."""
-    
+
     def __init__(
         self,
         message: str = "Insufficient permissions",
@@ -124,10 +120,9 @@ class AuthorizationError(APIException):
         super().__init__(message, "AUTHORIZATION_ERROR", details, **kwargs)
 
 
-# HTTP Exception mapping for FastAPI
 def create_http_exception(exc: APIException) -> HTTPException:
     """Convert APIException to FastAPI HTTPException with appropriate status code."""
-    
+
     status_code_mapping = {
         ValidationError: status.HTTP_422_UNPROCESSABLE_ENTITY,
         EntityNotFoundError: status.HTTP_404_NOT_FOUND,
@@ -138,16 +133,17 @@ def create_http_exception(exc: APIException) -> HTTPException:
         AuthenticationError: status.HTTP_401_UNAUTHORIZED,
         AuthorizationError: status.HTTP_403_FORBIDDEN,
     }
-    
-    status_code = status_code_mapping.get(type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    # For 5xx errors, don't expose internal details
+
+    status_code = status_code_mapping.get(
+        type(exc), status.HTTP_500_INTERNAL_SERVER_ERROR
+    )
+
     if status_code >= 500:
         detail = {
             "success": False,
             "error_code": exc.error_code,
             "message": "Internal server error" if status_code == 500 else exc.message,
-            "timestamp": None  # Will be set by error handler
+            "timestamp": None,
         }
     else:
         detail = {
@@ -155,13 +151,12 @@ def create_http_exception(exc: APIException) -> HTTPException:
             "error_code": exc.error_code,
             "message": exc.message,
             "details": exc.details,
-            "timestamp": None  # Will be set by error handler
+            "timestamp": None,
         }
-    
+
     return HTTPException(status_code=status_code, detail=detail)
 
 
-# Exception handler functions for FastAPI
 async def validation_exception_handler(request, exc: ValidationError):
     """Handle validation errors."""
     return create_http_exception(exc)
@@ -190,7 +185,7 @@ async def service_unavailable_exception_handler(request, exc: ServiceUnavailable
 async def rate_limit_exception_handler(request, exc: RateLimitError):
     """Handle rate limit errors."""
     http_exc = create_http_exception(exc)
-    # Add Retry-After header for rate limit errors
+
     if exc.details.get("retry_after"):
         http_exc.headers = {"Retry-After": str(exc.details["retry_after"])}
     return http_exc
@@ -211,7 +206,6 @@ async def generic_api_exception_handler(request, exc: APIException):
     return create_http_exception(exc)
 
 
-# Exception handler registry for easy registration
 EXCEPTION_HANDLERS = {
     ValidationError: validation_exception_handler,
     EntityNotFoundError: entity_not_found_exception_handler,

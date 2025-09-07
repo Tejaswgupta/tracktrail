@@ -11,9 +11,8 @@ from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.analysis import router as analysis_router
 from app.api.v1.endpoints.pdf import router as pdf_router
 
-# Create the main API v1 router with version prefix
 api_router = APIRouter(
-    prefix="",  # No prefix here since we handle it in main.py
+    prefix="",
     responses={
         404: {"description": "Not found"},
         422: {"description": "Validation Error"},
@@ -22,7 +21,6 @@ api_router = APIRouter(
     },
 )
 
-# Include PDF extraction endpoints under v1
 api_router.include_router(
     pdf_router,
     prefix="/api/v1",
@@ -34,7 +32,6 @@ api_router.include_router(
     },
 )
 
-# Include health endpoints (at root level for system monitoring)
 api_router.include_router(
     health_router,
     tags=["Health"],
@@ -44,7 +41,6 @@ api_router.include_router(
     },
 )
 
-# Include analysis endpoints with v1 prefix for proper API versioning
 api_router.include_router(
     analysis_router,
     prefix="/api/v1",
@@ -58,7 +54,6 @@ api_router.include_router(
     },
 )
 
-# Router metadata for documentation
 router_info = {
     "version": "1.0",
     "description": "Financial Analysis API v1 - Comprehensive transaction analysis services",

@@ -6,6 +6,7 @@ import CashFlowAnalysisTab from "./aml/CashFlowAnalysisTab";
 import RapidMovementDetectionTab from "./aml/RapidMovementDetectionTab";
 import RoundTrippingDetectionTab from "./aml/RoundTrippingDetectionTab";
 import CircularTradingDetectionTab from "./aml/CircularTradingDetectionTab";
+import MuleAccountDetectionTab from "./aml/MuleAccountDetectionTab"; 
 
 interface AMLTabProps {
   caseId: string;
@@ -31,6 +32,7 @@ export default function AMLTab({ caseId }: AMLTabProps) {
     | "round_tripping"
     | "rapid_movement"
     | "cash_flow"
+    | "mule_account"
   >("circular_trading");
   const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
   const [entityDetails, setEntityDetails] = useState<EntityDetails[]>([]);
@@ -102,6 +104,26 @@ export default function AMLTab({ caseId }: AMLTabProps) {
             strokeLinejoin="round"
             strokeWidth={2}
             d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+          />
+        </svg>
+      ),
+    },
+    {
+      key: "mule_account",
+      label: "Mule Account", 
+      description: "Detect pass-through money laundering patterns and suspicious account behavior",
+      icon: (
+        <svg
+          className="w-5 h-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
           />
         </svg>
       ),
@@ -472,6 +494,14 @@ export default function AMLTab({ caseId }: AMLTabProps) {
                 selectedEntityIds={selectedEntityIds}
               />
             )}
+
+            {activeDetectionTab === "mule_account" && (
+        <MuleAccountDetectionTab
+          caseId={caseId}
+          amlMetadata={amlMetadata}
+          selectedEntityIds={selectedEntityIds}
+        />
+           )}
             
             {activeDetectionTab === "round_tripping" && (
               <RoundTrippingDetectionTab

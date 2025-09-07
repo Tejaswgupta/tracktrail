@@ -1,11 +1,3 @@
-/**
- * AML Backend API Client Service
- *
- * This service provides a consolidated client interface for all backend AML analysis endpoints.
- * It uses axios for HTTP requests with retry logic, error handling, and data transformation.
- */
-
-import axios, { AxiosInstance, AxiosError } from 'axios';
 import type {
   AIResponse,
   AMLError,
@@ -29,7 +21,6 @@ import type {
   TransferPatternResult,
 } from "@/types/amlBackend";
 
-// Configuration for the API client
 interface AMLBackendClientConfig {
   baseUrl: string;
   timeout: number;
@@ -38,15 +29,13 @@ interface AMLBackendClientConfig {
   authToken?: string;
 }
 
-// Default configuration
 const DEFAULT_CONFIG: AMLBackendClientConfig = {
   baseUrl: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000",
-  timeout: 180000, // 3 minutes (matches your backend timeout requirements)
+  timeout: 180000,
   maxRetries: 3,
-  retryDelay: 1000, // 1 second
+  retryDelay: 1000,
 };
 
-// Error messages mapping
 const ERROR_MESSAGES: Record<AMLErrorCode, string> = {
   VALIDATION_ERROR: "Please check your input parameters and try again.",
   ENTITY_NOT_FOUND: "The selected entity could not be found.",
@@ -55,9 +44,6 @@ const ERROR_MESSAGES: Record<AMLErrorCode, string> = {
   INTERNAL_ERROR: "An unexpected error occurred. Please try again later.",
 };
 
-/**
- * Custom error class for AML API errors
- */
 class AMLBackendError extends Error implements AMLError {
   public code: AMLErrorCode;
   public details?: Record<string, any>;
@@ -74,114 +60,119 @@ class AMLBackendError extends Error implements AMLError {
   }
 }
 
-/**
- * AML Backend API Client (Consolidated)
- */
 export class AMLBackendClient {
   private config: AMLBackendClientConfig;
-  private axiosInstance: AxiosInstance;
 
   constructor(config?: Partial<AMLBackendClientConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    
-    // Create axios instance with configuration
-    this.axiosInstance = axios.create({
-      baseURL: `${this.config.baseUrl}/api/v1`,
-      timeout: this.config.timeout,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    this.setupInterceptors();
   }
 
-  /**
-   * Setup axios interceptors for logging and auth
-   */
-  private setupInterceptors(): void {
-    // Request interceptor
-    this.axiosInstance.interceptors.request.use(
-      (config) => {
-        // Add authentication if available
-        if (this.config.authToken) {
-          config.headers.Authorization = `Bearer ${this.config.authToken}`;
-        }
-        
-        console.log('AML API Request:', config.method?.toUpperCase(), config.url);
-        return config;
-      },
-      (error) => {
-        return Promise.reject(error);
-      }
-    );
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+    timeout: number
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    // Response interceptor
-    this.axiosInstance.interceptors.response.use(
-      (response) => {
-        console.log('AML API Response:', response.status, response.config.url);
-        return response;
-      },
-      (error) => {
-        console.error('AML API Error:', error.response?.status, error.response?.data);
-        return Promise.reject(error);
-      }
-    );
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
   }
 
-  /**
-   * Make HTTP request with retry logic and error handling
-   */
   private async makeRequest<T>(
     endpoint: string,
     data: any
   ): Promise<BackendAnalysisResponse<T>> {
     let lastError: Error | null = null;
+    const url = `${this.config.baseUrl}/api/v1${endpoint}`;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (this.config.authToken) {
+      headers.Authorization = `Bearer ${this.config.authToken}`;
+    }
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       try {
-        const response = await this.axiosInstance.post<BackendAnalysisResponse<T>>(endpoint, data);
-        return response.data;
-      } catch (error) {
-        lastError = error as Error;
+        console.log('AML API Request:', 'POST', url);
 
-        // Handle axios errors
-        if (axios.isAxiosError(error)) {
-          if (error.response) {
-            const errorData: BackendErrorResponse = error.response.data;
-            throw new AMLBackendError(
-              errorData.error_code as AMLErrorCode,
-              errorData.message,
-              errorData.details
-            );
+        const response = await this.fetchWithTimeout(
+          url,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(data),
+          },
+          this.config.timeout
+        );
+
+        console.log('AML API Response:', response.status, url);
+
+        if (!response.ok) {
+          const errorData: BackendErrorResponse = await response.json();
+          throw new AMLBackendError(
+            errorData.error_code as AMLErrorCode,
+            errorData.message,
+            errorData.details
+          );
+        }
+
+        const result: BackendAnalysisResponse<T> = await response.json();
+        return result;
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          lastError = error;
+
+          if (error instanceof TypeError && error.message.includes('fetch')) {
+            console.error('AML API Network Error:', error.message);
+          } else if ((error as any).name === 'AbortError') {
+            lastError = new Error(`Request timeout after ${this.config.timeout}ms`);
+          } else {
+            console.error('AML API Error:', error);
           }
-        }
 
-        // Don't retry on validation errors or client errors
-        if (
-          error instanceof AMLBackendError &&
-          (error.code === "VALIDATION_ERROR" || error.code === "ENTITY_NOT_FOUND")
-        ) {
-          throw error;
-        }
+          if (
+            error instanceof AMLBackendError &&
+            (error.code === "VALIDATION_ERROR" || error.code === "ENTITY_NOT_FOUND")
+          ) {
+            throw error;
+          }
 
-        // Don't retry on the last attempt
-        if (attempt === this.config.maxRetries) {
-          break;
-        }
+          if (attempt === this.config.maxRetries) {
+            break;
+          }
 
-        // Wait before retrying with exponential backoff
-        const delay = this.config.retryDelay * Math.pow(2, attempt);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+          const delay = this.config.retryDelay * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          lastError = new Error('Unknown error occurred');
+          console.error('AML API Unknown Error:', error);
+          
+          if (attempt === this.config.maxRetries) {
+            break;
+          }
+
+          const delay = this.config.retryDelay * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
       }
     }
 
-    // If we get here, all retries failed
     if (lastError instanceof AMLBackendError) {
       throw lastError;
     }
 
-    // Handle network or other errors
     throw new AMLBackendError(
       "INTERNAL_ERROR",
       `Request failed after ${this.config.maxRetries + 1} attempts: ${
@@ -190,8 +181,6 @@ export class AMLBackendClient {
       { originalError: lastError?.message || "Unknown error" }
     );
   }
-
-  // API Methods
 
   async analyzeAIllm(params: BackendAnalysisRequest): Promise<BackendAnalysisResponse<AIResponse>> {
     return this.makeRequest<AIResponse>("/analyze/ai-llm", params);
@@ -209,11 +198,6 @@ export class AMLBackendClient {
     return this.makeRequest<MuleAccountResult>("/analyze/mule-accounts", params);
   }
 
-  /**
-   * Detect cycles and round trips for specified entities
-   * - Single entity: Round trip detection
-   * - Multiple entities: Network cycle detection
-   */
   async analyzeCycles(params: CycleDetectionRequest): Promise<BackendAnalysisResponse<CycleDetectionResult>> {
     return this.makeRequest<CycleDetectionResult>("/analyze/cycles", params);
   }
@@ -230,8 +214,6 @@ export class AMLBackendClient {
     return this.makeRequest<TransferPatternResult>("/analyze/transfer-patterns", params);
   }
 
-  // Configuration and utility methods
-
   setAuthToken(token: string): void {
     this.config.authToken = token;
   }
@@ -246,21 +228,34 @@ export class AMLBackendClient {
 
   async healthCheck(): Promise<{ status: string; timestamp: string }> {
     try {
-      const response = await this.axiosInstance.get("/health");
-      return response.data;
-    } catch (error) {
+      const response = await this.fetchWithTimeout(
+        `${this.config.baseUrl}/api/v1/health`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(this.config.authToken && { Authorization: `Bearer ${this.config.authToken}` }),
+          },
+        },
+        this.config.timeout
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new AMLBackendError(
         "INTERNAL_ERROR",
         "Backend service is not available",
-        { originalError: (error as Error).message }
+        { originalError: errorMessage }
       );
     }
   }
 }
 
-// Export a default instance
 export const amlBackendClient = new AMLBackendClient();
-
-// Export the error class and types
 export { AMLBackendError };
 export type { AMLBackendClientConfig };
