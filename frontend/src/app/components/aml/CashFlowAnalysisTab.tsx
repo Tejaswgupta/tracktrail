@@ -36,7 +36,6 @@ interface CashFlowMetrics {
     transactionCount: number;
     avgAmount: number;
   }>;
-  // New fields from API
   largeCashCount: number;
   largeCashThreshold: number;
   amountPatterns: {
@@ -74,51 +73,37 @@ export default function CashFlowAnalysisTab({
   selectedEntityIds,
 }: CashFlowAnalysisTabProps) {
   const [loading, setLoading] = useState(true);
-
-  const [cashFlowMetrics, setCashFlowMetrics] =
-    useState<CashFlowMetrics | null>(null);
-  const [suspiciousPatterns, setSuspiciousPatterns] = useState<
-    CashFlowPattern[]
-  >([]);
+  const [cashFlowMetrics, setCashFlowMetrics] = useState<CashFlowMetrics | null>(null);
+  const [suspiciousPatterns, setSuspiciousPatterns] = useState<CashFlowPattern[]>([]);
   const [analysisComplete, setAnalysisComplete] = useState(false);
-  const [dateFrom, setDateFrom] = useState<string>(
-    amlMetadata.dateRange.from || ""
-  );
+  const [dateFrom, setDateFrom] = useState<string>(amlMetadata.dateRange.from || "");
   const [dateTo, setDateTo] = useState<string>(amlMetadata.dateRange.to || "");
   const [threshold, setThreshold] = useState<number>(50000);
-  const [keywordsInput, setKeywordsInput] = useState<string>(
-    "CASH, ATM, WITHDRAWAL, CHQ"
-  );
+  const [keywordsInput, setKeywordsInput] = useState<string>("CASH, ATM, WITHDRAWAL, CHQ");
   const [dateError, setDateError] = useState<string | null>(null);
 
-  // Map backend risk score [0-1] to UI risk level
   const riskLevelFromScore = (score: number): "LOW" | "MEDIUM" | "HIGH" => {
     if (score >= 0.7) return "HIGH";
     if (score >= 0.4) return "MEDIUM";
     return "LOW";
   };
 
-  // Transform backend CashFlowResult into UI-friendly structures
   const mapBackendToUI = (
     backend: any,
     totalTxCount: number
   ): { metrics: CashFlowMetrics; patterns: CashFlowPattern[] } => {
-    // Allow alternate backend shapes using safe fallbacks
     const results = (backend?.results ?? {}) as any;
 
     const inflow = Number(results.total_cash_in ?? 0);
     const outflow = Number(results.total_cash_out ?? 0);
     const cashTxCount = Number(results.total_cash_transactions ?? 0);
 
-    // Prefer daily patterns; fall back to monthly frequency counts
     const dailyPatterns =
       results.temporal_patterns?.daily_patterns ??
       results.frequency_analysis?.monthly_frequency ??
       {};
 
-    const dailyCashFlow: CashFlowMetrics["dailyCashFlow"] = Object.keys(
-      dailyPatterns
-    )
+    const dailyCashFlow: CashFlowMetrics["dailyCashFlow"] = Object.keys(dailyPatterns)
       .sort()
       .map((date) => ({
         date,
@@ -128,7 +113,6 @@ export default function CashFlowAnalysisTab({
         transactionCount: Number(dailyPatterns[date] ?? 0),
       }));
 
-    // Map large cash transactions (if provided) into Transaction[] for the table
     const largeTxRaw: any[] = Array.isArray(results.large_transactions)
       ? results.large_transactions
       : [];
@@ -156,7 +140,6 @@ export default function CashFlowAnalysisTab({
       };
     });
 
-    // Additional fields from API
     const largeCashCount = Number(results.large_cash_transactions ?? 0);
     const largeCashThreshold = Number(results.large_cash_threshold ?? 0);
 
@@ -211,16 +194,14 @@ export default function CashFlowAnalysisTab({
       riskIndicators,
     };
 
-    const patterns: any[] = (results.cash_patterns || []).map(
-      (p: any) => ({
-        pattern: p.pattern_type,
-        description: `${p.pattern_type} pattern detected`,
-        riskLevel: riskLevelFromScore(p.risk_score ?? 0),
-        transactions: [],
-        amount: p.total_amount || 0,
-        frequency: p.frequency || 0,
-      })
-    );
+    const patterns: any[] = (results.cash_patterns || []).map((p: any) => ({
+      pattern: p.pattern_type,
+      description: `${p.pattern_type} pattern detected`,
+      riskLevel: riskLevelFromScore(p.risk_score ?? 0),
+      transactions: [],
+      amount: p.total_amount || 0,
+      frequency: p.frequency || 0,
+    }));
 
     return { metrics, patterns };
   };
@@ -252,7 +233,6 @@ export default function CashFlowAnalysisTab({
           ? new Date(amlMetadata.dateRange.to)
           : undefined;
 
-        // Validate date range if both provided
         if (fromDate && toDate && fromDate > toDate) {
           setDateError("From date must be before To date");
           setLoading(false);
@@ -380,7 +360,6 @@ export default function CashFlowAnalysisTab({
 
   return (
     <div className="space-y-6">
-      {/* Filters */}
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-medium text-gray-900">
@@ -388,53 +367,60 @@ export default function CashFlowAnalysisTab({
           </h3>
         </div>
 
-        {/* Controls */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="dateFrom" className="block text-sm font-medium text-gray-700 mb-1">
               From date
             </label>
             <input
+              id="dateFrom"
               type="date"
               value={dateFrom ? dateFrom.slice(0, 10) : ""}
               onChange={(e) => setDateFrom(e.target.value)}
               className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+              aria-label="Select from date for cash flow analysis"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="dateTo" className="block text-sm font-medium text-gray-700 mb-1">
               To date
             </label>
             <input
+              id="dateTo"
               type="date"
               value={dateTo ? dateTo.slice(0, 10) : ""}
               onChange={(e) => setDateTo(e.target.value)}
               className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+              aria-label="Select to date for cash flow analysis"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="threshold" className="block text-sm font-medium text-gray-700 mb-1">
               Large cash threshold (₹)
             </label>
             <input
+              id="threshold"
               type="number"
               min={0}
               step={1000}
               value={threshold}
               onChange={(e) => setThreshold(Number(e.target.value))}
               className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+              aria-label="Set large cash transaction threshold amount in rupees"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="keywords" className="block text-sm font-medium text-gray-700 mb-1">
               Cash keywords (comma-separated)
             </label>
             <input
+              id="keywords"
               type="text"
               value={keywordsInput}
               onChange={(e) => setKeywordsInput(e.target.value)}
               className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
               placeholder="e.g., CASH, ATM, WITHDRAWAL, CHQ"
+              aria-label="Enter cash-related keywords separated by commas"
             />
           </div>
         </div>
@@ -445,7 +431,6 @@ export default function CashFlowAnalysisTab({
           </p>
         )}
 
-        {/* Key Metrics */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="bg-green-50 p-4 rounded-lg">
             <div className="flex items-center">
@@ -563,7 +548,6 @@ export default function CashFlowAnalysisTab({
             </div>
           </div>
 
-          {/* Large Cash Count */}
           <div className="bg-yellow-50 p-4 rounded-lg">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -592,7 +576,6 @@ export default function CashFlowAnalysisTab({
             </div>
           </div>
 
-          {/* Large Cash Threshold */}
           <div className="bg-indigo-50 p-4 rounded-lg">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -621,7 +604,6 @@ export default function CashFlowAnalysisTab({
             </div>
           </div>
 
-          {/* Avg Monthly Cash Tx */}
           <div className="bg-teal-50 p-4 rounded-lg">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -644,15 +626,12 @@ export default function CashFlowAnalysisTab({
                   Avg Monthly Cash Tx
                 </p>
                 <p className="text-2xl font-semibold text-teal-900">
-                  {cashFlowMetrics.frequencySummary.avgMonthlyTransactions.toFixed(
-                    1
-                  )}
+                  {cashFlowMetrics.frequencySummary.avgMonthlyTransactions.toFixed(1)}
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Peak Activity Day */}
           <div className="bg-orange-50 p-4 rounded-lg">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -683,13 +662,11 @@ export default function CashFlowAnalysisTab({
         </div>
       </div>
 
-      {/* Cash Flow Insights */}
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-medium text-gray-900 mb-4">
           Cash Flow Insights
         </h3>
 
-        {/* Amount Patterns */}
         <div className="mb-6">
           <h4 className="text-sm font-medium text-gray-900 mb-3">
             Amount Patterns
@@ -722,7 +699,6 @@ export default function CashFlowAnalysisTab({
           </div>
         </div>
 
-        {/* Frequency Summary */}
         <div className="mb-6">
           <h4 className="text-sm font-medium text-gray-900 mb-3">
             Day-of-Week Distribution
@@ -745,7 +721,6 @@ export default function CashFlowAnalysisTab({
           )}
         </div>
 
-        {/* Temporal Summary */}
         <div className="mb-6">
           <h4 className="text-sm font-medium text-gray-900 mb-3">
             Temporal Summary
@@ -780,7 +755,6 @@ export default function CashFlowAnalysisTab({
           </div>
         </div>
 
-        {/* Insights and Risk Indicators */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <h4 className="text-sm font-medium text-gray-900 mb-2">
@@ -814,7 +788,6 @@ export default function CashFlowAnalysisTab({
         </div>
       </div>
 
-      {/* Suspicious Patterns */}
       {suspiciousPatterns.length > 0 && (
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">
@@ -865,7 +838,6 @@ export default function CashFlowAnalysisTab({
         </div>
       )}
 
-      {/* Large Cash Transactions */}
       {cashFlowMetrics.largeCashTransactions.length > 0 && (
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">
@@ -931,7 +903,6 @@ export default function CashFlowAnalysisTab({
         </div>
       )}
 
-      {/* Top Cash Counterparties */}
       {cashFlowMetrics.topCashCounterparties.length > 0 && (
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">

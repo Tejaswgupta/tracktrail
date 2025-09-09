@@ -2,7 +2,6 @@
 
 import { useCounterpartyAnalysis } from "@/hooks/useCounterpartyAnalysis";
 import { Transaction } from "@/types/database";
-
 import React from "react";
 
 interface CounterpartyAnalysisProps {
@@ -73,16 +72,17 @@ export function CounterpartyAnalysis({
         )}
       </div>
 
-      {/* Bank Preset Selection */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">
+        <label htmlFor="bank-preset-select" className="block text-sm font-medium text-gray-700">
           Bank Preset
         </label>
         <select
+          id="bank-preset-select"
           value={bankPreset}
           onChange={(e) => setBankPreset(e.target.value)}
           className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
           disabled={isAnalyzing}
+          aria-label="Select bank preset for transaction format matching"
         >
           {availablePresets.map((preset) => (
             <option key={preset.value} value={preset.value}>
@@ -96,7 +96,6 @@ export function CounterpartyAnalysis({
         </p>
       </div>
 
-      {/* Advanced Analysis Option */}
       <div className="flex items-center space-x-2">
         <input
           type="checkbox"
@@ -110,7 +109,6 @@ export function CounterpartyAnalysis({
         </label>
       </div>
 
-      {/* Analysis Controls */}
       <div className="flex gap-3">
         <button
           onClick={handleAnalyze}
@@ -130,12 +128,12 @@ export function CounterpartyAnalysis({
         )}
       </div>
 
-      {/* Fuzzy Search */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">
+        <label htmlFor="counterparty-search" className="block text-sm font-medium text-gray-700">
           Search Counterparties
         </label>
         <input
+          id="counterparty-search"
           type="text"
           value={searchQuery}
           onChange={(e) => handleSearch(e.target.value)}
@@ -164,17 +162,14 @@ export function CounterpartyAnalysis({
         )}
       </div>
 
-      {/* Error Display */}
       {error && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-md">
           <p className="text-sm text-red-600">{error}</p>
         </div>
       )}
 
-      {/* Analysis Results */}
       {analysisResult && (
         <div className="space-y-4">
-          {/* Statistics */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-blue-50 p-4 rounded-lg">
               <div className="text-2xl font-bold text-blue-600">
@@ -208,7 +203,6 @@ export function CounterpartyAnalysis({
             </div>
           </div>
 
-          {/* Clusters */}
           {analysisResult.standardization.clusters.length > 0 && (
             <div>
               <h3 className="text-lg font-medium text-gray-900 mb-3">

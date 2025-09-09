@@ -21,14 +21,13 @@ export function CircularTradingGraph({
   selectedCycle,
   highlightedEntities = [],
   onNodeSelect,
-  onCycleHighlight,
 }: CircularTradingGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [showAmountLabels, setShowAmountLabels] = useState(true);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
 
-  // Memoize processed data
+
   const processedData = useMemo(() => {
     if (!nodes.length) return null;
 
@@ -75,13 +74,13 @@ export function CircularTradingGraph({
 
     if (processedNodes.length === 0) return;
 
-    // Create main group
+   
     const g = svg.append("g");
 
-    // Enhanced arrow markers with better styling
+    
     const defs = svg.append("defs");
 
-    // Add gradient definitions for nodes
+    
     const nodeGradient = defs.append("linearGradient")
       .attr("id", "nodeGradient")
       .attr("x1", "0%").attr("y1", "0%")
@@ -97,7 +96,7 @@ export function CircularTradingGraph({
       .attr("stop-color", "#000000")
       .attr("stop-opacity", 0.1);
 
-    // Drop shadow filter
+   
     const dropShadow = defs.append("filter")
       .attr("id", "dropshadow")
       .attr("x", "-50%").attr("y", "-50%")
@@ -108,7 +107,7 @@ export function CircularTradingGraph({
       .attr("stdDeviation", "3")
       .attr("flood-color", "rgba(0,0,0,0.3)");
 
-    // Refined arrow markers
+   
     defs.append("marker")
       .attr("id", "arrow-credit")
       .attr("viewBox", "0 0 10 10")
@@ -135,7 +134,7 @@ export function CircularTradingGraph({
       .attr("fill", "#dc2626")
       .attr("opacity", 0.8);
 
-    // Create zoom behavior with limits
+    
     const zoom = d3.zoom()
       .scaleExtent([0.3, 3])
       .on("zoom", (event) => {
@@ -144,7 +143,7 @@ export function CircularTradingGraph({
 
     svg.call(zoom as any);
 
-    // Create simulation with better forces
+    
     const simulation = d3.forceSimulation(processedNodes as any)
       .force("link", d3.forceLink(processedEdges)
         .id((d: any) => d.id)
@@ -159,13 +158,12 @@ export function CircularTradingGraph({
       .force("collision", d3.forceCollide().radius((d: any) => (d.radius || 25) + 20))
       .alpha(1);
 
-    // Create curved path generator for edges
+  
     const linkArc = (d: any) => {
       const dx = d.target.x - d.source.x;
       const dy = d.target.y - d.source.y;
-      const dr = Math.sqrt(dx * dx + dy * dy) * 0.3; // Curve factor
-      
-      // Calculate end point accounting for node radius
+      const dr = Math.sqrt(dx * dx + dy * dy) * 0.3;
+     
       const targetRadius = d.target.radius || 25;
       const length = Math.sqrt(dx * dx + dy * dy);
       const endX = d.target.x - (dx / length) * (targetRadius + 8);
@@ -174,7 +172,7 @@ export function CircularTradingGraph({
       return `M ${d.source.x},${d.source.y} A ${dr},${dr} 0 0,1 ${endX},${endY}`;
     };
 
-    // Create curved edges
+   
     const link = g.append("g")
       .attr("class", "links")
       .selectAll("path")
@@ -189,20 +187,20 @@ export function CircularTradingGraph({
         d.transactionType === 'credit' ? "url(#arrow-credit)" : "url(#arrow-debit)"
       )
       .style("cursor", "pointer")
-      .on("mouseover", function(event, d: any) {
-        d3.select(this)
-          .attr("stroke-width", (d: any) => Math.max(4, Math.min(8, Math.log(d.amount / 10000))))
+      .on("mouseover", (event, d: any) => { 
+        d3.select(event.currentTarget as SVGPathElement)  
+          .attr("stroke-width", Math.max(4, Math.min(8, Math.log(d.amount / 10000))))
           .attr("stroke-opacity", 1);
         setSelectedEdge(`${d.source.id}-${d.target.id}`);
       })
-      .on("mouseout", function(event, d: any) {
-        d3.select(this)
-          .attr("stroke-width", (d: any) => Math.max(2, Math.min(6, Math.log(d.amount / 10000))))
+      .on("mouseout", (event, d: any) => {  
+        d3.select(event.currentTarget as SVGPathElement)  
+          .attr("stroke-width", Math.max(2, Math.min(6, Math.log(d.amount / 10000))))
           .attr("stroke-opacity", 0.7);
         setSelectedEdge(null);
       });
 
-    // Enhanced nodes with gradients and shadows
+    
     const node = g.append("g")
       .attr("class", "nodes")
       .selectAll("circle")
@@ -214,10 +212,10 @@ export function CircularTradingGraph({
         if (highlightedEntities.includes(d.id)) {
           return 'url(#nodeGradient)';
         }
-        // Softer color palette
-        if (d.riskScore > 0.7) return '#dc2626'; // Red
-        if (d.riskScore > 0.4) return '#f59e0b'; // Amber
-        return '#059669'; // Emerald
+       
+        if (d.riskScore > 0.7) return '#dc2626'; 
+        if (d.riskScore > 0.4) return '#f59e0b'; 
+        return '#059669'; 
       })
       .attr("stroke", "#ffffff")
       .attr("stroke-width", 3)
@@ -227,27 +225,27 @@ export function CircularTradingGraph({
         event.stopPropagation();
         onNodeSelect?.(d.id);
       })
-      .on("mouseover", function(event, d: any) {
-        d3.select(this)
+      .on("mouseover", (event, d: any) => {  
+        d3.select(event.currentTarget as SVGCircleElement)  
           .transition()
           .duration(200)
-          .attr("r", (d: any) => d.radius * 1.1)
+          .attr("r", d.radius * 1.1)
           .attr("stroke", "#3b82f6")
           .attr("stroke-width", 4);
       })
-      .on("mouseout", function(event, d: any) {
-        d3.select(this)
+      .on("mouseout", (event, d: any) => {  
+        d3.select(event.currentTarget as SVGCircleElement)  
           .transition()
           .duration(200)
-          .attr("r", (d: any) => d.radius)
+          .attr("r", d.radius)
           .attr("stroke", "#ffffff")
           .attr("stroke-width", 3);
       });
 
-    // Enhanced node labels with background
+   
     const labelGroup = g.append("g").attr("class", "labels");
     
-    // Label backgrounds
+   
     labelGroup.selectAll("rect")
       .data(processedNodes)
       .enter()
@@ -269,7 +267,6 @@ export function CircularTradingGraph({
       })
       .attr("y", -10);
 
-    // Label text
     labelGroup.selectAll("text")
       .data(processedNodes)
       .enter()
@@ -282,7 +279,6 @@ export function CircularTradingGraph({
       .attr("fill", "#374151")
       .style("pointer-events", "none");
 
-    // Conditional amount labels (only show when toggled or on hover)
     const amountLabels = g.append("g")
       .attr("class", "amount-labels")
       .style("opacity", showAmountLabels ? 1 : 0);
@@ -295,7 +291,7 @@ export function CircularTradingGraph({
         !showAmountLabels && selectedEdge !== `${d.source.id}-${d.target.id}` ? 0 : 1
       );
 
-    // Amount label backgrounds
+
     amountLabelGroup.append("rect")
       .attr("rx", 3)
       .attr("ry", 3)
@@ -307,7 +303,7 @@ export function CircularTradingGraph({
       .attr("x", (d: any) => -(`₹${d.amount.toLocaleString()}`.length * 6 + 8) / 2)
       .attr("y", -8);
 
-    // Amount label text
+
     amountLabelGroup.append("text")
       .attr("font-size", "10px")
       .attr("font-weight", "600")
@@ -317,7 +313,7 @@ export function CircularTradingGraph({
       .style("pointer-events", "none")
       .text((d: any) => `₹${d.amount.toLocaleString()}`);
 
-    // Enhanced tooltip
+
     const tooltip = d3.select(container)
       .append("div")
       .style("position", "absolute")
@@ -332,7 +328,6 @@ export function CircularTradingGraph({
       .style("box-shadow", "0 10px 25px rgba(0, 0, 0, 0.3)")
       .style("border", "1px solid rgba(255, 255, 255, 0.1)");
 
-    // Enhanced node hover events
     node
       .on("mouseover.tooltip", (event, d: any) => {
         tooltip.transition().duration(300).style("opacity", 1);
@@ -362,7 +357,6 @@ export function CircularTradingGraph({
         tooltip.transition().duration(300).style("opacity", 0);
       });
 
-    // Smooth simulation updates
     simulation.on("tick", () => {
       link.attr("d", linkArc);
 
@@ -384,7 +378,7 @@ export function CircularTradingGraph({
         .attr("transform", (d: any) => `translate(${d.x}, ${d.y + (d.radius || 25) + 20})`);
     });
 
-    // Enhanced drag behavior
+  
     const drag = d3.drag()
       .on("start", (event, d: any) => {
         if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -403,7 +397,7 @@ export function CircularTradingGraph({
 
     node.call(drag as any);
 
-    // Cleanup
+  
     return () => {
       tooltip.remove();
       simulation.stop();

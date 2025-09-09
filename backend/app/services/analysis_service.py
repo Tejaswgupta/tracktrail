@@ -5,7 +5,7 @@ Coordinates between database operations and existing analysis modules.
 
 import logging
 import os
-
+import networkx as nx
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union

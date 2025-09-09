@@ -8,7 +8,6 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from contextlib import asynccontextmanager
-
 import pandas as pd
 from supabase import create_client, Client
 from postgrest.exceptions import APIError

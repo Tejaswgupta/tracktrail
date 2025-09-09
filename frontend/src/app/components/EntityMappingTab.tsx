@@ -10,9 +10,7 @@ interface EntityMappingTabProps {
 }
 
 export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
-  const [selectedMappings, setSelectedMappings] = useState<
-    Map<string, EntityMatch>
-  >(new Map());
+  const [selectedMappings, setSelectedMappings] = useState<Map<string, EntityMatch>>(new Map());
   const [similarityThreshold, setSimilarityThreshold] = useState(75);
   const [searchTerm, setSearchTerm] = useState("");
   const [saving, setSaving] = useState(false);
@@ -22,10 +20,7 @@ export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
     similarityThreshold
   );
 
-  const handleSelectMapping = (
-    counterpartyName: string,
-    match: EntityMatch
-  ) => {
+  const handleSelectMapping = (counterpartyName: string, match: EntityMatch) => {
     const newMappings = new Map(selectedMappings);
     newMappings.set(counterpartyName, match);
     setSelectedMappings(newMappings);
@@ -52,10 +47,7 @@ export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
         })
       );
 
-      const result = await mapper.batchSaveMappings(
-        mappingsToSave,
-        "current-user"
-      );
+      const result = await mapper.batchSaveMappings(mappingsToSave, "current-user");
 
       if (result.errors.length > 0) {
         console.error("Some mappings failed to save:", result.errors);
@@ -85,9 +77,7 @@ export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
   const filteredMappingGroups =
     mappingResult?.mappingGroups.filter(
       (group) =>
-        group.counterpartyName
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
+        group.counterpartyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         group.suggestedMatches.some((match) =>
           match.entityName.toLowerCase().includes(searchTerm.toLowerCase())
         )
@@ -139,9 +129,7 @@ export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h2 className="text-lg font-medium text-gray-900">
-              Entity Mapping
-            </h2>
+            <h2 className="text-lg font-medium text-gray-900">Entity Mapping</h2>
             <p className="text-sm text-gray-600 mt-1">
               Map counterparty names to known entities in your system
             </p>
@@ -194,13 +182,15 @@ export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">
+              <label htmlFor="similarity-threshold" className="text-sm font-medium text-gray-700">
                 Similarity Threshold:
               </label>
               <select
+                id="similarity-threshold"
                 value={similarityThreshold}
                 onChange={(e) => setSimilarityThreshold(Number(e.target.value))}
                 className="border border-gray-300 rounded-md px-3 py-1 text-sm"
+                aria-label="Select similarity threshold percentage for entity matching"
               >
                 <option value={60}>60% - More matches</option>
                 <option value={70}>70% - Balanced</option>
@@ -210,12 +200,17 @@ export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
               </select>
             </div>
             <div className="flex items-center space-x-2">
+              <label htmlFor="search-counterparties" className="sr-only">
+                Search counterparties
+              </label>
               <input
+                id="search-counterparties"
                 type="text"
                 placeholder="Search counterparties..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="border border-gray-300 rounded-md px-3 py-1 text-sm w-64"
+                aria-label="Search counterparties by name or entity"
               />
             </div>
           </div>
@@ -260,9 +255,7 @@ export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
               onSelectMapping={(match) =>
                 handleSelectMapping(group.counterpartyName, match)
               }
-              onRemoveMapping={() =>
-                handleRemoveMapping(group.counterpartyName)
-              }
+              onRemoveMapping={() => handleRemoveMapping(group.counterpartyName)}
               getConfidenceColor={getConfidenceColor}
               getConfidenceBadge={getConfidenceBadge}
             />
@@ -273,8 +266,7 @@ export default function EntityMappingTab({ caseId }: EntityMappingTabProps) {
       {mappingResult && mappingResult.unmappedCounterparties.length > 0 && (
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">
-            Unmapped Counterparties (
-            {mappingResult.unmappedCounterparties.length})
+            Unmapped Counterparties ({mappingResult.unmappedCounterparties.length})
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
             {mappingResult.unmappedCounterparties.map((name) => (
@@ -321,9 +313,7 @@ function EntityMappingCard({
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <div className="flex items-center space-x-3">
-              <h3 className="font-medium text-gray-900">
-                {group.counterpartyName}
-              </h3>
+              <h3 className="font-medium text-gray-900">{group.counterpartyName}</h3>
               {group.currentMapping && (
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                   Already Mapped
@@ -340,6 +330,7 @@ function EntityMappingCard({
           <button
             onClick={() => setExpanded(!expanded)}
             className="p-2 text-gray-400 hover:text-gray-600"
+            aria-label={`${expanded ? "Collapse" : "Expand"} mapping options for ${group.counterpartyName}`}
           >
             <svg
               className={`w-5 h-5 transform transition-transform ${
@@ -370,8 +361,7 @@ function EntityMappingCard({
                     </div>
                     <div className="text-sm text-green-700">
                       {group.currentMapping.entityType}
-                      {group.currentMapping.pan &&
-                        ` • PAN: ${group.currentMapping.pan}`}
+                      {group.currentMapping.pan && ` • PAN: ${group.currentMapping.pan}`}
                     </div>
                   </div>
                   <span
@@ -386,54 +376,57 @@ function EntityMappingCard({
               </div>
             ) : (
               <div className="space-y-2">
-                {group.suggestedMatches.map((match, index) => (
-                  <div
-                    key={`${match.entityId}-${index}`}
-                    className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                      selectedMapping?.entityId === match.entityId
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                    onClick={() => onSelectMapping(match)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="radio"
-                            checked={
-                              selectedMapping?.entityId === match.entityId
-                            }
-                            onChange={() => onSelectMapping(match)}
-                            className="text-blue-600"
-                          />
-                          <div>
-                            <div className="font-medium text-gray-900">
-                              {match.entityName}
-                            </div>
-                            <div className="text-sm text-gray-600">
-                              {match.entityType}
-                              {match.pan && ` • PAN: ${match.pan}`}
-                              {match.gstin && ` • GSTIN: ${match.gstin}`}
-                            </div>
+                {group.suggestedMatches.map((match, index) => {
+                  const radioId = `mapping-${group.counterpartyName}-${match.entityId}-${index}`;
+                  return (
+                    <div
+                      key={`${match.entityId}-${index}`}
+                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                        selectedMapping?.entityId === match.entityId
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300"
+                      }`}
+                      onClick={() => onSelectMapping(match)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              id={radioId}
+                              type="radio"
+                              checked={selectedMapping?.entityId === match.entityId}
+                              onChange={() => onSelectMapping(match)}
+                              className="text-blue-600"
+                              aria-label={`Map ${group.counterpartyName} to ${match.entityName} (${match.confidenceScore}% confidence)`}
+                            />
+                            <label htmlFor={radioId} className="cursor-pointer">
+                              <div className="font-medium text-gray-900">
+                                {match.entityName}
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {match.entityType}
+                                {match.pan && ` • PAN: ${match.pan}`}
+                                {match.gstin && ` • GSTIN: ${match.gstin}`}
+                              </div>
+                            </label>
                           </div>
                         </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span
-                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getConfidenceColor(
-                            match.confidenceScore
-                          )}`}
-                        >
-                          {match.confidenceScore}%
-                        </span>
-                        <span className="text-xs text-gray-500 capitalize">
-                          {match.matchMethod}
-                        </span>
+                        <div className="flex items-center space-x-2">
+                          <span
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getConfidenceColor(
+                              match.confidenceScore
+                            )}`}
+                          >
+                            {match.confidenceScore}%
+                          </span>
+                          <span className="text-xs text-gray-500 capitalize">
+                            {match.matchMethod}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 {selectedMapping && (
                   <div className="flex justify-end">
