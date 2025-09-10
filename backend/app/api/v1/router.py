@@ -1,12 +1,9 @@
 """
 API v1 router for organizing all analysis endpoints.
-
 This module provides a centralized router that organizes all analysis endpoints
 and provides proper API versioning and endpoint organization.
 """
-
 from fastapi import APIRouter
-
 from app.api.v1.endpoints import (
     analysis,
     health,

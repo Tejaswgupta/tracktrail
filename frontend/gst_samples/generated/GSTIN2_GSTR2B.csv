@@ -1,0 +1,4 @@
+recipient_gstin,supplier_gstin,invoice_no,invoice_date,claimed_itc_igst,claimed_itc_cgst,claimed_itc_sgst
+GSTIN2,GSTIN1,INV001,2023-01-15,1000,500,500
+GSTIN2,GSTIN1,CN1001,2023-01-25,-200,0,0
+GSTIN2,GSTIN1,INV006,2023-02-08,0,800,800
