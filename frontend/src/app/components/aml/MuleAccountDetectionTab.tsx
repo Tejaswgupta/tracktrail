@@ -1,5 +1,4 @@
 "use client";
-
 import React, { useState, useEffect } from 'react';
 import { useMuleAccountAnalysis } from '@/hooks/useMuleAccountAnalysis';
 import { MuleAccountReport } from './MuleAccountReport';
@@ -163,7 +162,6 @@ export default function MuleAccountDetectionTab({
             )}
           </div>
         </div>
-
         <MuleAccountControls
           parameters={analysisParameters}
           onParametersChange={setAnalysisParameters}
@@ -172,7 +170,6 @@ export default function MuleAccountDetectionTab({
           selectedEntityCount={selectedEntityIds.length}
         />
       </div>
-
       <div className="p-6">
         {result ? (
           <div className="space-y-6">
@@ -198,7 +195,6 @@ export default function MuleAccountDetectionTab({
                 <div className="text-xs text-gray-600 mt-1">Transaction accounts</div>
               </div>
             </div>
-
             {viewMode === 'summary' ? (
               <div className="space-y-6">
                 {alertsByRisk.high.length > 0 && (
@@ -210,20 +206,20 @@ export default function MuleAccountDetectionTab({
                       Critical Risk Alerts ({alertsByRisk.high.length})
                     </h4>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {alertsByRisk.high.map((alert) => (
+                      {alertsByRisk.high.map((alert, index) => (
                         <div
-                          key={alert.account_id}
+                          key={`high-alert-${alert.account_id || 'unknown'}-${index}`}
                           className="border-2 border-red-300 rounded-lg p-4 bg-red-50 cursor-pointer hover:bg-red-100 transition-colors"
-                          onClick={() => handleAlertSelect(alert.account_id)}
+                          onClick={() => handleAlertSelect(alert.account_id || `alert-${index}`)}
                         >
                           <div className="flex justify-between items-start mb-3">
-                            <div className="font-medium text-red-900">{alert.account_id}</div>
+                            <div className="font-medium text-red-900">{alert.account_id || `Account ${index + 1}`}</div>
                             <div className="px-2 py-1 bg-red-600 text-white text-xs rounded font-medium">
                               {(alert.confidence_score * 100).toFixed(0)}% RISK
                             </div>
                           </div>
                           <div className="text-sm text-red-800 mb-2">
-                            Pattern: <span className="font-medium">{alert.pattern_type.replace('_', ' ').toUpperCase()}</span>
+                            Pattern: <span className="font-medium">{alert.pattern_type?.replace('_', ' ').toUpperCase() || 'UNKNOWN'}</span>
                           </div>
                           <div className="text-xs text-red-700">
                             {alert.risk_indicators?.slice(0, 2).join('. ') || 'Suspicious activity detected'}
@@ -233,7 +229,6 @@ export default function MuleAccountDetectionTab({
                     </div>
                   </div>
                 )}
-
                 {(result?.summary?.total_alerts ?? 0) === 0 && (
                   <div className="text-center py-12">
                     <div className="w-16 h-16 mx-auto mb-4 bg-green-100 rounded-full flex items-center justify-center">

@@ -1,15 +1,20 @@
 """
 Request models for the FastAPI financial analysis service.
+
 This module contains Pydantic models for validating incoming API requests.
 All models inherit from the base AnalysisRequest model to ensure consistency.
 """
+
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
 from app.utils.validators import validate_entity_id
 from pydantic import BaseModel, Field, field_validator
 
+
 class AnalysisRequest(BaseModel):
     """Request model for analysis."""
+
     entity_ids: List[str] = Field(
         ...,
         min_items=1,
@@ -22,6 +27,7 @@ class AnalysisRequest(BaseModel):
     date_to: Optional[datetime] = Field(
         None, description="End date for analysis (ISO format)"
     )
+
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
         schema_extra = {
@@ -61,8 +67,10 @@ class AnalysisRequest(BaseModel):
             },
         }
 
+
 class CashFlowRequest(AnalysisRequest):
     """Request model for cash flow analysis."""
+
     include_patterns: Optional[bool] = Field(
         True, description="Include transaction patterns in analysis"
     )
@@ -75,6 +83,7 @@ class CashFlowRequest(AnalysisRequest):
     threshold: Optional[int] = Field(
         None, description="Minimum transaction amount to include in analysis"
     )
+
     @field_validator("granularity")
     @classmethod
     def validate_granularity(cls, v):
@@ -82,6 +91,7 @@ class CashFlowRequest(AnalysisRequest):
         if v not in allowed_values:
             raise ValueError(f"granularity must be one of {allowed_values}")
         return v
+
     class Config:
         schema_extra = {
             "example": {
@@ -117,14 +127,17 @@ class CashFlowRequest(AnalysisRequest):
             },
         }
 
+
 class CounterpartyTrendsRequest(AnalysisRequest):
     """Request model for counterparty trends analysis."""
+
     min_transaction_count: Optional[int] = Field(
         5, ge=1, description="Minimum number of transactions to consider a counterparty"
     )
     trend_window_days: Optional[int] = Field(
         30, ge=1, le=365, description="Window size in days for trend analysis"
     )
+
     class Config:
         schema_extra = {
             "example": {
@@ -169,14 +182,17 @@ class CounterpartyTrendsRequest(AnalysisRequest):
             },
         }
 
+
 class MuleAccountRequest(AnalysisRequest):
     """Request model for mule account detection."""
+
     velocity_threshold: Optional[float] = Field(
         10000.0, ge=0, description="Minimum transaction velocity to flag as suspicious"
     )
     pattern_sensitivity: Optional[str] = Field(
         "medium", description="Detection sensitivity level (low, medium, high)"
     )
+
     min_collection_transactions: int = Field(
         5,
         alias="minCollectionTransactions",
@@ -210,6 +226,7 @@ class MuleAccountRequest(AnalysisRequest):
         le=2.0,
         description="Multiplier to adjust detection sensitivity",
     )
+
     @field_validator("pattern_sensitivity")
     @classmethod
     def validate_sensitivity(cls, v):
@@ -217,6 +234,7 @@ class MuleAccountRequest(AnalysisRequest):
         if v not in allowed_values:
             raise ValueError(f"pattern_sensitivity must be one of {allowed_values}")
         return v
+
     class Config:
         allow_population_by_field_name = True
         schema_extra = {
@@ -234,8 +252,10 @@ class MuleAccountRequest(AnalysisRequest):
             }
         }
 
+
 class BogusITCRequest(AnalysisRequest):
     """Request model for bogus ITC analysis."""
+
     gstin: str = Field(..., description="GSTIN of the entity")
     include_cess: Optional[bool] = Field(False, description="Include CESS in analysis")
     min_origin: Optional[float] = Field(
@@ -245,6 +265,7 @@ class BogusITCRequest(AnalysisRequest):
         4, ge=1, le=10, description="Maximum hops in ITC chain"
     )
     min_flow: Optional[float] = Field(500.0, ge=0, description="Minimum flow amount")
+
     class Config:
         schema_extra = {
             "example": {
@@ -289,8 +310,10 @@ class BogusITCRequest(AnalysisRequest):
             },
         }
 
+
 class CycleDetectionRequest(AnalysisRequest):
     """Request model for cycle detection analysis."""
+
     max_cycle_length: Optional[int] = Field(
         10, ge=2, le=20, description="Maximum number of hops in a cycle"
     )
@@ -305,6 +328,7 @@ class CycleDetectionRequest(AnalysisRequest):
         le=168,
         description="Time window for cycle detection in hours",
     )
+
     class Config:
         schema_extra = {
             "example": {
@@ -363,8 +387,10 @@ class CycleDetectionRequest(AnalysisRequest):
             },
         }
 
+
 class RapidMovementRequest(AnalysisRequest):
     """Request model for rapid movement analysis."""
+
     time_threshold_minutes: Optional[int] = Field(
         60,
         ge=1,
@@ -377,6 +403,7 @@ class RapidMovementRequest(AnalysisRequest):
     tolerance_percentage: Optional[float] = Field(
         5.0, ge=0, le=100, description="Tolerance percentage for amount matching"
     )
+
     class Config:
         schema_extra = {
             "example": {
@@ -425,8 +452,10 @@ class RapidMovementRequest(AnalysisRequest):
             },
         }
 
+
 class TimeTrendsRequest(AnalysisRequest):
     """Request model for time trends analysis."""
+
     aggregation_period: Optional[str] = Field(
         "daily", description="Time aggregation period (hourly, daily, weekly, monthly)"
     )
@@ -437,6 +466,7 @@ class TimeTrendsRequest(AnalysisRequest):
         "linear",
         description="Method for trend detection (linear, polynomial, seasonal)",
     )
+
     @field_validator("aggregation_period")
     @classmethod
     def validate_aggregation_period(cls, v):
@@ -444,6 +474,7 @@ class TimeTrendsRequest(AnalysisRequest):
         if v not in allowed_values:
             raise ValueError(f"aggregation_period must be one of {allowed_values}")
         return v
+
     @field_validator("trend_detection_method")
     @classmethod
     def validate_trend_method(cls, v):
@@ -451,6 +482,7 @@ class TimeTrendsRequest(AnalysisRequest):
         if v not in allowed_values:
             raise ValueError(f"trend_detection_method must be one of {allowed_values}")
         return v
+
     class Config:
         schema_extra = {
             "example": {
@@ -501,8 +533,10 @@ class TimeTrendsRequest(AnalysisRequest):
             },
         }
 
+
 class TransferPatternRequest(AnalysisRequest):
     """Request model for transfer pattern analysis."""
+
     pattern_types: Optional[List[str]] = Field(
         ["layering", "structuring", "round_robin"],
         description="Types of patterns to detect",
@@ -513,6 +547,7 @@ class TransferPatternRequest(AnalysisRequest):
     min_pattern_strength: Optional[float] = Field(
         0.7, ge=0.1, le=1.0, description="Minimum pattern strength threshold (0.1-1.0)"
     )
+
     @field_validator("pattern_types")
     @classmethod
     def validate_pattern_types(cls, v):
@@ -531,6 +566,7 @@ class TransferPatternRequest(AnalysisRequest):
             if v not in allowed_patterns:
                 raise ValueError(f"pattern_type must be one of {allowed_patterns}")
         return v
+
     class Config:
         schema_extra = {
             "example": {
