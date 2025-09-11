@@ -109,7 +109,7 @@ class NetworkCycleDetector:
             self.logger.info(f"Found {len(all_cycles)} raw cycles")
 
             # Debug: Print all raw cycles for debugging
-            print(f"🔍 DEBUG: Found {len(all_cycles)} raw cycles:")
+            print(f" DEBUG: Found {len(all_cycles)} raw cycles:")
             for i, cycle in enumerate(all_cycles[:10]):  # Show first 10
                 print(f"  Cycle {i + 1}: {cycle}")
 

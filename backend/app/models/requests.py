@@ -253,6 +253,64 @@ class MuleAccountRequest(AnalysisRequest):
         }
 
 
+class BogusITCRequest(AnalysisRequest):
+    """Request model for bogus ITC analysis."""
+
+    gstin: str = Field(..., description="GSTIN of the entity")
+    include_cess: Optional[bool] = Field(False, description="Include CESS in analysis")
+    min_origin: Optional[float] = Field(
+        1000.0, ge=0, description="Minimum origin amount"
+    )
+    max_hops: Optional[int] = Field(
+        4, ge=1, le=10, description="Maximum hops in ITC chain"
+    )
+    min_flow: Optional[float] = Field(500.0, ge=0, description="Minimum flow amount")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "entity_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                "date_from": "2024-01-01T00:00:00Z",
+                "date_to": "2024-12-31T23:59:59Z",
+                "gstin": "07AABCU9603R1ZX",
+                "include_cess": False,
+                "min_origin": 1000.0,
+                "max_hops": 4,
+                "min_flow": 500.0,
+            },
+            "examples": {
+                "basic_analysis": {
+                    "summary": "Basic bogus ITC analysis",
+                    "description": "Standard bogus ITC detection with default parameters",
+                    "value": {
+                        "entity_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        "date_from": "2024-01-01T00:00:00Z",
+                        "date_to": "2024-12-31T23:59:59Z",
+                        "gstin": "07AABCU9603R1ZX",
+                        "include_cess": False,
+                        "min_origin": 1000.0,
+                        "max_hops": 4,
+                        "min_flow": 500.0,
+                    },
+                },
+                "detailed_analysis": {
+                    "summary": "Detailed bogus ITC analysis",
+                    "description": "Comprehensive analysis with extended parameters",
+                    "value": {
+                        "entity_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                        "date_from": "2024-01-01T00:00:00Z",
+                        "date_to": "2024-12-31T23:59:59Z",
+                        "gstin": "27AABCU9603R1ZX",
+                        "include_cess": True,
+                        "min_origin": 500.0,
+                        "max_hops": 6,
+                        "min_flow": 250.0,
+                    },
+                },
+            },
+        }
+
+
 class CycleDetectionRequest(AnalysisRequest):
     """Request model for cycle detection analysis."""
 

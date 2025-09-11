@@ -1,5 +1,0 @@
-recipient_gstin,supplier_gstin,invoice_no,invoice_date,claimed_itc_igst,claimed_itc_cgst,claimed_itc_sgst
-GSTIN5,GSTIN3,INV004,2023-01-30,3000,1500,1500
-GSTIN5,GSTIN3,INV008,2023-02-15,2500,0,0
-GSTIN5,GSTIN4,INV010,2023-02-22,0,400,400
-GSTIN5,GSTIN3,INV013,2023-03-10,3500,0,0

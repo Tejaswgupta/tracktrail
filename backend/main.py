@@ -16,15 +16,6 @@ import uvicorn
 from app.core.config import settings
 from app.core.database import init_database, close_database
 from app.core.exceptions import (
-    APIException, 
-    ValidationError, 
-    EntityNotFoundError, 
-    DatabaseError, 
-    AnalysisError, 
-    ServiceUnavailableError,
-    RateLimitError,
-    AuthenticationError,
-    AuthorizationError,
     EXCEPTION_HANDLERS
 )
 from app.api.v1.router import api_router

@@ -1,4 +1,0 @@
-supplier_gstin,recipient_gstin,invoice_no,invoice_date,igst_amount,cgst_amount,sgst_amount
-GSTIN4,GSTIN6,INV4001,2023-01-22,0,150,150
-GSTIN4,GSTIN5,INV010,2023-02-22,0,400,400
-GSTIN4,GSTIN6,INV017,2023-03-25,0,100,100
