@@ -1,11 +1,12 @@
 "use client";
 
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
-import { transactionExtractorService } from "@/services/transactionExtractor";
+import { transactionExtractorService, type ExtractionResult } from "@/services/transactionExtractor";
 import { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import BankSelector from "./BankSelector";
 import CSVColumnMapper from "./CSVColumnMapper";
+import PreviewDataDisplay from "./PreviewDataDisplay";
 
 interface UploadStatementModalProps {
   accountId: string;
@@ -35,6 +36,52 @@ export default function UploadStatementModal({
   const [columnMapping, setColumnMapping] = useState<ColumnMapping | null>(
     null
   );
+  const [previewData, setPreviewData] = useState<ExtractionResult | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
+  const handleBankChange = (bankPreset: string) => {
+    setSelectedBank(bankPreset);
+    // Reset preview when bank changes
+    setPreviewData(null);
+  };
+
+  useEffect(() => {
+    const fetchPreviewData = async () => {
+      if (!file || !selectedBank || isPreviewLoading) return;
+      
+      // Only show preview for CSV or PDF files
+      if (file.type !== "text/csv" && file.type !== "application/pdf") return;
+      
+      // Only show preview if we have valid column mapping or validation
+      if (!csvValidation?.isValid && !columnMapping) return;
+      
+      setIsPreviewLoading(true);
+      try {
+        const preview = await transactionExtractorService.previewTransactions(
+          file,
+          selectedBank,
+          columnMapping || undefined
+        );
+        setPreviewData(preview);
+      } catch (error) {
+        console.error("Preview error:", error);
+        setPreviewData({
+          transactions: [],
+          errors: [error instanceof Error ? error.message : "Failed to generate preview"],
+          summary: {
+            totalTransactions: 0,
+            totalCredits: 0,
+            totalDebits: 0,
+            dateRange: { from: "", to: "" },
+          },
+        });
+      } finally {
+        setIsPreviewLoading(false);
+      }
+    };
+
+    fetchPreviewData();
+  }, [file, selectedBank, columnMapping, csvValidation]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -373,8 +420,9 @@ export default function UploadStatementModal({
             {/* Bank Selection */}
             <BankSelector
               selectedBank={selectedBank}
-              onBankChange={setSelectedBank}
+              onBankChange={handleBankChange}
               disabled={isUploading}
+              extractedData={previewData?.transactions || null}
             />
 
             {/* Statement Period */}
@@ -536,28 +584,64 @@ export default function UploadStatementModal({
           )}
 
         {/* Column Mapping Success Message */}
-        {columnMapping && (
-          <div className="rounded-md bg-blue-50 p-4">
-            <div className="flex">
-              <svg
-                className="h-5 w-5 text-blue-400"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <div className="ml-3">
-                <p className="text-sm text-blue-800">
-                  Column mapping configured successfully! Ready to upload.
-                </p>
+            {columnMapping && (
+              <div className="rounded-md bg-blue-50 p-4">
+                <div className="flex">
+                  <svg
+                    className="h-5 w-5 text-blue-400"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <div className="ml-3">
+                    <p className="text-sm text-blue-800">
+                      Column mapping configured successfully! Ready to upload.
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
+
+            {/* Preview Data */}
+            {previewData && (
+              <PreviewDataDisplay 
+                transactions={previewData.transactions} 
+                errors={previewData.errors} 
+              />
+            )}
+
+            {/* Preview Loading Indicator */}
+            {isPreviewLoading && (
+              <div className="rounded-md bg-gray-50 p-4">
+                <div className="flex items-center justify-center">
+                  <svg
+                    className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  <span className="text-sm text-gray-600">Generating preview...</span>
+                </div>
+              </div>
+            )}
       </div>
     </div>
   );

@@ -29,9 +29,23 @@ import { parseAndConvertToISO } from "./dateParser";
 
 export const transactionExtractorService = {
   bankPreset: "generic" as string,
+  customRegexPattern: null as RegExp | null,
 
   setBankPreset(preset: string) {
     this.bankPreset = preset;
+  },
+
+  setCustomRegexPattern(pattern: string | null) {
+    if (pattern) {
+      try {
+        this.customRegexPattern = new RegExp(pattern, 'i');
+      } catch (error) {
+        console.error("Invalid regex pattern:", error);
+        this.customRegexPattern = null;
+      }
+    } else {
+      this.customRegexPattern = null;
+    }
   },
 
   getAvailableBanks() {
@@ -515,7 +529,6 @@ export const transactionExtractorService = {
     const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
       method: "POST",
       body: formData,
-      signal: AbortSignal.timeout(60000),
     });
 
     if (!response.ok) {
@@ -558,6 +571,308 @@ export const transactionExtractorService = {
       ...validation,
       previewData,
     };
+  },
+
+  // Preview transaction extraction with a specific bank preset
+  async previewTransactions(
+    file: File,
+    bankPreset: string,
+    columnMapping?: ColumnMapping
+  ): Promise<ExtractionResult> {
+    try {
+      // Set bank preset
+      this.setBankPreset(bankPreset);
+
+      // For PDF files, we need to first convert to CSV
+      if (file.type === "application/pdf") {
+        // Get CSV from PDF using the backend
+        const formData = new FormData();
+        formData.append("file", file, file.name);
+
+        const baseUrl = amlBackendClient.getConfig().baseUrl;
+        const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          let errText = "";
+          try {
+            errText = await response.text();
+          } catch {}
+          throw new Error(
+            `PDF extraction failed (${response.status}): ${errText || response.statusText}`
+          );
+        }
+
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("text/csv")) {
+          const body = await response.text().catch(() => "");
+          throw new Error(`Unexpected content-type: ${contentType}. Body: ${body}`);
+        }
+
+        let csvText = await response.text();
+        if (csvText.charCodeAt(0) === 0xfeff) csvText = csvText.slice(1);
+        const lines = this.splitCSVRows(csvText);
+
+        if (lines.length === 0) {
+          throw new Error("No CSV content returned from PDF extraction");
+        }
+
+        // Parse headers
+        const headers = this.parseCSVColumns(lines[0]);
+
+        // Determine column indices either from provided mapping or via auto-detection
+        let columnIndices: Record<string, number> = {} as Record<string, number>;
+        if (columnMapping) {
+          // Use provided column mapping with exact string matching
+          columnIndices = {
+            DATE: headers.findIndex((h) => h.trim() === columnMapping.DATE.trim()),
+            DESCRIPTION: headers.findIndex(
+              (h) => h.trim() === columnMapping.DESCRIPTION.trim()
+            ),
+            DEBIT: columnMapping.DEBIT
+              ? headers.findIndex((h) => h.trim() === columnMapping.DEBIT.trim())
+              : -1,
+            CREDIT: columnMapping.CREDIT
+              ? headers.findIndex((h) => h.trim() === columnMapping.CREDIT.trim())
+              : -1,
+            AMOUNT: columnMapping.AMOUNT
+              ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
+              : -1,
+            DIRECTION: columnMapping.DIRECTION
+              ? headers.findIndex((h) => h.trim() === columnMapping.DIRECTION?.trim())
+              : -1,
+          };
+
+          // Validate that required columns were found
+          if (columnIndices.DATE === -1) {
+            throw new Error(
+              `Date column "${columnMapping.DATE}" not found in extracted headers: ${headers.join(", ")}`
+            );
+          }
+          if (columnIndices.DESCRIPTION === -1) {
+            throw new Error(
+              `Description column "${columnMapping.DESCRIPTION}" not found in extracted headers: ${headers.join(", ")}`
+            );
+          }
+          if (
+            columnIndices.AMOUNT === -1 &&
+            (columnIndices.DEBIT === -1 || columnIndices.CREDIT === -1)
+          ) {
+            const missingCols: string[] = [];
+            if (columnMapping.DEBIT && columnIndices.DEBIT === -1)
+              missingCols.push(`"${columnMapping.DEBIT}"`);
+            if (columnMapping.CREDIT && columnIndices.CREDIT === -1)
+              missingCols.push(`"${columnMapping.CREDIT}"`);
+            if (columnMapping.AMOUNT && columnIndices.AMOUNT === -1)
+              missingCols.push(`"${columnMapping.AMOUNT}"`);
+            throw new Error(
+              `Amount columns not found: ${missingCols.join(", ")}. Headers: ${headers.join(", ")}`
+            );
+          }
+        } else {
+          // Auto-detect using CSV validator
+          const validation = validateCSVColumns(headers);
+
+          if (!validation.isValid) {
+            const missing = validation.missingColumns.join(", ");
+            throw new Error(`Extracted CSV missing required columns: ${missing}. Headers: ${headers.join(", ")}`);
+          }
+
+          columnIndices = {
+            DATE: headers.findIndex(
+              (h) => h.trim() === validation.requiredColumns.DATE.trim()
+            ),
+            DESCRIPTION: headers.findIndex(
+              (h) => h.trim() === validation.requiredColumns.DESCRIPTION.trim()
+            ),
+            DEBIT:
+              validation.requiredColumns.DEBIT
+                ? headers.findIndex(
+                    (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
+                  )
+                : -1,
+            CREDIT:
+              validation.requiredColumns.CREDIT
+                ? headers.findIndex(
+                    (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
+                  )
+                : -1,
+            AMOUNT:
+              validation.requiredColumns.AMOUNT
+                ? headers.findIndex(
+                    (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
+                  )
+                : -1,
+            DIRECTION:
+              validation.requiredColumns.DIRECTION
+                ? headers.findIndex(
+                    (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
+                  )
+                : -1,
+          };
+        }
+
+        // Parse rows into transactions (up to 5 for preview)
+        const transactions: ExtractedTransaction[] = [];
+        const errors: string[] = [];
+        console.log("lines.length", lines.length);
+        //shuffle hte transactions
+        lines.sort(() => Math.random() - 0.5);
+
+        for (let i = 1; i < Math.min(50, lines.length); i++) {
+          try {
+            const tx = this.parseCSVLineWithMapping(
+              lines[i],
+              i + 1,
+              columnIndices,
+              i // original index (0-based here); display as 1-based
+            );
+            if (tx) transactions.push(tx);
+          } catch (err) {
+            errors.push(
+              `Line ${i + 1}: ${err instanceof Error ? err.message : "Unknown error"}`
+            );
+          }
+        }
+
+        return this.buildExtractionResult(transactions, errors);
+      } else if (file.type === "text/csv") {
+        // For CSV files, directly extract transactions
+        const text = await file.text();
+        const lines = text.split("").filter((line) => line.trim());
+
+        if (lines.length === 0) {
+          throw new Error("CSV file is empty");
+        }
+
+        const transactions: ExtractedTransaction[] = [];
+        const errors: string[] = [];
+
+        // Parse header row to get column indices
+        const headers = this.parseCSVColumns(lines[0]);
+
+        let columnIndices: Record<string, number> = {};
+
+        if (columnMapping) {
+          // Use provided column mapping with exact string matching
+          columnIndices = {
+            DATE: headers.findIndex((h) => h.trim() === columnMapping.DATE.trim()),
+            DESCRIPTION: headers.findIndex(
+              (h) => h.trim() === columnMapping.DESCRIPTION.trim()
+            ),
+            DEBIT: columnMapping.DEBIT
+              ? headers.findIndex((h) => h.trim() === columnMapping.DEBIT.trim())
+              : -1,
+            CREDIT: columnMapping.CREDIT
+              ? headers.findIndex((h) => h.trim() === columnMapping.CREDIT.trim())
+              : -1,
+            AMOUNT: columnMapping.AMOUNT
+              ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
+              : -1,
+            DIRECTION: columnMapping.DIRECTION
+              ? headers.findIndex((h) => h.trim() === columnMapping.DIRECTION?.trim())
+              : -1,
+          };
+
+          // Validate that required columns were found
+          if (columnIndices.DATE === -1) {
+            throw new Error(
+              `Date column "${columnMapping.DATE}" not found in CSV headers: ${headers.join(", ")}`
+            );
+          }
+          if (columnIndices.DESCRIPTION === -1) {
+            throw new Error(
+              `Description column "${columnMapping.DESCRIPTION}" not found in CSV headers: ${headers.join(", ")}`
+            );
+          }
+          if (
+            columnIndices.AMOUNT === -1 &&
+            (columnIndices.DEBIT === -1 || columnIndices.CREDIT === -1)
+          ) {
+            const missingCols: string[] = [];
+            if (columnMapping.DEBIT && columnIndices.DEBIT === -1)
+              missingCols.push(`"${columnMapping.DEBIT}"`);
+            if (columnMapping.CREDIT && columnIndices.CREDIT === -1)
+              missingCols.push(`"${columnMapping.CREDIT}"`);
+            if (columnMapping.AMOUNT && columnIndices.AMOUNT === -1)
+              missingCols.push(`"${columnMapping.AMOUNT}"`);
+            throw new Error(
+              `Amount columns not found: ${missingCols.join(", ")} in CSV headers: ${headers.join(", ")}`
+            );
+          }
+        } else {
+          // Use default column order (legacy behavior) or auto-detect
+          const validation = validateCSVColumns(headers);
+          if (validation.isValid && validation.suggestedMapping) {
+            const mapping = validation.suggestedMapping;
+            columnIndices = {
+              DATE: headers.findIndex((h) => h.trim() === mapping.DATE.trim()),
+              DESCRIPTION: headers.findIndex((h) => h.trim() === mapping.DESCRIPTION.trim()),
+              DEBIT: mapping.DEBIT
+                ? headers.findIndex((h) => h.trim() === mapping.DEBIT.trim())
+                : -1,
+              CREDIT: mapping.CREDIT
+                ? headers.findIndex((h) => h.trim() === mapping.CREDIT.trim())
+                : -1,
+              AMOUNT: mapping.AMOUNT
+                ? headers.findIndex((h) => h.trim() === mapping.AMOUNT?.trim())
+                : -1,
+              DIRECTION: mapping.DIRECTION
+                ? headers.findIndex((h) => h.trim() === mapping.DIRECTION?.trim())
+                : -1,
+            };
+          } else {
+            // Fallback to default column order
+            columnIndices = {
+              DATE: 0,
+              DESCRIPTION: 1,
+              DEBIT: 2,
+              CREDIT: 3,
+              AMOUNT: -1,
+              DIRECTION: -1,
+            };
+          }
+        }
+
+        // Parse rows into transactions (up to 5 for preview)
+        const dataLines = lines.slice(1);
+        for (let i = 0; i < Math.min(5, dataLines.length); i++) {
+          try {
+            const transaction = this.parseCSVLineWithMapping(
+              dataLines[i],
+              i + 2,
+              columnIndices,
+              i + 1 // Pass original index (1-based)
+            );
+            if (transaction) {
+              transactions.push(transaction);
+            }
+          } catch (error) {
+            const errorMsg = `Line ${i + 2}: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`;
+            errors.push(errorMsg);
+          }
+        }
+
+        return this.buildExtractionResult(transactions, errors);
+      } else {
+        throw new Error(`Unsupported file type for preview: ${file.type}`);
+      }
+    } catch (error) {
+      return {
+        transactions: [],
+        errors: [error instanceof Error ? error.message : "Unknown preview error"],
+        summary: {
+          totalTransactions: 0,
+          totalCredits: 0,
+          totalDebits: 0,
+          dateRange: { from: "", to: "" },
+        },
+      };
+    }
   },
 
   async extractFromExcel(
@@ -845,6 +1160,18 @@ export const transactionExtractorService = {
     // Clean up description - normalize whitespace
     const cleanDesc = description.replace(/\s+/g, " ").trim();
 
+    // Use custom regex pattern if provided
+    if (this.customRegexPattern) {
+      const match = cleanDesc.match(this.customRegexPattern);
+      if (match && match[1]) {
+        const extracted = match[1].trim();
+        if (this.isValidCounterpartyName(extracted)) {
+          return extracted;
+        }
+      }
+      return undefined;
+    }
+
     // Bank-specific regex patterns based on Python implementation
     const bankPatterns: Record<string, RegExp[]> = {
       generic: [
@@ -977,5 +1304,74 @@ export const transactionExtractorService = {
         },
       },
     };
+  },
+
+  async testRegexPattern(
+    file: File,
+    regexPattern: string,
+    bankPreset: string = "generic"
+  ): Promise<{ extracted: number; failed: number }> {
+    try {
+      // Save the current bank preset and custom regex
+      const originalBankPreset = this.bankPreset;
+      const originalCustomRegex = this.customRegexPattern;
+      
+      // Set the new values for testing
+      this.setBankPreset(bankPreset);
+      this.setCustomRegexPattern(regexPattern);
+      
+      // Extract transactions using the preview method
+      const result = await this.previewTransactions(file, bankPreset);
+      
+      // Restore the original values
+      this.setBankPreset(originalBankPreset);
+      this.customRegexPattern = originalCustomRegex;
+      
+      // Return the counts
+      return {
+        extracted: result.transactions.length,
+        failed: result.errors.length
+      };
+    } catch (error) {
+      console.error("Error testing regex pattern:", error);
+      return { extracted: 0, failed: 0 };
+    }
+  },
+
+  testRegexOnDescriptions(
+    descriptions: string[],
+    regexPattern: string
+  ): { extracted: number; failed: number } {
+    try {
+      // Create regex pattern
+      const pattern = new RegExp(regexPattern, 'i');
+      
+      let extracted = 0;
+      let failed = 0;
+      
+      // Test pattern on each description
+      for (const description of descriptions) {
+        try {
+          const match = description.match(pattern);
+          if (match && match[1]) {
+            const extractedName = match[1].trim();
+            if (this.isValidCounterpartyName(extractedName)) {
+              extracted++;
+            } else {
+              failed++;
+            }
+          } else {
+            failed++;
+          }
+        } catch (error) {
+          failed++;
+        }
+      }
+      
+      return { extracted, failed };
+    } catch (error) {
+      console.error("Invalid regex pattern:", error);
+      return { extracted: 0, failed: 0 };
+    }
   },
 };

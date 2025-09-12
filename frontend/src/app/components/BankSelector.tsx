@@ -13,14 +13,21 @@ interface BankSelectorProps {
   selectedBank: string;
   onBankChange: (bankPreset: string) => void;
   disabled?: boolean;
+  onRegexTest?: (result: { extracted: number; failed: number }) => void;
+  extractedData?: any[] | null;
 }
 
 export default function BankSelector({
   selectedBank,
   onBankChange,
   disabled = false,
+  onRegexTest,
+  extractedData,
 }: BankSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [customRegex, setCustomRegex] = useState("");
+  const [testResult, setTestResult] = useState<{ extracted: number; failed: number } | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const banks = transactionExtractorService.getAvailableBanks();
   const selectedBankInfo = banks.find((bank) => bank.value === selectedBank);
@@ -44,6 +51,34 @@ export default function BankSelector({
   const handleBankSelect = (bankPreset: string) => {
     onBankChange(bankPreset);
     setIsOpen(false);
+  };
+
+  const handleRegexTest = () => {
+    if (!customRegex || !extractedData || extractedData.length === 0) return;
+    
+    setIsTesting(true);
+    setTestResult(null);
+    
+    try {
+      // Extract descriptions from the data
+      const descriptions = extractedData.map(item => item.description || "");
+      
+      // Test the regex pattern
+      const result = transactionExtractorService.testRegexOnDescriptions(
+        descriptions,
+        customRegex
+      );
+      
+      setTestResult(result);
+      if (onRegexTest) {
+        onRegexTest(result);
+      }
+    } catch (error) {
+      console.error("Error testing regex pattern:", error);
+      setTestResult({ extracted: 0, failed: 0 });
+    } finally {
+      setIsTesting(false);
+    }
   };
 
   return (
@@ -132,6 +167,43 @@ export default function BankSelector({
           {selectedBankInfo.description}
         </p>
       )}
+
+      {/* Custom Regex Input */}
+      <div className="mt-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Custom Regex Pattern
+        </label>
+        <div className="flex">
+          <input
+            type="text"
+            value={customRegex}
+            onChange={(e) => setCustomRegex(e.target.value)}
+            placeholder="Enter regex pattern for counterparty extraction"
+            className="flex-1 min-w-0 block w-full px-3 py-2 rounded-l-md border border-gray-300 shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+            disabled={disabled}
+          />
+          <button
+            type="button"
+            onClick={handleRegexTest}
+            disabled={disabled || isTesting || !customRegex}
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-r-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+          >
+            {isTesting ? "Testing..." : "Test"}
+          </button>
+        </div>
+        
+        {testResult && (
+          <div className="mt-2 text-sm">
+            <span className="text-green-600 font-medium">
+              Extracted: {testResult.extracted}
+            </span>
+            <span className="mx-2">|</span>
+            <span className="text-red-600 font-medium">
+              Failed: {testResult.failed}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
