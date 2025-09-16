@@ -49,8 +49,14 @@ export default function MuleAccountDetectionTab({
   };
 
   const handleAlertSelect = (alertId: string) => {
-    setSelectedAlert(alertId);
-    setViewMode('detailed');
+    setSelectedAlert(alertId || null);
+    // Only switch to detailed view when selecting an alert, not when clearing selection
+    if (alertId) {
+      setViewMode('detailed');
+    } else {
+      // When clearing selection, go back to summary view
+      setViewMode('summary');
+    }
   };
 
   const getAlertsByRiskLevel = (): { high: MuleAlert[]; medium: MuleAlert[]; low: MuleAlert[] } => {

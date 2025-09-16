@@ -95,8 +95,6 @@ export function MuleAccountReport({
     );
   }
 
-  console.log(`selectedAlertData`,selectedAlertData)
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
