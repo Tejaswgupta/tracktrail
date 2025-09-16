@@ -51,52 +51,42 @@ interface AMLFlag {
 
 
 export default function AIModeTab({ caseId }: AIModeTabProps) {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] =
     useState<AIResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [forceRerun, setForceRerun] = useState(false);
+  const [entityIds, setEntityIds] = useState<string[]>([]);
 
-  useEffect(() => {
-    const fetchTransactions = async () => {
-      try {
-        const txData = await transactionsService.getCaseTransactionsForAnalysis(
-          caseId
-        );
-        setTransactions(txData);
-      } catch (err) {
-        setError("Failed to load transactions");
-        console.error("Error fetching transactions:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
 
-    fetchTransactions();
-  }, [caseId]);
 
   // Attempt to restore cached analysis after transactions load
   useEffect(() => {
-    try {
-      if (transactions.length === 0) return;
-      const entityIds = transactions.map((tx) => tx.entity_id);
-      const cacheKey = buildCacheKey(caseId, entityIds);
+
+      async function fetchEntityIds(){
+        try{
+      const metadata = await transactionsService.getCaseAMLMetadata(caseId);
+      setEntityIds(metadata.entityIds);
+      const cacheKey = buildCacheKey(caseId, metadata.entityIds);
       const cached = readCache(cacheKey);
       if (cached) {
         setAnalysisResult(cached);
         console.log("Restored AI analysis from cache on load");
       }
-    } catch (e) {
+      }
+       catch (e) {
       console.warn("Failed to restore cached AI analysis:", e);
     }
-  }, [transactions, caseId]);
+      
+
+
+  }
+fetchEntityIds();
+}, [caseId]);
 
   const analyzeWithAI = async (force = false) => {
     setError(null);
     setAnalyzing(true);
-    const entityIds = transactions.map((tx) => tx.entity_id);
     const cacheKey = buildCacheKey(caseId, entityIds);
 
     // 1) Try cache first unless force re-run
@@ -141,14 +131,7 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <span className="ml-3 text-gray-600">Loading transactions...</span>
-      </div>
-    );
-  }
+
 
   if (error) {
     return (
@@ -189,12 +172,6 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
             <p className="text-sm text-gray-600 mt-1">
               Uses advanced AI to detect potential money laundering patterns in
               transactions
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm text-gray-600">Total Transactions</p>
-            <p className="text-2xl font-semibold text-gray-900">
-              {transactions.length.toLocaleString()}
             </p>
           </div>
         </div>
@@ -238,8 +215,8 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
           </div>
           <button
             onClick={() => analyzeWithAI(forceRerun)}
-            disabled={analyzing || transactions.length === 0}
-            className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${analyzing || transactions.length === 0
+            disabled={analyzing}
+            className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${analyzing
               ? "bg-gray-400 cursor-not-allowed"
               : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
               }`}

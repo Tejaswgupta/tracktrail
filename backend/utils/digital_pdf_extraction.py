@@ -1,10 +1,8 @@
-import csv
 import re
 import fitz
 import logging
-from typing import List, Dict, Tuple, Optional
-import camelot
-
+from typing import List, Dict, Tuple
+import tabula
 
 
 logger = logging.getLogger(__name__)
@@ -14,30 +12,31 @@ class PDFExtractor:
     def __init__(self, method: str = "both"):
         """
         Initialize PDFExtractor with specified extraction method.
-        
+
         Args:
             method (str): Extraction method to use. Options are:
-                - "camelot": Use only Camelot library
+                - "tabula": Use only Tabula-py library
                 - "pymupdf": Use only PyMuPDF library
                 - "both": Try both methods (default behavior)
         """
         self.extraction_methods = []
-        
-        if method == "camelot":
-            self.extraction_methods.append("camelot")
+
+        if method == "tabula":
+            self.extraction_methods.append("tabula")
         elif method == "pymupdf":
             self.extraction_methods.append("pymupdf")
         elif method == "both":
-            self.extraction_methods.append("camelot")
+            self.extraction_methods.append("tabula")
             self.extraction_methods.append("pymupdf")
         else:
             # Default to both if invalid method specified
-            self.extraction_methods.append("camelot")
+            self.extraction_methods.append("tabula")
             self.extraction_methods.append("pymupdf")
 
 
-
-def extract_tables_from_pdf(pdf_path: str, method: str = "auto", extraction_method: str = "both") -> List[Dict]:
+def extract_tables_from_pdf(
+    pdf_path: str, method: str = "auto", extraction_method: str = "both"
+) -> List[Dict]:
     """Extract tables from PDF using specified method or auto-detection with bank-specific handling"""
 
     extractor = PDFExtractor(method=extraction_method)
@@ -63,57 +62,50 @@ def extract_tables_from_pdf(pdf_path: str, method: str = "auto", extraction_meth
         return _extract_with_method(pdf_path, method)
 
 
-
-
 def _extract_with_method(pdf_path: str, method: str) -> List[Dict]:
     """Extract tables using specified method"""
-    if method == "camelot":
-        return _extract_with_camelot(pdf_path)
+    if method == "tabula":
+        return _extract_with_tabula(pdf_path)
     elif method == "pymupdf":
         return _extract_with_pymupdf(pdf_path)
     else:
         raise ValueError(f"Extraction method '{method}' not available")
 
 
-def _extract_with_camelot(pdf_path: str) -> List[Dict]:
-    """Extract tables using Camelot library"""
+def _extract_with_tabula(pdf_path: str) -> List[Dict]:
+    """Extract tables using Tabula-py library"""
     try:
-        tables = camelot.read_pdf(pdf_path, pages="all", flavor="lattice")
+        tables = tabula.read_pdf(
+            pdf_path, pages="all", output_format="json", lattice=True
+        )
         if not tables or len(tables) == 0:
-            tables = camelot.read_pdf(pdf_path, pages="all", flavor="stream")
+            tables = tabula.read_pdf(
+                pdf_path, pages="all", output_format="json", stream=True
+            )
 
         extracted_data = []
         for i, table in enumerate(tables):
-            df = table.df
-            table_data = df.values.tolist()
-
-            if not df.columns.empty:
-                headers = df.columns.tolist()
-                table_data.insert(0, headers)
+            table_data = []
+            for row in table["data"]:
+                table_data.append([cell["text"] for cell in row])
 
             extracted_data.append(
                 {
-                    "page": table.page,
+                    "page": table["page"],
                     "table_number": i + 1,
                     "data": table_data,
-                    "confidence": (
-                        getattr(table, "accuracy", 0.0)
-                        if hasattr(table, "accuracy")
-                        else 0.0
-                    ),
+                    "confidence": 0.0,
                 }
             )
 
         return extracted_data
     except Exception as e:
-        logger.error(f"Camelot extraction failed: {str(e)}")
+        logger.error(f"Tabula extraction failed: {str(e)}")
         return []
-
 
 
 def _extract_with_pymupdf(pdf_path: str) -> List[Dict]:
     """Extract tables using PyMuPDF library with bank-specific handling"""
-
 
     all_extracted_tables = []
     try:
@@ -158,13 +150,6 @@ def _extract_with_pymupdf(pdf_path: str) -> List[Dict]:
     except Exception as e:
         logger.error(f"PyMuPDF extraction failed: {str(e)}")
         return []
-
-
-
-
-
-
-
 
 
 def is_statement_table(table_data, reference_col_count=None) -> Tuple[bool, bool]:

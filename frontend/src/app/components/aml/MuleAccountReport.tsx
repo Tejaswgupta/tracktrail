@@ -31,6 +31,10 @@ export function MuleAccountReport({
     return new Date(dateStr).toLocaleDateString('en-IN');
   };
 
+  const formatPercentage = (value: number) => {
+    return (value * 100).toFixed(2) + '%';
+  };
+
   const getRiskLevel = (confidence: number) => {
     if (confidence >= 0.7) return 'HIGH RISK';
     if (confidence >= 0.4) return 'MEDIUM RISK';
@@ -41,6 +45,21 @@ export function MuleAccountReport({
     if (confidence >= 0.7) return 'text-red-700 bg-red-100 border-red-300';
     if (confidence >= 0.4) return 'text-yellow-700 bg-yellow-100 border-yellow-300';
     return 'text-green-700 bg-green-100 border-green-300';
+  };
+
+  const formatIntervalType = (type: string) => {
+    switch (type) {
+      case 'lifetime':
+        return 'Lifetime';
+      case 'monthly':
+        return 'Monthly';
+      case 'rolling_7d':
+        return '7-Day Rolling';
+      case 'rolling_30d':
+        return '30-Day Rolling';
+      default:
+        return type.replace('_', ' ').toUpperCase();
+    }
   };
 
   if (!selectedAlertData) {
@@ -75,6 +94,8 @@ export function MuleAccountReport({
       </div>
     );
   }
+
+  console.log(`selectedAlertData`,selectedAlertData)
 
   return (
     <div className="space-y-6">
@@ -139,11 +160,78 @@ export function MuleAccountReport({
           <div className="text-center">
             <div className="text-sm text-gray-600 mb-1">Flow Balance</div>
             <div className="text-2xl font-bold text-blue-600">
-              {(selectedAlertData.disbursement_phase.flow_balance_score * 100).toFixed(1)}%
+              {formatPercentage(selectedAlertData.disbursement_phase.flow_balance_score)}
             </div>
           </div>
         </div>
       </div>
+
+      {selectedAlertData.multi_interval_analysis && selectedAlertData.multi_interval_analysis.intervals_summary.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-lg p-6">
+          <h5 className="font-semibold text-gray-900 mb-4">Interval Analysis</h5>
+          <p className="text-sm text-gray-600 mb-4">
+            Analysis of transaction patterns across different time intervals to identify consistent balancing behavior.
+          </p>
+          
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Interval Type
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Balanced Periods
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Suspicion Score
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Description
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {selectedAlertData.multi_interval_analysis.intervals_summary.map((interval, index) => (
+                  <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {formatIntervalType(interval.type)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {interval.balanced_periods}/{interval.periods_analyzed}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className={`h-2 rounded-full ${
+                              interval.suspicion >= 0.8 ? 'bg-red-500' : 
+                              interval.suspicion >= 0.5 ? 'bg-yellow-500' : 'bg-green-500'
+                            }`} 
+                            style={{ width: `${interval.suspicion * 100}%` }}
+                          ></div>
+                        </div>
+                        <span className="ml-2 text-sm text-gray-500 w-12">
+                          {formatPercentage(interval.suspicion)}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">
+                      {interval.description}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          
+          <div className="mt-4 text-sm text-gray-600">
+            <p>
+              <span className="font-medium">Overall Suspicion:</span> {formatPercentage(selectedAlertData.multi_interval_analysis.lifetime_ratio)} of total activity shows balanced flow patterns.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className={`border-2 rounded-lg p-6 ${selectedAlertData.confidence_score >= 0.7 ? 'border-red-300 bg-red-50' : selectedAlertData.confidence_score >= 0.4 ? 'border-yellow-300 bg-yellow-50' : 'border-green-300 bg-green-50'}`}>
         <h5 className="font-semibold text-gray-900 mb-3">Risk Assessment</h5>

@@ -46,6 +46,7 @@ function transformBackendResponse(apiResp: any): MuleAnalysisResult {
       flow_balance_score: alert.pass_through_analysis?.flow_balance_percentage || alert.pass_through_analysis?.flow_balance_score || 0,
     },
     recommended_actions: alert.recommended_actions || [],
+    multi_interval_analysis: alert.multi_interval_analysis || [],
   }));
 
   return {

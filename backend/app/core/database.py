@@ -134,7 +134,7 @@ class DatabaseManager:
         """
         try:
             async with self.get_connection() as client:
-
+                PAGE_SIZE = 10000
                 query = (
                     client.table("transactions")
                     .select(
@@ -163,10 +163,21 @@ class DatabaseManager:
                 if date_to:
                     query = query.lte("tx_date", date_to.date().isoformat())
 
-                result = query.execute()
+                all_data = []
+                offset = 0
+                while True:
+                    paginated_query = query.limit(PAGE_SIZE).offset(offset)
+                    result = paginated_query.execute()
 
-                if not result.data:
+                    if result.data:
+                        all_data.extend(result.data)
 
+                    if not result.data or len(result.data) < PAGE_SIZE:
+                        break
+
+                    offset += PAGE_SIZE
+
+                if not all_data:
                     entity_check = (
                         client.table("entities")
                         .select("entity_id")
@@ -177,10 +188,9 @@ class DatabaseManager:
                         raise EntityNotFoundError(
                             f"No entities found for IDs: {entity_ids}"
                         )
-
                     return pd.DataFrame()
 
-                df = pd.DataFrame(result.data)
+                df = pd.DataFrame(all_data)
 
                 df = self._standardize_transaction_columns(df)
 

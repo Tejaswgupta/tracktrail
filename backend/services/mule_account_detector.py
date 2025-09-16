@@ -521,6 +521,20 @@ class MuleAccountDetector:
             if not interval_results:
                 return None
 
+            # Use all interval results instead of just the best one
+            all_intervals_summary = [
+                {
+                    "type": r["interval_type"],
+                    "ratio": r["net_flow_ratio"],
+                    "suspicion": r["suspicion_score"],
+                    "description": r["description"],
+                    "periods_analyzed": r.get("periods_analyzed", 0),
+                    "balanced_periods": r.get("balanced_periods", 0),
+                }
+                for r in interval_results
+            ]
+
+            # Use the best result for scoring calculations
             best_result = max(interval_results, key=lambda x: x["suspicion_score"])
 
             net_flow_ratio = best_result["net_flow_ratio"]
@@ -623,15 +637,7 @@ class MuleAccountDetector:
                         "description", "Overall account analysis"
                     ),
                     "all_intervals_analyzed": len(interval_results),
-                    "intervals_summary": [
-                        {
-                            "type": r["interval_type"],
-                            "ratio": r["net_flow_ratio"],
-                            "suspicion": r["suspicion_score"],
-                            "description": r["description"],
-                        }
-                        for r in interval_results[:5]
-                    ],
+                    "intervals_summary": all_intervals_summary,
                 }
 
                 return MuleAccountAlert(

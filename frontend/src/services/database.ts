@@ -833,6 +833,32 @@ export const counterpartyService = {
     return data || [];
   },
 
+  async getCaseCounterpartyStatsWithDetails(caseId: string): Promise<
+    Array<{
+      counterparty_name: string;
+      transaction_count: number;
+      total_debits: number;
+      total_credits: number;
+      total_amount: number;
+      net_flow: number;
+      avg_transaction_size: number;
+      max_transaction_size: number;
+      first_seen: string;
+      last_seen: string;
+      days_active: number;
+      frequency: number;
+    }>
+  > {
+    const { data, error } = await supabase
+      .from("counterparty_stats")
+      .select("*")
+      .eq("case_id", caseId)
+      .order("transaction_count", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
   async findSimilarCounterparties(
     caseId: string,
     similarityThreshold: number = 0.8

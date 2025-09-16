@@ -14,6 +14,18 @@ export interface MuleAlert {
     net_flow: number;
     flow_balance_score: number;
   };
+  multi_interval_analysis?: {
+    all_intervals_analyzed: number;
+    intervals_summary: Array<{
+      type: string;
+      ratio: number;
+      suspicion: number;
+      description: string;
+      periods_analyzed: number;
+      balanced_periods: number;
+    }>;
+    lifetime_ratio: number;
+  };
   recommended_actions?: string[];
   // Add these optional fields if your API returns them
   detection_interval?: string;

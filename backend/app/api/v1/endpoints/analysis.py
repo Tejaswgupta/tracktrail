@@ -172,16 +172,9 @@ async def analyze_mule_accounts(
                     "flow_balance_percentage": alert.disbursement_phase.get('flow_balance_score', 0) * 100
                 },
                 "multi_interval_analysis": {
-                    "daily_balancing": {
-                        "balanced_days": alert.disbursement_phase.get('balanced_periods', 0),
-                        "total_days": alert.disbursement_phase.get('periods_analyzed', 1),
-                        "ratio": alert.disbursement_phase.get('suspicion_score', 0)
-                    },
-                    "suspicion_metrics": {
-                        "lifetime_ratio": alert.disbursement_phase.get('net_flow_ratio', 0),
-                        "daily_ratio": 0.001,
-                        "monthly_ratio": 0.001
-                    }
+                    "all_intervals_analyzed": alert.disbursement_phase.get('all_intervals_analyzed', 0),
+                    "intervals_summary": alert.disbursement_phase.get('intervals_summary', []),
+                    "lifetime_ratio": alert.disbursement_phase.get('net_flow_ratio', 0)
                 }
             }
             formatted_alerts.append(formatted_alert)

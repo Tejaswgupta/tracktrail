@@ -1,8 +1,8 @@
 "use client";
 
-import { entitiesService, transactionsService } from "@/services/database";
+import { entitiesService, transactionsService, counterpartyService } from "@/services/database";
 import type { Entity, Transaction } from "@/types/database";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 // Import Recharts components
 import {
   Bar,
@@ -47,6 +47,7 @@ interface OverviewTabProps {
 
 export default function OverviewTab({ caseId }: OverviewTabProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [counterpartyStats, setCounterpartyStats] = useState<CounterpartyStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] =
     useState<NumericCounterpartyStatsKeys>("totalVolume");
@@ -70,14 +71,21 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     fetchData();
   }, []);
 
+  // Fetch transactions (for summary metrics only)
   useEffect(() => {
     const fetchData = async () => {
       try {
+        setLoading(true);
         let data: Transaction[] = [];
         if (selectedEntityId) {
           data = await transactionsService.getByEntityId(selectedEntityId);
         } else {
-          data = await transactionsService.getByCaseId(caseId);
+          // For large datasets, we'll only fetch a sample or use optimized queries
+          data = await transactionsService.getCaseTransactionsForAnalysis(caseId, [
+            "transaction_id",
+            "amount",
+            "direction"
+          ]);
         }
         setTransactions(data);
       } catch (error) {
@@ -88,6 +96,69 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     };
 
     fetchData();
+  }, [caseId, selectedEntityId]);
+
+  // Fetch counterparty stats from backend
+  useEffect(() => {
+    const fetchCounterpartyStats = async () => {
+      try {
+        setLoading(true);
+        // Try to get detailed stats first, fallback to basic stats
+        let stats;
+        try {
+          stats = await counterpartyService.getCaseCounterpartyStatsWithDetails(caseId);
+        } catch (error) {
+          console.warn("Detailed counterparty stats not available, using basic stats");
+          const basicStats = await counterpartyService.getCaseCounterpartyStats(caseId);
+          // Transform basic stats to match detailed format
+          stats = basicStats.map(stat => ({
+            counterparty_name: stat.counterparty_name,
+            transaction_count: stat.transaction_count,
+            total_debits: 0,
+            total_credits: Number(stat.total_amount),
+            total_amount: Number(stat.total_amount),
+            net_flow: Number(stat.total_amount),
+            avg_transaction_size: Number(stat.total_amount) / stat.transaction_count,
+            max_transaction_size: 0,
+            first_seen: stat.first_seen,
+            last_seen: stat.last_seen
+          }));
+        }
+        
+        // Transform backend data to match our CounterpartyStats interface
+        const transformedStats: CounterpartyStats[] = stats.map(stat => {
+          const daysActive = Math.max(
+            1,
+            Math.ceil(
+              (new Date(stat.last_seen).getTime() - new Date(stat.first_seen).getTime()) / (1000 * 60 * 60 * 24)
+            ) + 1
+          );
+          
+          return {
+            name: stat.counterparty_name,
+            transactionCount: stat.transaction_count,
+            totalDebit: Number(stat.total_debits),
+            totalCredit: Number(stat.total_credits),
+            totalVolume: Number(stat.total_amount),
+            netFlow: Number(stat.net_flow),
+            avgTransactionSize: Number(stat.avg_transaction_size),
+            maxTransactionSize: Number(stat.max_transaction_size),
+            firstTransactionDate: stat.first_seen,
+            lastTransactionDate: stat.last_seen,
+            daysActive: daysActive,
+            frequency: stat.transaction_count / daysActive
+          };
+        });
+        
+        setCounterpartyStats(transformedStats);
+      } catch (error) {
+        console.error("Error fetching counterparty stats:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCounterpartyStats();
   }, [caseId, selectedEntityId]);
 
   // Calculate summary metrics
@@ -157,71 +228,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     },
   };
 
-  // Calculate counterparty statistics
-  const counterpartyStats: Record<string, CounterpartyStats> = transactions
-    .filter((t) => t.counterparty_merged && t.counterparty_merged.trim() !== "")
-    .reduce((acc, transaction) => {
-      const counterparty = transaction.counterparty_merged!;
-
-      if (!acc[counterparty]) {
-        acc[counterparty] = {
-          name: counterparty,
-          transactionCount: 0,
-          totalDebit: 0,
-          totalCredit: 0,
-          totalVolume: 0,
-          netFlow: 0,
-          avgTransactionSize: 0,
-          maxTransactionSize: 0,
-          firstTransactionDate: transaction.tx_date,
-          lastTransactionDate: transaction.tx_date,
-          daysActive: 0,
-          frequency: 0,
-        };
-      }
-
-      const stats = acc[counterparty];
-      stats.transactionCount++;
-
-      if (transaction.direction === "DR") {
-        stats.totalDebit += transaction.amount;
-      } else {
-        stats.totalCredit += transaction.amount;
-      }
-
-      stats.totalVolume += transaction.amount;
-      stats.netFlow = stats.totalCredit - stats.totalDebit;
-      stats.maxTransactionSize = Math.max(
-        stats.maxTransactionSize,
-        transaction.amount
-      );
-
-      if (transaction.tx_date < stats.firstTransactionDate) {
-        stats.firstTransactionDate = transaction.tx_date;
-      }
-      if (transaction.tx_date > stats.lastTransactionDate) {
-        stats.lastTransactionDate = transaction.tx_date;
-      }
-
-      return acc;
-    }, {} as Record<string, CounterpartyStats>);
-
-  // Calculate derived metrics for counterparties
-  Object.values(counterpartyStats).forEach((stats) => {
-    stats.avgTransactionSize = stats.totalVolume / stats.transactionCount;
-
-    const firstDate = new Date(stats.firstTransactionDate);
-    const lastDate = new Date(stats.lastTransactionDate);
-    stats.daysActive = Math.max(
-      1,
-      Math.ceil(
-        (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24)
-      ) + 1
-    );
-    stats.frequency = stats.transactionCount / stats.daysActive;
-  });
-
-  const sortedCounterparties = Object.values(counterpartyStats)
+    // Use backend counterparty stats instead of client-side calculation
+  const sortedCounterparties = [...counterpartyStats]
     .sort((a, b) => b[sortBy] - a[sortBy])
     .slice(0, showTopN);
 
