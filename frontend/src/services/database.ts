@@ -12,6 +12,13 @@ import { createClient } from "@/utils/supabase/client";
 
 export const supabase = createClient();
 
+export interface AMLMetadata {
+  entityIds: string[];
+  // dateRange: { from: string; to: string };
+  // transactionCount: number;
+  // totalVolume: number;
+}
+
 // Cases
 export const casesService = {
   async getAll(): Promise<CaseWithStats[]> {
@@ -447,13 +454,11 @@ export const transactionsService = {
     return data || [];
   },
 
+  
+
+
   // Optimized method for AML analysis - only fetches metadata
-  async getCaseAMLMetadata(caseId: string): Promise<{
-    entityIds: string[];
-    dateRange: { from: string; to: string };
-    transactionCount: number;
-    totalVolume: number;
-  }> {
+  async getCaseAMLMetadata(caseId: string): Promise<AMLMetadata> {
     // First get all entity IDs for this case
     const { data: caseEntities, error: caseError } = await supabase
       .from("case_entities")
@@ -465,52 +470,52 @@ export const transactionsService = {
     if (!caseEntities || caseEntities.length === 0) {
       return {
         entityIds: [],
-        dateRange: { from: "", to: "" },
-        transactionCount: 0,
-        totalVolume: 0,
+        // dateRange: { from: "", to: "" },
+        // transactionCount: 0,
+        // totalVolume: 0,
       };
     }
 
     const entityIds = caseEntities.map((ce) => ce.entity_id);
 
     // Get transaction metadata for those entities
-    const { data, error } = await supabase
-      .from("transactions")
-      .select("tx_date, amount, entity_id")
-      .in("entity_id", entityIds);
+    // const { data, error } = await supabase
+    //   .from("transactions")
+    //   .select("tx_date, amount, entity_id")
+    //   .in("entity_id", entityIds);
 
-    if (error) throw error;
+    // if (error) throw error;
 
-    if (!data || data.length === 0) {
-      return {
-        entityIds,
-        dateRange: { from: "", to: "" },
-        transactionCount: 0,
-        totalVolume: 0,
-      };
-    }
+    // if (!data || data.length === 0) {
+    //   return {
+    //     entityIds,
+    //     dateRange: { from: "", to: "" },
+    //     transactionCount: 0,
+    //     totalVolume: 0,
+    //   };
+    // }
 
     // Calculate date range
-    const dates = data
-      .map((tx: any) => new Date(tx.tx_date))
-      .sort((a, b) => a.getTime() - b.getTime());
-    const dateRange = {
-      from: dates[0].toISOString().split("T")[0],
-      to: dates[dates.length - 1].toISOString().split("T")[0],
-    };
+    // const dates = data
+    //   .map((tx: any) => new Date(tx.tx_date))
+    //   .sort((a, b) => a.getTime() - b.getTime());
+    // const dateRange = {
+    //   from: dates[0].toISOString().split("T")[0],
+    //   to: dates[dates.length - 1].toISOString().split("T")[0],
+    // };
 
-    // Calculate totals
-    const transactionCount = data.length;
-    const totalVolume = data.reduce(
-      (sum: number, tx: any) => sum + tx.amount,
-      0
-    );
+    // // Calculate totals
+    // const transactionCount = data.length;
+    // const totalVolume = data.reduce(
+    //   (sum: number, tx: any) => sum + tx.amount,
+    //   0
+    // );
 
     return {
       entityIds,
-      dateRange,
-      transactionCount,
-      totalVolume,
+      // dateRange,
+      // transactionCount,
+      // totalVolume,
     };
   },
 

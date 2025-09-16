@@ -205,7 +205,6 @@ class AMLDetectionService {
    * Handles both simple bilateral (A→B→A) and complex multi-entity patterns (A→B→C→A)
    */
   async detectRoundTripping(
-    transactions: Transaction[],
     selectedEntityIds: string[],
     config: RoundTrippingConfig = this.defaultConfig.roundTripping
   ): Promise<RoundTrippingResult> {
@@ -227,7 +226,6 @@ class AMLDetectionService {
       // Transform backend response to frontend format
       const result = AMLDataTransformer.transformCycleDetectionResult(
         backendResponse.data,
-        transactions
       );
 
       this.setLoadingState({ isLoading: false });

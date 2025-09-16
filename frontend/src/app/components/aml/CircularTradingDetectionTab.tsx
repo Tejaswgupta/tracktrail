@@ -6,14 +6,10 @@ import { CircularTradingGraph } from './CircularTradingGraph';
 import { CircularTradingControls } from './CircularTradingControls';
 
 interface CircularTradingDetectionTabProps {
-  caseId: string;
-  amlMetadata: any;
   selectedEntityIds: string[];
 }
 
 export default function CircularTradingDetectionTab({
-  caseId,
-  amlMetadata,
   selectedEntityIds,
 }: CircularTradingDetectionTabProps) {
   const [analysisParameters, setAnalysisParameters] = useState({

@@ -6,14 +6,11 @@ import { MuleAccountControls } from './MuleAccountControls';
 import type { MuleAlert } from '@/types/mule';
 
 interface MuleAccountDetectionTabProps {
-  caseId: string;
-  amlMetadata: any;
   selectedEntityIds: string[];
 }
 
 export default function MuleAccountDetectionTab({
-  caseId,
-  amlMetadata,
+
   selectedEntityIds,
 }: MuleAccountDetectionTabProps) {
   const [analysisParameters, setAnalysisParameters] = useState({

@@ -3,39 +3,44 @@ import re
 import fitz
 import logging
 from typing import List, Dict, Tuple, Optional
-import pandas as pd
+import camelot
 
-try:
-    import camelot
-    CAMELOT_AVAILABLE = True
-except ImportError:
-    CAMELOT_AVAILABLE = False
 
-try:
-    import tabula
-
-    TABULA_AVAILABLE = True
-except ImportError:
-    TABULA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 
 class PDFExtractor:
-    def __init__(self):
+    def __init__(self, method: str = "both"):
+        """
+        Initialize PDFExtractor with specified extraction method.
+        
+        Args:
+            method (str): Extraction method to use. Options are:
+                - "camelot": Use only Camelot library
+                - "pymupdf": Use only PyMuPDF library
+                - "both": Try both methods (default behavior)
+        """
         self.extraction_methods = []
-        if CAMELOT_AVAILABLE:
+        
+        if method == "camelot":
             self.extraction_methods.append("camelot")
-        if TABULA_AVAILABLE:
-            self.extraction_methods.append("tabula")
-        self.extraction_methods.append("pymupdf")
+        elif method == "pymupdf":
+            self.extraction_methods.append("pymupdf")
+        elif method == "both":
+            self.extraction_methods.append("camelot")
+            self.extraction_methods.append("pymupdf")
+        else:
+            # Default to both if invalid method specified
+            self.extraction_methods.append("camelot")
+            self.extraction_methods.append("pymupdf")
 
 
 
-def extract_tables_from_pdf(pdf_path: str, method: str = "auto") -> List[Dict]:
+def extract_tables_from_pdf(pdf_path: str, method: str = "auto", extraction_method: str = "both") -> List[Dict]:
     """Extract tables from PDF using specified method or auto-detection with bank-specific handling"""
 
-    extractor = PDFExtractor()
+    extractor = PDFExtractor(method=extraction_method)
 
     if method == "auto":
         for extraction_method in extractor.extraction_methods:
@@ -54,7 +59,6 @@ def extract_tables_from_pdf(pdf_path: str, method: str = "auto") -> List[Dict]:
                 continue
 
         logger.info("All table methods failed, trying text-based extraction")
-        return _extract_from_text(pdf_path)
     else:
         return _extract_with_method(pdf_path, method)
 
@@ -63,10 +67,8 @@ def extract_tables_from_pdf(pdf_path: str, method: str = "auto") -> List[Dict]:
 
 def _extract_with_method(pdf_path: str, method: str) -> List[Dict]:
     """Extract tables using specified method"""
-    if method == "camelot" and CAMELOT_AVAILABLE:
+    if method == "camelot":
         return _extract_with_camelot(pdf_path)
-    elif method == "tabula" and TABULA_AVAILABLE:
-        return _extract_with_tabula(pdf_path)
     elif method == "pymupdf":
         return _extract_with_pymupdf(pdf_path)
     else:
@@ -108,36 +110,6 @@ def _extract_with_camelot(pdf_path: str) -> List[Dict]:
         return []
 
 
-def _extract_with_tabula(pdf_path: str) -> List[Dict]:
-    """Extract tables using Tabula library"""
-    try:
-        dfs = tabula.read_pdf(pdf_path, pages="all", multiple_tables=True)
-
-        extracted_data = []
-        current_page = 1
-
-        for i, df in enumerate(dfs):
-            if df.empty:
-                continue
-
-            table_data = df.values.tolist()
-            headers = df.columns.tolist()
-            table_data.insert(0, headers)
-
-            extracted_data.append(
-                {
-                    "page": current_page,
-                    "table_number": i + 1,
-                    "data": table_data,
-                    "confidence": 0.8,
-                }
-            )
-
-        return extracted_data
-    except Exception as e:
-        logger.error(f"Tabula extraction failed: {str(e)}")
-        return []
-
 
 def _extract_with_pymupdf(pdf_path: str) -> List[Dict]:
     """Extract tables using PyMuPDF library with bank-specific handling"""
@@ -178,11 +150,8 @@ def _extract_with_pymupdf(pdf_path: str) -> List[Dict]:
                     logger.info(
                         f"Structured tables found but poorly formatted, using text parsing for page {page_num + 1}"
                     )
-                    text_tables = _extract_table_from_text_layout(page, page_num + 1)
-                    all_extracted_tables.extend(text_tables)
             else:
-                text_tables = _extract_table_from_text_layout(page, page_num + 1)
-                all_extracted_tables.extend(text_tables)
+                pass
 
         document.close()
         return all_extracted_tables
@@ -191,108 +160,11 @@ def _extract_with_pymupdf(pdf_path: str) -> List[Dict]:
         return []
 
 
-def _extract_table_from_text_layout(page, page_num: int) -> List[Dict]:
-    """Extract table data from text layout when structured tables aren't found"""
-    try:
-        text = page.get_text()
-        lines = text.split("\n")
-
-        potential_rows = []
-        for line in lines:
-            if not line.strip():
-                continue
-
-            if _looks_like_table_row(line):
-                parsed_columns = _parse_generic_row(line)
-                if len(parsed_columns) >= 4 and any(
-                    col.strip() for col in parsed_columns
-                ):
-                    potential_rows.append(parsed_columns)
-
-        if len(potential_rows) > 3:
-            return [
-                {
-                    "page": page_num,
-                    "table_number": 1,
-                    "data": potential_rows,
-                    "confidence": 0.6,
-                }
-            ]
-
-        return []
-    except Exception as e:
-        logger.error(f"Text layout extraction failed: {str(e)}")
-        return []
 
 
 
 
 
-def _looks_like_table_row(line: str) -> bool:
-    """Determine if a line looks like a bank statement table row"""
-    date_patterns = [
-        r"\b\d{1,2}-\d{1,2}-\d{4}\b",
-        r"\b\d{1,2}/\d{1,2}/\d{4}\b",
-        r"\b\d{1,2}\.\d{1,2}\.\d{4}\b",
-    ]
-
-    amount_patterns = [
-        r"\b\d+,\d+\.\d{2}(?:CR|DR)?\b",
-        r"\b\d+\.\d{2}(?:CR|DR)?\b",
-        r"\b\d+,\d+(?:CR|DR)?\b",
-    ]
-
-    transaction_patterns = [
-        r"[A-Z]\d{8,}",
-        r"NEFT|RTGS|IMPS",
-        r"NET@\d+",
-        r"EPFO|DTAX|GSTX",
-    ]
-
-    has_date = any(re.search(pattern, line) for pattern in date_patterns)
-    has_amount = any(re.search(pattern, line) for pattern in amount_patterns)
-    has_transaction = any(re.search(pattern, line) for pattern in transaction_patterns)
-
-    return has_date and (has_amount or has_transaction)
-
-
-def _extract_from_text(pdf_path: str) -> List[Dict]:
-    """Fallback text-based extraction method"""
-
-    try:
-        document = fitz.Document(pdf_path)
-        all_text_data = []
-
-        for page_num in range(len(document)):
-            page = document.load_page(page_num)
-            text = page.get_text()
-
-            lines = [line.strip() for line in text.split("\n") if line.strip()]
-
-            table_rows = []
-            for line in lines:
-                if _looks_like_table_row(line):
-                    parsed_columns = _parse_generic_row(line)
-                    if len(parsed_columns) >= 4 and any(
-                        col.strip() for col in parsed_columns
-                    ):
-                        table_rows.append(parsed_columns)
-
-            if table_rows:
-                all_text_data.append(
-                    {
-                        "page": page_num + 1,
-                        "table_number": 1,
-                        "data": table_rows,
-                        "confidence": 0.4,
-                    }
-                )
-
-        document.close()
-        return all_text_data
-    except Exception as e:
-        logger.error(f"Text extraction failed: {str(e)}")
-        return []
 
 
 def is_statement_table(table_data, reference_col_count=None) -> Tuple[bool, bool]:

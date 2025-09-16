@@ -5,13 +5,6 @@ import { Transaction } from "@/types/database";
 import { useEffect, useState } from "react";
 
 interface CashFlowAnalysisTabProps {
-  caseId: string;
-  amlMetadata: {
-    entityIds: string[];
-    dateRange: { from: string; to: string };
-    transactionCount: number;
-    totalVolume: number;
-  };
   selectedEntityIds: string[];
 }
 
@@ -68,19 +61,14 @@ interface CashFlowPattern {
 }
 
 export default function CashFlowAnalysisTab({
-  caseId,
-  amlMetadata,
   selectedEntityIds,
 }: CashFlowAnalysisTabProps) {
   const [loading, setLoading] = useState(true);
   const [cashFlowMetrics, setCashFlowMetrics] = useState<CashFlowMetrics | null>(null);
   const [suspiciousPatterns, setSuspiciousPatterns] = useState<CashFlowPattern[]>([]);
   const [analysisComplete, setAnalysisComplete] = useState(false);
-  const [dateFrom, setDateFrom] = useState<string>(amlMetadata.dateRange.from || "");
-  const [dateTo, setDateTo] = useState<string>(amlMetadata.dateRange.to || "");
   const [threshold, setThreshold] = useState<number>(50000);
   const [keywordsInput, setKeywordsInput] = useState<string>("CASH, ATM, WITHDRAWAL, CHQ");
-  const [dateError, setDateError] = useState<string | null>(null);
 
   const riskLevelFromScore = (score: number): "LOW" | "MEDIUM" | "HIGH" => {
     if (score >= 0.7) return "HIGH";
@@ -222,27 +210,8 @@ export default function CashFlowAnalysisTab({
         setLoading(true);
         setAnalysisComplete(false);
 
-        const fromDate = dateFrom
-          ? new Date(dateFrom)
-          : amlMetadata.dateRange.from
-          ? new Date(amlMetadata.dateRange.from)
-          : undefined;
-        const toDate = dateTo
-          ? new Date(dateTo)
-          : amlMetadata.dateRange.to
-          ? new Date(amlMetadata.dateRange.to)
-          : undefined;
 
-        if (fromDate && toDate && fromDate > toDate) {
-          setDateError("From date must be before To date");
-          setLoading(false);
-          setAnalysisComplete(false);
-          setCashFlowMetrics(null);
-          setSuspiciousPatterns([]);
-          return;
-        } else {
-          setDateError(null);
-        }
+
 
         console.log(`Entity IDs`, selectedEntityIds);
 
@@ -253,8 +222,6 @@ export default function CashFlowAnalysisTab({
 
         const response = await amlBackendClient.analyzeCashFlow({
           entity_ids: selectedEntityIds,
-          date_from: fromDate ? fromDate.toISOString() : undefined,
-          date_to: toDate ? toDate.toISOString() : undefined,
           granularity: "daily",
           threshold: threshold > 0 ? threshold : undefined,
           cash_keywords: parsedKeywords.length > 0 ? parsedKeywords : undefined,
@@ -287,12 +254,8 @@ export default function CashFlowAnalysisTab({
     };
   }, [
     selectedEntityIds,
-    dateFrom,
-    dateTo,
     threshold,
     keywordsInput,
-    amlMetadata.dateRange.from,
-    amlMetadata.dateRange.to,
   ]);
 
   const formatCurrency = (amount: number) => {
@@ -369,32 +332,6 @@ export default function CashFlowAnalysisTab({
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div>
-            <label htmlFor="dateFrom" className="block text-sm font-medium text-gray-700 mb-1">
-              From date
-            </label>
-            <input
-              id="dateFrom"
-              type="date"
-              value={dateFrom ? dateFrom.slice(0, 10) : ""}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-              aria-label="Select from date for cash flow analysis"
-            />
-          </div>
-          <div>
-            <label htmlFor="dateTo" className="block text-sm font-medium text-gray-700 mb-1">
-              To date
-            </label>
-            <input
-              id="dateTo"
-              type="date"
-              value={dateTo ? dateTo.slice(0, 10) : ""}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-              aria-label="Select to date for cash flow analysis"
-            />
-          </div>
-          <div>
             <label htmlFor="threshold" className="block text-sm font-medium text-gray-700 mb-1">
               Large cash threshold (₹)
             </label>
@@ -425,11 +362,7 @@ export default function CashFlowAnalysisTab({
           </div>
         </div>
 
-        {dateError && (
-          <p className="text-sm text-red-600 mb-2" role="alert">
-            {dateError}
-          </p>
-        )}
+
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="bg-green-50 p-4 rounded-lg">

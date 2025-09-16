@@ -17,18 +17,12 @@ interface AMLMetadata {
 }
 
 interface RoundTrippingDetectionTabProps {
-  caseId: string;
-  amlMetadata: AMLMetadata;
   selectedEntityIds: string[];
 }
 
 export default function RoundTrippingDetectionTab({
-  caseId,
-  amlMetadata,
   selectedEntityIds,
 }: RoundTrippingDetectionTabProps) {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [config, setConfig] = useState<RoundTrippingConfig>({
     maxTimeSpanHours: 72,
     minReturnRatio: 0.7,
@@ -42,42 +36,10 @@ export default function RoundTrippingDetectionTab({
     RoundTrippingResult["patterns"][0] | null
   >(null);
 
-  const fetchTransactionsForAnalysis = async () => {
-    if (amlMetadata.transactionCount === 0 || selectedEntityIds.length === 0)
-      return;
 
-    setLoadingTransactions(true);
-    try {
-      // Only fetch required fields for round tripping analysis
-      const data = await transactionsService.getCaseTransactionsForAnalysis(
-        caseId,
-        [
-          "transaction_id",
-          "tx_date",
-          "amount",
-          "direction",
-          "counterparty_merged",
-          "entity_id",
-          "description",
-        ]
-      );
-
-      // Filter transactions by selected entities
-      const filteredTransactions = data.filter((tx) =>
-        selectedEntityIds.includes(tx.entity_id)
-      );
-
-      setTransactions(filteredTransactions);
-    } catch (error) {
-      console.error("Error fetching transactions for analysis:", error);
-      setError("Failed to load transaction data for analysis");
-    } finally {
-      setLoadingTransactions(false);
-    }
-  };
 
   const runDetection = async () => {
-    if (transactions.length === 0) {
+    if (selectedEntityIds.length === 0) {
       setError("No transactions available for analysis");
       return;
     }
@@ -87,7 +49,6 @@ export default function RoundTrippingDetectionTab({
 
     try {
       const result = await amlDetectionService.detectRoundTripping(
-        transactions,
         selectedEntityIds
       );
       setResults(result);
@@ -105,15 +66,9 @@ export default function RoundTrippingDetectionTab({
     }
   };
 
-  useEffect(() => {
-    fetchTransactionsForAnalysis();
-  }, [caseId, amlMetadata, selectedEntityIds]);
 
-  useEffect(() => {
-    if (transactions.length > 0) {
-      runDetection();
-    }
-  }, [transactions, config]);
+
+
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -155,21 +110,11 @@ export default function RoundTrippingDetectionTab({
             onClick={runDetection}
             disabled={
               loading ||
-              loadingTransactions ||
-              amlMetadata.transactionCount === 0 ||
               selectedEntityIds.length === 0
             }
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
-            {loading || loadingTransactions ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                {loadingTransactions
-                  ? "Loading Data..."
-                  : "Analyzing via Backend..."}
-              </>
-            ) : (
-              <>
+            <>
                 <svg
                   className="w-4 h-4 mr-2"
                   fill="none"
@@ -185,7 +130,6 @@ export default function RoundTrippingDetectionTab({
                 </svg>
                 {error ? "Retry Analysis" : "Run Detection"}
               </>
-            )}
           </button>
         </div>
 
@@ -702,56 +646,10 @@ export default function RoundTrippingDetectionTab({
           </p>
           <div className="text-sm text-gray-400">
             <p>Analysis completed using backend cycle detection</p>
-            <p>Processed {transactions.length} transactions</p>
           </div>
         </div>
       )}
 
-      {/* No Transactions */}
-      {amlMetadata.transactionCount === 0 && (
-        <div className="bg-white rounded-lg shadow p-6 text-center">
-          <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-            <svg
-              className="w-8 h-8 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-          </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">
-            No Transaction Data Available
-          </h3>
-          <p className="text-gray-500">
-            Please upload transaction data to perform round tripping analysis.
-          </p>
-        </div>
-      )}
-
-      {/* Loading Overlay */}
-      {(loading || loadingTransactions) && (
-        <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600 font-medium">
-              {loadingTransactions
-                ? "Loading transaction data..."
-                : "Analyzing round tripping patterns..."}
-            </p>
-            <p className="text-sm text-gray-500 mt-1">
-              {loadingTransactions
-                ? `Fetching ${amlMetadata.transactionCount.toLocaleString()} transactions efficiently`
-                : `Processing ${transactions.length} transactions via backend API`}
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

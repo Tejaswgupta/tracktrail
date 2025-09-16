@@ -26,7 +26,6 @@ class DatabaseManager:
         self._connection_pool: Dict[str, Client] = {}
         self._pool_size = settings.database_pool_size
         self._max_overflow = settings.database_max_overflow
-        self._timeout = settings.database_timeout
         self._active_connections = 0
         self._lock = asyncio.Lock()
 

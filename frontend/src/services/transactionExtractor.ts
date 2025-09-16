@@ -341,15 +341,20 @@ export const transactionExtractorService = {
       throw new Error("No amount columns found or mapped");
     }
 
+    const counterparty = this.extractCounterparty(
+      description,
+      this.bankPreset);
+
+    console.log(
+      `Parsed line ${lineNumber}: date=${txDate}, desc="${description}", amount=${amount}, direction=${direction}, counterparty="${counterparty}"`
+    );
+
     return {
       tx_date: txDate,
       description,
       amount,
       direction,
-      counterparty_merged: this.extractCounterparty(
-        description,
-        this.bankPreset
-      ),
+      counterparty_merged: counterparty,
       balance: undefined, // Balance extraction can be added later if needed
       original_index: originalIndex,
     };
@@ -582,9 +587,12 @@ export const transactionExtractorService = {
     try {
       // Set bank preset
       this.setBankPreset(bankPreset);
+      console.log(`Previewing transactions with bank preset:`,bankPreset,file,columnMapping);
+      
 
       // For PDF files, we need to first convert to CSV
       if (file.type === "application/pdf") {
+        console.log(`processing pdf file for preview`, file);
         // Get CSV from PDF using the backend
         const formData = new FormData();
         formData.append("file", file, file.name);
@@ -740,8 +748,9 @@ export const transactionExtractorService = {
         return this.buildExtractionResult(transactions, errors);
       } else if (file.type === "text/csv") {
         // For CSV files, directly extract transactions
+        console.log(`processing csv file for preview`, file);
         const text = await file.text();
-        const lines = text.split("").filter((line) => line.trim());
+        const lines = text.split("\n").filter((line) => line.trim());
 
         if (lines.length === 0) {
           throw new Error("CSV file is empty");
@@ -750,7 +759,9 @@ export const transactionExtractorService = {
         const transactions: ExtractedTransaction[] = [];
         const errors: string[] = [];
 
+
         // Parse header row to get column indices
+        console.log(`headers`,lines[0])
         const headers = this.parseCSVColumns(lines[0]);
 
         let columnIndices: Record<string, number> = {};
@@ -838,7 +849,7 @@ export const transactionExtractorService = {
 
         // Parse rows into transactions (up to 5 for preview)
         const dataLines = lines.slice(1);
-        for (let i = 0; i < Math.min(5, dataLines.length); i++) {
+        for (let i = 0; i < Math.min(50, dataLines.length); i++) {
           try {
             const transaction = this.parseCSVLineWithMapping(
               dataLines[i],
@@ -856,6 +867,8 @@ export const transactionExtractorService = {
             errors.push(errorMsg);
           }
         }
+
+        console.log(`transactions`,transactions, errors);
 
         return this.buildExtractionResult(transactions, errors);
       } else {
@@ -1149,6 +1162,7 @@ export const transactionExtractorService = {
     description: string,
     bankPreset: string = "generic"
   ): string | undefined {
+    console.log(`Extracting counterparty from description:`, description, bankPreset);
     if (
       !description ||
       typeof description !== "string" ||
@@ -1221,13 +1235,12 @@ export const transactionExtractorService = {
         /^FT?\s*IMPS\/IFI\/\d+\/([^\/]+)\/SUPP/i,
       ],
       indian: [
-        // UPI generic
-        /^[^"\/]+\/([^\/]+?)\/XXXXX/i,
-        // /Pay/<Name> extraction (TO/FROM variants)
-        /^TRANSFER (?:TO|FROM) \d+ [^\/]*?\/P[Aa]y\/([^\/\r\n"]+?)\s*(?:\/|\r|\n|$)/i,
-        // /Pay/<Name> after IMPS/P2A/... (more structured)
+        /\/[A-Z]{3,}\/([^\/-]+)(?:\/-)?$/i,
+        /RTGS\s+\S+\s+(.+)$/i,
+        /^TRANSFER (?:TO|FROM) \d+ [^\/]*?\/P[Aa]y\/([^\/\r\n"]+?)(?:\/|$)/i,
         /^TRANSFER (?:TO|FROM) \d+ [^\/]*?\/IMPS\/P2A\/\d+\/ \/P[Aa]y\/([^\/]+?)\s*\/BRANCH/i,
-        // Fallback: extract mobile/account number after "TRANSFER TO"
+        /\s([A-Z][A-Z0-9 &]+)$/,
+        /FROM (\d{8,15})$/i,
         /^TRANSFER TO (\d{8,15})/i,
         /Paid to SELF \/BRANCH\s*:\s*([^\/]+)/i,
       ],
@@ -1241,9 +1254,12 @@ export const transactionExtractorService = {
 
     // Get patterns for the selected bank preset
     const patterns = bankPatterns[bankPreset] || bankPatterns.generic;
+    console.log(`Using patterns for bank preset "${bankPreset}":`, patterns);
 
     for (const pattern of patterns) {
       const match = cleanDesc.match(pattern);
+    
+      console.log(`Trying pattern:`, pattern, `Match:`, match);
       if (match && match[1]) {
         const extracted = match[1].trim();
 

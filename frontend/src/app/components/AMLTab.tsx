@@ -1,6 +1,6 @@
 "use client";
 
-import { entitiesService, transactionsService } from "@/services/database";
+import { AMLMetadata, entitiesService, transactionsService } from "@/services/database";
 import { useEffect, useState } from "react";
 import CashFlowAnalysisTab from "./aml/CashFlowAnalysisTab";
 import RapidMovementDetectionTab from "./aml/RapidMovementDetectionTab";
@@ -12,12 +12,7 @@ interface AMLTabProps {
   caseId: string;
 }
 
-interface AMLMetadata {
-  entityIds: string[];
-  dateRange: { from: string; to: string };
-  transactionCount: number;
-  totalVolume: number;
-}
+
 
 interface EntityDetails {
   entity_id: string;
@@ -199,7 +194,7 @@ export default function AMLTab({ caseId }: AMLTabProps) {
     );
   }
 
-  if (!amlMetadata || amlMetadata.transactionCount === 0) {
+  if (!amlMetadata || amlMetadata.entityIds?.length === 0) {
     return (
       <div className="text-center py-12">
         <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
@@ -236,25 +231,6 @@ export default function AMLTab({ caseId }: AMLTabProps) {
             <h2 className="text-xl font-semibold text-gray-900">
               AML Detection Suite
             </h2>
-            <p className="text-sm text-gray-600">
-              Advanced anti-money laundering analysis for{" "}
-              {amlMetadata.transactionCount.toLocaleString()} transactions
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {amlMetadata.entityIds.length} entities •{" "}
-              {amlMetadata.dateRange.from} to {amlMetadata.dateRange.to}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm text-gray-600">Total Transaction Volume</p>
-            <p className="text-2xl font-semibold text-gray-900">
-              {new Intl.NumberFormat("en-IN", {
-                style: "currency",
-                currency: "INR",
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0,
-              }).format(amlMetadata.totalVolume)}
-            </p>
           </div>
         </div>
 
@@ -489,40 +465,30 @@ export default function AMLTab({ caseId }: AMLTabProps) {
           <>
             {activeDetectionTab === "circular_trading" && (
               <CircularTradingDetectionTab
-                caseId={caseId}
-                amlMetadata={amlMetadata}
                 selectedEntityIds={selectedEntityIds}
               />
             )}
 
             {activeDetectionTab === "mule_account" && (
         <MuleAccountDetectionTab
-          caseId={caseId}
-          amlMetadata={amlMetadata}
           selectedEntityIds={selectedEntityIds}
         />
            )}
             
             {activeDetectionTab === "round_tripping" && (
               <RoundTrippingDetectionTab
-                caseId={caseId}
-                amlMetadata={amlMetadata}
                 selectedEntityIds={selectedEntityIds}
               />
             )}
 
             {activeDetectionTab === "rapid_movement" && (
               <RapidMovementDetectionTab
-                caseId={caseId}
-                amlMetadata={amlMetadata}
                 selectedEntityIds={selectedEntityIds}
               />
             )}
 
             {activeDetectionTab === "cash_flow" && (
               <CashFlowAnalysisTab
-                caseId={caseId}
-                amlMetadata={amlMetadata}
                 selectedEntityIds={selectedEntityIds}
               />
             )}

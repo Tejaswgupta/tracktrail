@@ -31,7 +31,7 @@ interface AMLBackendClientConfig {
 
 const DEFAULT_CONFIG: AMLBackendClientConfig = {
   baseUrl: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000",
-  timeout: 180000,
+  timeout: 300, // in seconds
   maxRetries: 3,
   retryDelay: 1000,
 };
@@ -70,10 +70,10 @@ export class AMLBackendClient {
   private async fetchWithTimeout(
     url: string,
     options: RequestInit,
-    timeout: number
+    timeout: number, //in seconds
   ): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const timeoutId = setTimeout(() => controller.abort(), timeout*1000);
 
     try {
       const response = await fetch(url, {

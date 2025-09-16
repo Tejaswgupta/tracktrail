@@ -26,18 +26,13 @@ interface AMLMetadata {
 }
 
 interface RapidMovementDetectionTabProps {
-  caseId: string;
-  amlMetadata: AMLMetadata;
+
   selectedEntityIds: string[];
 }
 
 export default function RapidMovementDetectionTab({
-  caseId,
-  amlMetadata,
   selectedEntityIds,
 }: RapidMovementDetectionTabProps) {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [config, setConfig] = useState<RapidMovementConfig>({
     percentageThreshold: 10,
     timeWindowHours: 24,
@@ -53,42 +48,11 @@ export default function RapidMovementDetectionTab({
     RapidMovementResult["patterns"][0] | null
   >(null);
 
-  const fetchTransactionsForAnalysis = async () => {
-    if (amlMetadata.transactionCount === 0 || selectedEntityIds.length === 0)
-      return;
-
-    setLoadingTransactions(true);
-    try {
-      // Only fetch required fields for rapid movement analysis
-      const data = await transactionsService.getCaseTransactionsForAnalysis(
-        caseId,
-        [
-          "transaction_id",
-          "tx_date",
-          "amount",
-          "direction",
-          "counterparty_merged",
-          "entity_id",
-          "description",
-        ]
-      );
-
-      // Filter transactions by selected entities
-      const filteredTransactions = data.filter((tx) =>
-        selectedEntityIds.includes(tx.entity_id)
-      );
-
-      setTransactions(filteredTransactions);
-    } catch (error) {
-      console.error("Error fetching transactions for analysis:", error);
-      setError("Failed to load transaction data for analysis");
-    } finally {
-      setLoadingTransactions(false);
-    }
-  };
-
   const runDetection = async (isRetry = false) => {
-    if (transactions.length === 0) return;
+    if (selectedEntityIds.length === 0) {
+      setError("Please select at least one entity to analyze.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -134,11 +98,7 @@ export default function RapidMovementDetectionTab({
     runDetection(true);
   };
 
-  useEffect(() => {
-    fetchTransactionsForAnalysis();
-  }, [caseId, amlMetadata, selectedEntityIds]);
 
-  // Removed auto-detection - users must click the button to run analysis
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -170,27 +130,15 @@ export default function RapidMovementDetectionTab({
               and layering patterns. Analysis is performed using backend AI
               algorithms.
             </p>
-            <p className="text-xs text-blue-600 mt-1">
-              Analyzing {selectedEntityIds.length} selected entities •{" "}
-              {transactions.length} transactions
-            </p>
           </div>
           <button
             onClick={() => runDetection()}
             disabled={
               loading ||
-              loadingTransactions ||
-              amlMetadata.transactionCount === 0 ||
               selectedEntityIds.length === 0
             }
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center"
           >
-            {loading || loadingTransactions ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                {loadingTransactions ? "Loading Data..." : "Analyzing..."}
-              </>
-            ) : (
               <>
                 <svg
                   className="w-4 h-4 mr-2"
@@ -207,7 +155,6 @@ export default function RapidMovementDetectionTab({
                 </svg>
                 Run Detection
               </>
-            )}
           </button>
         </div>
 
@@ -735,24 +682,6 @@ export default function RapidMovementDetectionTab({
         </div>
       )}
 
-      {/* Loading Overlay */}
-      {(loading || loadingTransactions) && (
-        <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">
-              {loadingTransactions
-                ? "Loading transaction data..."
-                : "Analyzing rapid movements using backend AI..."}
-            </p>
-            <p className="text-sm text-gray-500 mt-1">
-              {loadingTransactions
-                ? `Fetching ${amlMetadata.transactionCount.toLocaleString()} transactions efficiently`
-                : "This may take a few moments"}
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

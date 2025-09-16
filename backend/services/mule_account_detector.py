@@ -38,20 +38,48 @@ class MuleAccountDetector:
     2. Periodic disbursement patterns (daily, weekly, monthly)
     3. Threshold avoidance behaviors
     4. Velocity and timing anomalies
+    
+    Scoring Methodology:
+    Each detection pattern contributes to a confidence score (0.0 to 1.0) based on:
+    - Pattern strength indicators (e.g., flow balance ratios, periodicity strength)
+    - Transaction volume and frequency
+    - Temporal concentration of activities
+    - Behavioral consistency (amount patterns, timing patterns)
+    
+    The final confidence score is a weighted sum of these factors, with higher scores
+    indicating stronger evidence of mule account activity.
     """
 
     def __init__(self):
         self.detection_cache = {}
 
+        # Configuration parameters with documentation
         self.config = {
+            # Minimum number of credit transactions required for classic mule pattern
             "min_collection_transactions": 5,
+            
+            # Minimum ratio of median debit to median credit amounts (classic pattern)
             "min_disbursement_amount_ratio": 3.0,
+            
+            # Maximum collection period in days for concentrated activity scoring
             "max_collection_period_days": 30,
+            
+            # Percentile threshold for defining "small" transactions
             "small_percentile_threshold": 0.3,
+            
+            # Percentile threshold for defining "large" transactions
             "large_percentile_threshold": 0.8,
+            
+            # Minimum velocity threshold for timing pattern scoring
             "velocity_threshold": 0.5,
+            
+            # Tolerance in days for periodicity detection (e.g., 7-day ±2 days)
             "periodicity_tolerance": 2,
+            
+            # Minimum ratio of credits to debits for asymmetric pattern scoring
             "collection_disbursement_ratio": 2.0,
+            
+            # Threshold for amount variance in periodic pattern detection
             "amount_variance_threshold": 2.0,
         }
 
@@ -461,6 +489,30 @@ class MuleAccountDetector:
         """
         Detect the core mule pattern: Pass-through account where inflow ≈ outflow
         This checks multiple time intervals to catch sophisticated mule operations.
+        
+        Scoring Methodology:
+        Confidence Score Calculation (Max 1.0):
+        1. Flow Balance (Max 0.70):
+           - Net flow ratio <= 0.02: +0.70
+           - Net flow ratio <= 0.05: +0.60
+           - Net flow ratio <= 0.10: +0.45
+           - Net flow ratio <= 0.20: +0.25
+           
+        2. Transaction Volume (Max 0.15):
+           - >= 15 transactions: +0.15
+           - >= 8 transactions: +0.10
+           - >= 5 transactions: +0.05
+           
+        3. Concentrated Activity (Max 0.10):
+           - <= 30 days with >= 8 transactions: +0.10
+           - <= 60 days with >= 12 transactions: +0.05
+           
+        4. Bidirectional Flow (Max 0.05):
+           - >= 3 credits and >= 2 debits: +0.05
+           - >= 2 credits and >= 1 debit: +0.02
+           
+        Total Score: Sum of all applicable scores, capped at 1.0
+        Minimum threshold for alert: 0.4 (adjusted by sensitivity multiplier)
         """
         try:
 
@@ -658,6 +710,26 @@ class MuleAccountDetector:
     ) -> Optional[MuleAccountAlert]:
         """
         Detect classic mule pattern: Many small credits → Few large debits
+        
+        Scoring Methodology:
+        Confidence Score Calculation (Max 1.0):
+        1. Asymmetric Pattern (Max 0.25):
+           - Credit/Debit count ratio >= config ratio: Variable score based on ratio
+           
+        2. Amount Ratio Analysis (Max 0.25):
+           - Median debit/credit ratio >= config ratio: Variable score based on ratio
+           
+        3. Small Credit Ratio (Max 0.25):
+           - Small credit ratio > 0.6: Variable score based on ratio
+           
+        4. Large Debit Ratio (Max 0.25):
+           - Large debit ratio > 0.4: Variable score based on ratio
+           
+        5. Timing Patterns (Max 0.15):
+           - Suspicious timing between collections and disbursements: Up to 0.15
+           
+        Total Score: Sum of all applicable scores, capped at 1.0
+        Minimum threshold for alert: 0.4 (adjusted by sensitivity multiplier)
         """
         try:
 
@@ -804,6 +876,20 @@ class MuleAccountDetector:
     ) -> Optional[MuleAccountAlert]:
         """
         Detect periodic mule pattern: Regular disbursement cycles
+        
+        Scoring Methodology:
+        Confidence Score Calculation (Max 1.0):
+        1. Periodicity Strength (Max 0.40):
+           - Periodicity strength > 0.7: +0.40
+           
+        2. Amount Consistency (Max 0.30):
+           - Amount consistency > 0.6: +0.30
+           
+        3. Timing Regularity (Max 0.30):
+           - Timing regularity > 0.5: +0.30
+           
+        Total Score: Sum of all applicable scores, capped at 1.0
+        Minimum threshold for alert: 0.5
         """
         try:
             debits = df[df["is_debit"]].copy()
@@ -862,6 +948,17 @@ class MuleAccountDetector:
     ) -> Optional[MuleAccountAlert]:
         """
         Detect threshold avoidance mule pattern
+        
+        Scoring Methodology:
+        Confidence Score Calculation (Max 1.0):
+        1. Near Threshold Transactions:
+           - For each threshold, if ratio of near-threshold transactions > 0.2: Add ratio to score
+           
+        2. Round Number Transactions:
+           - If round ratio > 0.6: +0.3
+           
+        Total Score: Sum of all applicable scores, capped at 1.0
+        Minimum threshold for alert: 0.4
         """
         try:
 

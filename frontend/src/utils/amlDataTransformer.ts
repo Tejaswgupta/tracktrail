@@ -68,7 +68,6 @@ export class AMLDataTransformer {
    */
   static transformCycleDetectionResult(
     backendResult: CycleDetectionResult,
-    _originalTransactions: Transaction[]
   ): RoundTrippingResult {
     const alerts: AMLAlert[] = [];
     const patterns: RoundTrippingResult["patterns"] = [];
