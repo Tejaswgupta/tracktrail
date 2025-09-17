@@ -394,7 +394,7 @@ class RapidMovementRequest(AnalysisRequest):
     time_threshold_minutes: Optional[int] = Field(
         60,
         ge=1,
-        le=1440,
+        le=20160,
         description="Time threshold for rapid movement detection in minutes",
     )
     amount_threshold: Optional[float] = Field(
