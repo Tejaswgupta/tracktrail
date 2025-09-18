@@ -12,6 +12,68 @@ import { createClient } from "@/utils/supabase/client";
 
 export const supabase = createClient();
 
+// Simple in-memory cache with expiration
+class SimpleCache<T> {
+  private cache = new Map<string, { value: T; expiry: number }>();
+  private defaultTtl: number;
+
+  constructor(defaultTtlMs: number = 5 * 60 * 1000) { // 5 minutes default
+    this.defaultTtl = defaultTtlMs;
+  }
+
+  set(key: string, value: T, ttl?: number): void {
+    const expiry = Date.now() + (ttl ?? this.defaultTtl);
+    this.cache.set(key, { value, expiry });
+  }
+
+  get(key: string): T | null {
+    const item = this.cache.get(key);
+    if (!item) return null;
+
+    if (Date.now() > item.expiry) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    return item.value;
+  }
+
+  delete(key: string): boolean {
+    return this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+
+  // Clean up expired entries
+  cleanup(): void {
+    const now = Date.now();
+    for (const [key, item] of this.cache.entries()) {
+      if (now > item.expiry) {
+        this.cache.delete(key);
+      }
+    }
+  }
+  
+  // Get cache statistics
+  getStats() {
+    return {
+      size: this.cache.size,
+      entries: Array.from(this.cache.entries()).map(([key, item]) => ({
+        key,
+        expiresAt: new Date(item.expiry).toISOString(),
+        isExpired: Date.now() > item.expiry
+      }))
+    };
+  }
+}
+
+// Create cache instances for different data types
+const transactionCache = new SimpleCache<Transaction[]>(5 * 60 * 1000); // 5 minutes
+const caseAMLMetadataCache = new SimpleCache<AMLMetadata>(10 * 60 * 1000); // 10 minutes
+const caseTransactionsAnalysisCache = new SimpleCache<Transaction[]>(10 * 60 * 1000); // 10 minutes
+
 export interface AMLMetadata {
   entityIds: string[];
   // dateRange: { from: string; to: string };
@@ -276,6 +338,9 @@ export const entitiesService = {
       .eq("entity_id", entityId);
 
     if (error) throw error;
+    
+    // Clear transaction caches since deleting an entity removes its transactions
+    transactionCache.clear();
   },
 
   async removeFromCase(caseId: string, entityId: string): Promise<void> {
@@ -342,6 +407,9 @@ export const accountsService = {
       .eq("account_id", accountId);
 
     if (error) throw error;
+    
+    // Clear transaction caches since deleting an account removes its transactions
+    transactionCache.clear();
   },
 };
 
@@ -401,12 +469,22 @@ export const statementsService = {
     console.log(error);
 
     if (error) throw error;
+    
+    // Clear transaction caches since deleting a statement removes its transactions
+    transactionCache.clear();
   },
 };
 
 // Transactions
 export const transactionsService = {
   async getByAccountId(accountId: string): Promise<Transaction[]> {
+    // Check cache first
+    const cacheKey = `transactions-account-${accountId}`;
+    const cached = transactionCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const { data, error } = await supabase
       .from("transactions")
       .select("*")
@@ -414,10 +492,21 @@ export const transactionsService = {
       .order("tx_date", { ascending: false });
 
     if (error) throw error;
-    return data || [];
+    
+    const result = data || [];
+    // Cache the result
+    transactionCache.set(cacheKey, result);
+    return result;
   },
 
   async getByEntityId(entityId: string): Promise<Transaction[]> {
+    // Check cache first
+    const cacheKey = `transactions-entity-${entityId}`;
+    const cached = transactionCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const { data, error } = await supabase
       .from("transactions")
       .select("*")
@@ -425,10 +514,21 @@ export const transactionsService = {
       .order("tx_date", { ascending: false });
 
     if (error) throw error;
-    return data || [];
+    
+    const result = data || [];
+    // Cache the result
+    transactionCache.set(cacheKey, result);
+    return result;
   },
 
   async getByCaseId(caseId: string): Promise<Transaction[]> {
+    // Check cache first
+    const cacheKey = `transactions-case-${caseId}`;
+    const cached = transactionCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     // First get all entity IDs for this case
     const { data: caseEntities, error: caseError } = await supabase
       .from("case_entities")
@@ -451,7 +551,11 @@ export const transactionsService = {
       .order("tx_date", { ascending: false });
 
     if (error) throw error;
-    return data || [];
+    
+    const result = data || [];
+    // Cache the result
+    transactionCache.set(cacheKey, result);
+    return result;
   },
 
   
@@ -459,6 +563,13 @@ export const transactionsService = {
 
   // Optimized method for AML analysis - only fetches metadata
   async getCaseAMLMetadata(caseId: string): Promise<AMLMetadata> {
+    // Check cache first
+    const cacheKey = `aml-metadata-${caseId}`;
+    const cached = caseAMLMetadataCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     // First get all entity IDs for this case
     const { data: caseEntities, error: caseError } = await supabase
       .from("case_entities")
@@ -468,12 +579,15 @@ export const transactionsService = {
     if (caseError) throw caseError;
 
     if (!caseEntities || caseEntities.length === 0) {
-      return {
+      const result = {
         entityIds: [],
         // dateRange: { from: "", to: "" },
         // transactionCount: 0,
         // totalVolume: 0,
       };
+      // Cache the result
+      caseAMLMetadataCache.set(cacheKey, result);
+      return result;
     }
 
     const entityIds = caseEntities.map((ce) => ce.entity_id);
@@ -511,12 +625,16 @@ export const transactionsService = {
     //   0
     // );
 
-    return {
+    const result = {
       entityIds,
       // dateRange,
       // transactionCount,
       // totalVolume,
     };
+    
+    // Cache the result
+    caseAMLMetadataCache.set(cacheKey, result);
+    return result;
   },
 
   // Optimized method for AML analysis - fetches only required fields
@@ -531,6 +649,13 @@ export const transactionsService = {
       "entity_id",
     ]
   ): Promise<Transaction[]> {
+    // Check cache first
+    const cacheKey = `transactions-analysis-${caseId}-${fields.sort().join(',')}`;
+    const cached = caseTransactionsAnalysisCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     // First get all entity IDs for this case
     const { data: caseEntities, error: caseError } = await supabase
       .from("case_entities")
@@ -558,7 +683,10 @@ export const transactionsService = {
     if (error) throw error;
 
     // Fix: Ensure we return an array of Transaction objects
-    return (data as Transaction[]) || [];
+    const result = (data as Transaction[]) || [];
+    // Cache the result
+    caseTransactionsAnalysisCache.set(cacheKey, result);
+    return result;
   },
 
   async create(
@@ -571,6 +699,10 @@ export const transactionsService = {
       .single();
 
     if (error) throw error;
+    
+    // Invalidate relevant caches
+    transactionCache.clear(); // Clear all transaction caches when adding new transactions
+    
     return data;
   },
 
@@ -583,6 +715,10 @@ export const transactionsService = {
       .select();
 
     if (error) throw error;
+    
+    // Invalidate relevant caches
+    transactionCache.clear(); // Clear all transaction caches when adding new transactions
+    
     return data || [];
   },
 
@@ -1138,3 +1274,105 @@ export const searchService = {
     return data;
   },
 };
+
+// Cache management utilities
+export const cacheManagement = {
+  // Clean up all expired cache entries
+  cleanupAllCaches() {
+    transactionCache.cleanup();
+    caseAMLMetadataCache.cleanup();
+    caseTransactionsAnalysisCache.cleanup();
+  },
+  
+  // Clear all caches (use when data has been updated)
+  clearAllCaches() {
+    transactionCache.clear();
+    caseAMLMetadataCache.clear();
+    caseTransactionsAnalysisCache.clear();
+  },
+  
+  // Get cache statistics
+  getCacheStats() {
+    return {
+      transactions: transactionCache.getStats(),
+      amlMetadata: caseAMLMetadataCache.getStats(),
+      transactionsAnalysis: caseTransactionsAnalysisCache.getStats()
+    };
+  },
+  
+  // Enable or disable cache monitoring
+  enableMonitoring(enabled: boolean) {
+    (globalThis as any).__CACHE_MONITORING_ENABLED__ = enabled;
+  },
+  
+  // Log cache hit/miss statistics
+  logCacheStats() {
+    if (!(globalThis as any).__CACHE_MONITORING_ENABLED__) return;
+    
+    const stats = this.getCacheStats();
+    console.log("=== Cache Statistics ===");
+    console.log("Transaction cache size:", stats.transactions.size);
+    console.log("AML Metadata cache size:", stats.amlMetadata.size);
+    console.log("Transaction Analysis cache size:", stats.transactionsAnalysis.size);
+    console.log("========================");
+  },
+  
+  // Warm cache for a specific case by preloading commonly accessed data
+  async warmCaseCache(caseId: string) {
+    try {
+      // Load AML metadata
+      await transactionsService.getCaseAMLMetadata(caseId);
+      
+      // Load transactions for analysis (with default fields)
+      await transactionsService.getCaseTransactionsForAnalysis(caseId);
+      
+      // Load full transaction data for the case (this is what DetailedOverviewTab needs)
+      await transactionsService.getByCaseId(caseId);
+      
+      // Load counterparty stats which are commonly used
+      await counterpartyService.getCaseCounterpartyStats(caseId);
+      
+      console.log(`Cache warmed for case ${caseId}`);
+    } catch (error) {
+      console.warn(`Failed to warm cache for case ${caseId}:`, error);
+    }
+  },
+  
+  // Warm cache for a specific account
+  async warmAccountCache(accountId: string) {
+    try {
+      // Load account transactions (full data)
+      await transactionsService.getByAccountId(accountId);
+      
+      console.log(`Cache warmed for account ${accountId}`);
+    } catch (error) {
+      console.warn(`Failed to warm cache for account ${accountId}:`, error);
+    }
+  },
+  
+  // Warm caches for all active cases
+  async warmAllCasesCache() {
+    try {
+      // Get all cases
+      const cases = await casesService.getAll();
+      
+      // Warm cache for each case
+      for (const caseItem of cases) {
+        await this.warmCaseCache(caseItem.case_id);
+      }
+      
+      console.log(`Cache warmed for all ${cases.length} cases`);
+    } catch (error) {
+      console.warn("Failed to warm cache for all cases:", error);
+    }
+  }
+};
+
+// Periodic cache cleanup (runs every 10 minutes)
+setInterval(() => {
+  try {
+    cacheManagement.cleanupAllCaches();
+  } catch (error) {
+    console.warn("Error during periodic cache cleanup:", error);
+  }
+}, 10 * 60 * 1000); // 10 minutes

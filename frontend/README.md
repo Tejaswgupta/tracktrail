@@ -93,7 +93,10 @@ The application uses direct Supabase client calls for optimal performance:
 - `entitiesService`: Entity management and case linking
 - `accountsService`: Account management
 - `statementsService`: Statement upload and processing
+- `transactionsService`: Transaction retrieval with caching for performance
 - `searchService`: Entity search and analytics
+
+See [caching documentation](docs/caching.md) for details on the caching implementation.
 
 ## Development Guidelines
 
@@ -116,6 +119,7 @@ The application uses direct Supabase client calls for optimal performance:
 - Direct database access via Supabase SDK
 - Optimized queries with proper joins
 - Lazy loading for large datasets
+- In-memory caching for transaction-heavy operations (see [caching documentation](docs/caching.md))
 
 ## Security Considerations
 

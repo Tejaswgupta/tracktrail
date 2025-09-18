@@ -96,8 +96,7 @@ async def analyze_ai_llm(
     start_time = datetime.now(timezone.utc)
     try:
         logger.info(f"Starting AI LLM analysis for {len(request.entity_ids)} entities")
-        if len(request.entity_ids) > 1:
-            raise ValidationError("AI LLM analysis currently supports single entity analysis only")
+        logger.info(request.entity_ids)
         transactions = await database_service.get_entity_transactions(
             request.entity_ids, convert_to_polars=False
         )

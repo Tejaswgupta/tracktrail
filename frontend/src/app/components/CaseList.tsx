@@ -25,8 +25,11 @@ export default function CaseList() {
   useEffect(() => {
     const fetchCases = async () => {
       try {
-        const { casesService } = await import("@/services/database");
+        const { casesService, cacheManagement } = await import("@/services/database");
         const casesData = await casesService.getAll();
+
+        // Warm caches for all cases in the background
+        cacheManagement.warmAllCasesCache().catch(console.warn);
 
         // Transform to match component interface
         const transformedCases = casesData.map((caseData) => ({

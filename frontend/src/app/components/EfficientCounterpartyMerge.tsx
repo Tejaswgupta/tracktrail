@@ -1,8 +1,9 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { counterpartyService } from "@/services/database";
+import { counterpartyService, transactionsService } from "@/services/database";
 import { useCallback, useEffect, useState } from "react";
+import { useFrontendCounterpartyMerge } from "@/hooks/useFrontendCounterpartyMerge";
 
 interface CounterpartyMergeCandidate {
   representative: string;
@@ -37,13 +38,22 @@ export default function EfficientCounterpartyMerge({
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
 
-  const loadCandidates = useCallback(async () => {
+  const {
+    counterparties,
+    candidates: frontendCandidates,
+    loading: frontendLoading,
+    error: frontendError,
+    findMergeCandidates,
+    refresh
+  } = useFrontendCounterpartyMerge(caseId);
+
+  const loadCandidates = useCallback(() => {
     try {
       setLoading(true);
       setError(null);
 
-      const data = await counterpartyService.getCounterpartyMergeCandidates(
-        caseId,
+      // Use frontend implementation instead of backend RPC
+      const data = findMergeCandidates(
         similarityThreshold / 100, // Convert percentage to decimal
         100 // Limit to top 100 candidates
       );
@@ -57,7 +67,7 @@ export default function EfficientCounterpartyMerge({
     } finally {
       setLoading(false);
     }
-  }, [caseId, similarityThreshold]);
+  }, [similarityThreshold, findMergeCandidates]);
 
   const handleThresholdChange = useCallback(
     async (newThreshold: number) => {
@@ -69,7 +79,7 @@ export default function EfficientCounterpartyMerge({
       }, 500);
       return () => clearTimeout(timeoutId);
     },
-    [loadCandidates]
+    []
   );
 
   const toggleMergeSelection = useCallback(
@@ -268,8 +278,10 @@ export default function EfficientCounterpartyMerge({
     );
 
   useEffect(() => {
-    loadCandidates();
-  }, [loadCandidates]);
+    if (!frontendLoading && counterparties.length > 0) {
+      loadCandidates();
+    }
+  }, [frontendLoading, counterparties]);
 
   if (loading) {
     return (

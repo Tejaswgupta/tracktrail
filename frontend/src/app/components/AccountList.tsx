@@ -1,6 +1,6 @@
 "use client";
 
-import { accountsService } from "@/services/database";
+import { accountsService, cacheManagement } from "@/services/database";
 import { AccountWithStatements } from "@/types/database";
 import { useEffect, useState } from "react";
 import AccountCard from "./AccountCard";
@@ -37,6 +37,11 @@ export default function AccountList({ entityId, caseId }: AccountListProps) {
       try {
         setError(null);
         const accountsData = await accountsService.getByEntityId(entityId);
+
+        // Warm caches for all accounts in the background
+        accountsData.forEach(account => {
+          cacheManagement.warmAccountCache(account.account_id).catch(console.warn);
+        });
 
         // Transform database accounts to component format
         const transformedAccounts: Account[] = accountsData.map(

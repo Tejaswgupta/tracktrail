@@ -46,10 +46,13 @@ export default function CaseDetailPage() {
   useEffect(() => {
     const fetchCase = async () => {
       try {
-        const { casesService } = await import("@/services/database");
+        const { casesService, cacheManagement } = await import("@/services/database");
         const caseData = await casesService.getById(caseId);
 
         if (caseData) {
+          // Warm the cache for this case
+          cacheManagement.warmCaseCache(caseId).catch(console.warn);
+          
           // Transform to match component interface
           setCaseData({
             id: caseData.case_id,
