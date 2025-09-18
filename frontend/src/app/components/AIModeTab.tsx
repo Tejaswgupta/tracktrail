@@ -1,9 +1,9 @@
 "use client";
 
 import { amlBackendClient } from "@/services/amlBackendClient";
-import { transactionsService } from "@/services/database";
+import { entitiesService } from "@/services/database";
 import { AIResponse } from "@/types/amlBackend";
-import { Transaction } from "@/types/database";
+import { EntityWithAccounts } from "@/types/database";
 import { useEffect, useState } from "react";
 
 // Persistent client-side cache for AI analysis (no expiration)
@@ -44,11 +44,10 @@ interface AIModeTabProps {
 interface AMLFlag {
   type: string;
   description: string;
-  transactions: string[];
+  transactions_ids: string[];
+  suspcious_participants: string[];
   severity: "low" | "medium" | "high";
 }
-
-
 
 export default function AIModeTab({ caseId }: AIModeTabProps) {
   const [analyzing, setAnalyzing] = useState(false);
@@ -56,38 +55,43 @@ export default function AIModeTab({ caseId }: AIModeTabProps) {
     useState<AIResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [forceRerun, setForceRerun] = useState(false);
-  const [entityIds, setEntityIds] = useState<string[]>([]);
+  const [allEntityIds, setAllEntityIds] = useState<string[]>([]);
+  const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
+  const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
+  const [loadingEntities, setLoadingEntities] = useState(true);
 
-
-
-  // Attempt to restore cached analysis after transactions load
+  // Fetch entities for the case
   useEffect(() => {
-
-      async function fetchEntityIds(){
-        try{
-      const metadata = await transactionsService.getCaseAMLMetadata(caseId);
-      setEntityIds(metadata.entityIds);
-      const cacheKey = buildCacheKey(caseId, metadata.entityIds);
-      const cached = readCache(cacheKey);
-      if (cached) {
-        setAnalysisResult(cached);
-        console.log("Restored AI analysis from cache on load");
+    async function fetchEntities() {
+      try {
+        setLoadingEntities(true);
+        const entitiesData = await entitiesService.getByCaseId(caseId);
+        setEntities(entitiesData);
+        const entityIds = entitiesData.map(entity => entity.entity_id);
+        setAllEntityIds(entityIds);
+        setSelectedEntityIds(entityIds); // Select all by default
+        
+        // Try to restore cached analysis for all entities
+        const cacheKey = buildCacheKey(caseId, entityIds);
+        const cached = readCache(cacheKey);
+        if (cached) {
+          setAnalysisResult(cached);
+          console.log("Restored AI analysis from cache on load");
+        }
+      } catch (e) {
+        console.warn("Failed to fetch entities:", e);
+      } finally {
+        setLoadingEntities(false);
       }
-      }
-       catch (e) {
-      console.warn("Failed to restore cached AI analysis:", e);
     }
-      
 
-
-  }
-fetchEntityIds();
-}, [caseId]);
+    fetchEntities();
+  }, [caseId]);
 
   const analyzeWithAI = async (force = false) => {
     setError(null);
     setAnalyzing(true);
-    const cacheKey = buildCacheKey(caseId, entityIds);
+    const cacheKey = buildCacheKey(caseId, selectedEntityIds);
 
     // 1) Try cache first unless force re-run
     if (!force) {
@@ -103,7 +107,7 @@ fetchEntityIds();
     // 2) Fallback to API and cache the result
     try {
       const result = await amlBackendClient.analyzeAIllm({
-        entity_ids: Array.from(new Set(entityIds)),
+        entity_ids: Array.from(new Set(selectedEntityIds)),
       });
       console.log(`API response`, result.data,)
       setAnalysisResult(result.data);
@@ -115,7 +119,6 @@ fetchEntityIds();
     } finally {
       setAnalyzing(false);
     }
-
   };
 
   const getSeverityColor = (severity: string) => {
@@ -131,7 +134,29 @@ fetchEntityIds();
     }
   };
 
+  const handleSelectAll = () => {
+    setSelectedEntityIds(allEntityIds);
+  };
 
+  const handleDeselectAll = () => {
+    setSelectedEntityIds([]);
+  };
+
+  const handleEntityToggle = (entityId: string) => {
+    setSelectedEntityIds(prev => 
+      prev.includes(entityId) 
+        ? prev.filter(id => id !== entityId)
+        : [...prev, entityId]
+    );
+  };
+
+  if (loadingEntities) {
+    return (
+      <div className="flex justify-center items-center h-32">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -193,9 +218,62 @@ fetchEntityIds();
             </div>
             <div className="ml-3 flex-1 md:flex md:justify-between">
               <p className="text-sm text-blue-700">
-                AI analysis will process transactions.
+                AI analysis will process transactions from the selected entities.
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* Entity Selection */}
+        <div className="mt-6">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-md font-medium text-gray-900">
+              Select Entities for Analysis
+            </h3>
+            <div className="space-x-2">
+              <button
+                onClick={handleSelectAll}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                Select All
+              </button>
+              <button
+                onClick={handleDeselectAll}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                Deselect All
+              </button>
+            </div>
+          </div>
+          
+          {entities.length === 0 ? (
+            <div className="text-center py-4 text-gray-500">
+              <p>No entities found in this case</p>
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-md p-4 max-h-60 overflow-y-auto">
+              {entities.map((entity) => (
+                <div key={entity.entity_id} className="flex items-center mb-2">
+                  <input
+                    id={`entity-${entity.entity_id}`}
+                    type="checkbox"
+                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    checked={selectedEntityIds.includes(entity.entity_id)}
+                    onChange={() => handleEntityToggle(entity.entity_id)}
+                  />
+                  <label 
+                    htmlFor={`entity-${entity.entity_id}`} 
+                    className="ml-2 text-sm text-gray-700"
+                  >
+                    {entity.entity_name} ({entity.pan || entity.gstin || entity.cin || "No ID"})
+                  </label>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          <div className="mt-2 text-sm text-gray-500">
+            {selectedEntityIds.length} of {allEntityIds.length} entities selected
           </div>
         </div>
 
@@ -215,11 +293,12 @@ fetchEntityIds();
           </div>
           <button
             onClick={() => analyzeWithAI(forceRerun)}
-            disabled={analyzing}
-            className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${analyzing
-              ? "bg-gray-400 cursor-not-allowed"
-              : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              }`}
+            disabled={analyzing || selectedEntityIds.length === 0}
+            className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+              analyzing || selectedEntityIds.length === 0
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            }`}
           >
             {analyzing ? (
               <>

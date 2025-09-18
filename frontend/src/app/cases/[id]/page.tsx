@@ -269,7 +269,7 @@ export default function CaseDetailPage() {
             {[
               { key: "overview", label: "Overview" },
               { key: "entities", label: "Entities" },
-              { key: "timeline", label: "Timeline" },
+              // { key: "timeline", label: "Timeline" },
               { key: "analytics", label: "AML Analytics" },
               { key: "ai-mode", label: "AI Mode" },
               { key: "counterparty-merge", label: "Counterparty Merge" },
