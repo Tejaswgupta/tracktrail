@@ -1,146 +1,220 @@
 import Fuse from 'fuse.js';
 
-// Simple string similarity function using character-level comparison
+// More efficient string similarity without creating new Fuse instances
 export function stringSimilarity(str1: string, str2: string): number {
-  // Convert to lowercase for case-insensitive comparison
-  str1 = str1.toLowerCase();
-  str2 = str2.toLowerCase();
+  const s1 = str1.toLowerCase();
+  const s2 = str2.toLowerCase();
   
-  // If strings are identical, return 1 (100% similarity)
-  if (str1 === str2) return 1;
+  if (s1 === s2) return 1;
+  if (s1.length === 0 || s2.length === 0) return 0;
   
-  // If one string is empty, return 0
-  if (str1.length === 0 || str2.length === 0) return 0;
+  // Simple character-based similarity (Dice coefficient)
+  const bigrams1 = getBigrams(s1);
+  const bigrams2 = getBigrams(s2);
   
-  // Use Fuse.js for fuzzy matching
-  const fuse = new Fuse([str1], { includeScore: true });
-  const result = fuse.search(str2);
+  let matches = 0;
+  bigrams1.forEach(bigram => {
+    if (bigrams2.has(bigram)) matches++;
+  });
   
-  // If no match found, return 0
-  if (result.length === 0) return 0;
-  
-  // Convert score to similarity (Fuse.js scores are between 0 and 1, where 0 is perfect match)
-  return 1 - (result[0].score || 0);
+  return (2 * matches) / (bigrams1.size + bigrams2.size);
 }
 
-// Check if the first few words match
-export function firstWordsMatch(str1: string, str2: string, wordCount: number = 3): boolean {
-  const words1 = str1.trim().split(/\s+/);
-  const words2 = str2.trim().split(/\s+/);
-  
-  // Compare first 3 words (or all words if less than 3)
-  const compareCount = Math.min(wordCount, words1.length, words2.length);
-  
-  for (let i = 0; i < compareCount; i++) {
-    // If any of the first 3 words don't match, return false
-    if (words1[i].toLowerCase() !== words2[i].toLowerCase()) {
-      return false;
-    }
+function getBigrams(str: string): Set<string> {
+  const bigrams = new Set<string>();
+  for (let i = 0; i < str.length - 1; i++) {
+    bigrams.add(str.substring(i, i + 2));
   }
-  
-  return true;
+  return bigrams;
 }
 
-// Optimization 1: Filter top k common descriptions
-export function getTopKCommonDescriptions(
+// Calculate percentile threshold
+export function calculatePercentileThreshold(
   counterparties: Array<{ name: string; count: number }>,
-  k: number = 50
-): Array<{ name: string; count: number }> {
-  // Sort by count (descending) and take top k
-  return [...counterparties]
-    .sort((a, b) => b.count - a.count)
-    .slice(0, k);
+  percentile: number = 90 // Top 10%
+): number {
+  if (counterparties.length === 0) return 0;
+  
+  const counts = counterparties.map(cp => cp.count).sort((a, b) => a - b);
+  const index = Math.floor((percentile / 100) * counts.length);
+  
+  return counts[Math.min(index, counts.length - 1)];
 }
 
-// Find similar counterparties using fuzzy matching with optimizations
+// Get counterparties above percentile threshold
+export function getTopPercentileCounterparties(
+  counterparties: Array<{ name: string; count: number }>,
+  percentile: number = 90 // Top 10%
+): Array<{ name: string; count: number }> {
+  const threshold = calculatePercentileThreshold(counterparties, percentile);
+  
+  console.log(`Transaction count threshold (${percentile}th percentile): ${threshold}`);
+  
+  return counterparties
+    .filter(cp => cp.count >= threshold)
+    .sort((a, b) => b.count - a.count);
+}
+
+// Normalize counterparty names for AML matching
+export function normalizeForAML(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/\b(PAYMENT|TRANSFER|TRF|WIRE|ACH|PMT)\b/g, '') // Remove transfer indicators
+    .replace(/\b\d{6,}\b/g, '') // Remove long reference numbers
+    .replace(/REF\s*:?\s*\S+/g, '') // Remove reference numbers
+    .replace(/[^\w\s]/g, ' ') // Replace special chars
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Extract key entity name for grouping
+export function extractKeyEntity(name: string): string {
+  const normalized = normalizeForAML(name);
+  const words = normalized.split(' ').filter(w => w.length > 2);
+  
+  // For AML, focus on first 2-3 significant words
+  return words.slice(0, 3).join(' ');
+}
+
+// Find similar counterparties with Union-Find to prevent duplicates
 export function findSimilarCounterparties(
   counterparties: Array<{ name: string; count: number }>,
   minSimilarity: number = 0.8,
-  maxResults: number = 100
+  maxResults: number = 100,
+  percentile: number = 90 // Top 10% by default
 ): Array<{
   representative: string;
   similar_names: string[];
   similarity_scores: number[];
   total_transactions: number;
   potential_savings: number;
+  risk_score?: number;
+  transaction_concentration?: number; // New metric for AML
 }> {
-  // Optimization 1: Filter top k common descriptions to reduce computation
-  const topCounterparties = getTopKCommonDescriptions(counterparties, 100);
-
-  console.log(`common counterparties considered for matching: ${topCounterparties.length}`);
+  // Filter for AML-relevant counterparties (top percentile)
+  const relevantCounterparties = getTopPercentileCounterparties(counterparties, percentile);
   
-  // Group counterparties by first word for optimization
+  console.log(`AML Analysis: ${relevantCounterparties.length} counterparties in top ${100-percentile}% (${counterparties.length} total)`);
+  
+  // Calculate total transactions for concentration analysis
+  const totalTransactionsAll = counterparties.reduce((sum, cp) => sum + cp.count, 0);
+  const totalTransactionsRelevant = relevantCounterparties.reduce((sum, cp) => sum + cp.count, 0);
+  
+  console.log(`Transaction concentration: ${((totalTransactionsRelevant / totalTransactionsAll) * 100).toFixed(1)}% of transactions in top ${100-percentile}% of counterparties`);
+  
+  // Union-Find to prevent duplicate groups
+  const parent = new Map<string, string>();
+  const rank = new Map<string, number>();
+  
+  relevantCounterparties.forEach(cp => {
+    parent.set(cp.name, cp.name);
+    rank.set(cp.name, 0);
+  });
+  
+  function find(x: string): string {
+    if (parent.get(x) !== x) {
+      parent.set(x, find(parent.get(x)!));
+    }
+    return parent.get(x)!;
+  }
+  
+  function union(x: string, y: string): void {
+    const rootX = find(x);
+    const rootY = find(y);
+    if (rootX === rootY) return;
+    
+    if (rank.get(rootX)! < rank.get(rootY)!) {
+      parent.set(rootX, rootY);
+    } else if (rank.get(rootX)! > rank.get(rootY)!) {
+      parent.set(rootY, rootX);
+    } else {
+      parent.set(rootY, rootX);
+      rank.set(rootX, rank.get(rootX)! + 1);
+    }
+  }
+  
+  // Build index by key entity
+  const entityIndex = new Map<string, string[]>();
+  
+  relevantCounterparties.forEach(cp => {
+    const keyEntity = extractKeyEntity(cp.name);
+    if (!entityIndex.has(keyEntity)) {
+      entityIndex.set(keyEntity, []);
+    }
+    entityIndex.get(keyEntity)!.push(cp.name);
+  });
+  
+  // Find similar counterparties within each entity group
+  for (const [entity, names] of entityIndex) {
+    for (let i = 0; i < names.length; i++) {
+      for (let j = i + 1; j < names.length; j++) {
+        const similarity = stringSimilarity(names[i], names[j]);
+        if (similarity >= minSimilarity) {
+          union(names[i], names[j]);
+        }
+      }
+    }
+  }
+  
+  // Build final groups
   const groups = new Map<string, Array<{ name: string; count: number }>>();
   
-  topCounterparties.forEach(cp => {
-    const firstWord = cp.name.trim().split(/\s+/)[0].toLowerCase();
-    if (!groups.has(firstWord)) {
-      groups.set(firstWord, []);
+  relevantCounterparties.forEach(cp => {
+    const root = find(cp.name);
+    if (!groups.has(root)) {
+      groups.set(root, []);
     }
-    groups.get(firstWord)!.push(cp);
+    groups.get(root)!.push(cp);
   });
-
-
   
+  // Create results with AML focus
   const results: Array<{
     representative: string;
     similar_names: string[];
     similarity_scores: number[];
     total_transactions: number;
     potential_savings: number;
+    risk_score?: number;
+    transaction_concentration?: number;
   }> = [];
-
-  console.log(`groups formed for matching: ${groups.size}`);
   
-  // For each counterparty, find similar ones
-  for (const cp of topCounterparties) {
-    const similar: Array<{ name: string; score: number; count: number }> = [];
-    
-    // Optimization 1: Only check counterparties with matching first words
-    const firstWord = cp.name.trim().split(/\s+/)[0].toLowerCase();
-    const potentialMatches = groups.get(firstWord) || [];
-    
-    // Optimization 2: Only do fuzzy matching if first few words match
-    for (const match of potentialMatches) {
-      if (cp.name === match.name) continue; // Skip self
+  for (const [root, group] of groups) {
+    if (group.length > 1) {
+      // Choose most frequent as representative
+      const representative = group.reduce((a, b) => a.count > b.count ? a : b);
       
-      // Check if first few words match
-      if (firstWordsMatch(cp.name, match.name, 3)) {
-        const similarity = stringSimilarity(cp.name, match.name);
-        if (similarity >= minSimilarity) {
-          similar.push({
-            name: match.name,
-            score: similarity,
-            count: match.count
-          });
+      const similar_names: string[] = [];
+      const similarity_scores: number[] = [];
+      let total_transactions = 0;
+      
+      group.forEach(cp => {
+        total_transactions += cp.count;
+        if (cp.name !== representative.name) {
+          similar_names.push(cp.name);
+          similarity_scores.push(stringSimilarity(representative.name, cp.name));
         }
-      }
-    }
-    
-    // Sort by similarity score (highest first)
-    similar.sort((a, b) => b.score - a.score);
-    
-    // Limit to top results
-    const topSimilar = similar.slice(0, 10); // Limit to top 10 similar names
-    
-    if (topSimilar.length > 0) {
-      results.push({
-        representative: cp.name,
-        similar_names: topSimilar.map(s => s.name),
-        similarity_scores: topSimilar.map(s => s.score),
-        total_transactions: cp.count + topSimilar.reduce((sum, s) => sum + s.count, 0),
-        potential_savings: topSimilar.length // Each merge saves one entry
       });
-    }
-    
-    // Limit total results
-    if (results.length >= maxResults) {
-      break;
+      
+
+      
+      // Calculate transaction concentration for this group
+      const transaction_concentration = (total_transactions / totalTransactionsAll) * 100;
+      
+      results.push({
+        representative: representative.name,
+        similar_names,
+        similarity_scores,
+        total_transactions,
+        potential_savings: group.length - 1,
+        transaction_concentration
+      });
     }
   }
   
-  // Sort by potential savings (highest first)
-  results.sort((a, b) => b.potential_savings - a.potential_savings);
+  // Sort by total transactions (important for AML)
+  results.sort((a, b) => b.total_transactions - a.total_transactions);
   
-  return results;
+  console.log(`Found ${results.length} potential counterparty groups for AML review`);
+  
+  return results.slice(0, maxResults);
 }

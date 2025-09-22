@@ -1172,16 +1172,14 @@ export const transactionExtractorService = {
     }
 
     // Clean up description - normalize whitespace
-    const cleanDesc = description.replace(/\s+/g, " ").trim();
+    const cleanDesc = description.replace(/\s+/g, " ").trim().toLowerCase();
 
     // Use custom regex pattern if provided
     if (this.customRegexPattern) {
       const match = cleanDesc.match(this.customRegexPattern);
       if (match && match[1]) {
         const extracted = match[1].trim();
-        if (this.isValidCounterpartyName(extracted)) {
-          return extracted;
-        }
+        return extracted;
       }
       return undefined;
     }
@@ -1264,24 +1262,14 @@ export const transactionExtractorService = {
         const extracted = match[1].trim();
 
         // Filter out invalid extractions
-        if (this.isValidCounterpartyName(extracted)) {
-          return extracted;
-        }
+        return extracted;
       }
     }
 
     return undefined;
   },
 
-  isValidCounterpartyName(name: string): boolean {
-    if (!name || name.length < 3) {
-      return false;
-    }
 
-    const nameClean = name.trim().toUpperCase();
-
-    return true;
-  },
 
   buildExtractionResult(
     transactions: ExtractedTransaction[],
@@ -1371,11 +1359,7 @@ export const transactionExtractorService = {
           const match = description.match(pattern);
           if (match && match[1]) {
             const extractedName = match[1].trim();
-            if (this.isValidCounterpartyName(extractedName)) {
-              extracted++;
-            } else {
-              failed++;
-            }
+          
           } else {
             failed++;
           }

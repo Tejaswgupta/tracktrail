@@ -48,6 +48,8 @@ export default function TransactionsTable({
     Record<string, CaseTransaction | null>
   >({});
   const [notesOpen, setNotesOpen] = useState(false);
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editingCounterparty, setEditingCounterparty] = useState<string>("");
 
   const canCollaborate = useMemo(() => Boolean(caseId && user?.id), [caseId, user?.id]);
 
@@ -260,6 +262,44 @@ export default function TransactionsTable({
 
   const goToNext = () => {
     setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+  };
+
+  const handleSaveCounterparty = async (transactionId: string) => {
+    if (!user?.id) {
+      alert("Please sign in to edit counterparties.");
+      return;
+    }
+
+    try {
+      // Find the transaction in our local state
+      const transaction = transactions.find(t => t.transaction_id === transactionId);
+      if (!transaction) {
+        throw new Error("Transaction not found");
+      }
+
+      // Update the transaction in the database
+      const updatedTransaction = await transactionsService.updateTransactionCounterparty(
+        transactionId,
+        editingCounterparty,
+        user.id
+      );
+
+      // Update the local state
+      setTransactions(prev => 
+        prev.map(t => 
+          t.transaction_id === transactionId 
+            ? { ...t, counterparty_merged: editingCounterparty } 
+            : t
+        )
+      );
+
+      // Clear editing state
+      setEditingTransactionId(null);
+      setEditingCounterparty("");
+    } catch (error) {
+      console.error("Failed to update counterparty:", error);
+      alert(error instanceof Error ? error.message : "Failed to update counterparty");
+    }
   };
 
   if (loading) {
@@ -584,9 +624,9 @@ export default function TransactionsTable({
                   <TableHead className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Amount
                   </TableHead>
-                  <TableHead className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  {/* <TableHead className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Balance
-                  </TableHead>
+                  </TableHead> */}
                 </TableRow>
               </TableHeader>
               <TableBody className="bg-white">
@@ -603,11 +643,58 @@ export default function TransactionsTable({
                       <div className="max-w-xs truncate">
                         {transaction.description || "No description"}
                       </div>
-                      {transaction.counterparty_merged && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          {transaction.counterparty_merged}
-                        </div>
-                      )}
+                      <div className="text-xs text-gray-500 mt-1">
+                        {editingTransactionId === transaction.transaction_id ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editingCounterparty}
+                              onChange={(e) => setEditingCounterparty(e.target.value)}
+                              className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
+                              placeholder="Enter counterparty name"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  handleSaveCounterparty(transaction.transaction_id);
+                                } else if (e.key === "Escape") {
+                                  setEditingTransactionId(null);
+                                  setEditingCounterparty("");
+                                }
+                              }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleSaveCounterparty(transaction.transaction_id)}
+                              className="text-xs bg-blue-500 text-white rounded px-2 py-1 hover:bg-blue-600"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingTransactionId(null);
+                                setEditingCounterparty("");
+                              }}
+                              className="text-xs bg-gray-500 text-white rounded px-2 py-1 hover:bg-gray-600"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className={transaction.counterparty_merged ? "" : "text-gray-400 italic"}>
+                              {transaction.counterparty_merged || "No counterparty"}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setEditingTransactionId(transaction.transaction_id);
+                                setEditingCounterparty(transaction.counterparty_merged || "");
+                              }}
+                              className="text-xs bg-gray-200 text-gray-700 rounded px-2 py-1 hover:bg-gray-300"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </TableCell>
                     {/* {statements.length > 1 && (
                       <TableCell className="px-6 py-4 text-sm text-gray-500">
@@ -672,11 +759,11 @@ export default function TransactionsTable({
                       {transaction.direction === "CR" ? "+" : "-"}
                       {formatAmount(Math.abs(transaction.amount))}
                     </TableCell>
-                    <TableCell className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                    {/* <TableCell className="px-6 py-4 whitespace-nowrap text-sm text-right">
                       {typeof transaction.balance === "number"
                         ? formatAmount(transaction.balance)
                         : "-"}
-                    </TableCell>
+                    </TableCell> */}
                   </TableRow>
                 ))}
               </TableBody>

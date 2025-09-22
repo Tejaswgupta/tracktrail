@@ -922,6 +922,30 @@ export const transactionsService = {
     if (error) throw error;
     return count || 0;
   },
+
+  async updateTransactionCounterparty(
+    transactionId: string,
+    counterpartyName: string,
+    userId: string
+  ): Promise<Transaction> {
+    const { data, error } = await supabase
+      .from("transactions")
+      .update({
+        counterparty_merged: counterpartyName,
+        updated_at: new Date().toISOString(),
+        updated_by: userId,
+      })
+      .eq("transaction_id", transactionId)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    
+    // Invalidate relevant caches
+    transactionCache.clear(); // Clear all transaction caches when updating transactions
+    
+    return data;
+  },
 };
 
 // Counterparty Operations
