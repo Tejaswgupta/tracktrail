@@ -34,12 +34,25 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Protect routes that require authentication (allow anonymous users)
-  // Only redirect to login if there's no user at all (not even anonymous)
-  if (!user && !request.nextUrl.pathname.startsWith("/auth")) {
-    // Check if this is a request that should allow anonymous access
-    // For now, we'll allow anonymous access to the main app
-    // You can modify this logic based on your needs
+  // Define public paths that don't require authentication
+  const publicPaths = [
+    "/auth/login",
+    "/auth/signup",
+    "/welcome",
+    "/favicon.ico",
+  ];
+
+  // Check if the path is public
+  const isPublicPath = publicPaths.some((path) =>
+    request.nextUrl.pathname.startsWith(path)
+  );
+
+  // Redirect unauthenticated users to login page
+  if (!user && !isPublicPath) {
+    // Redirect to login page
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/login";
+    return NextResponse.redirect(url);
   }
 
   // Redirect authenticated users away from auth pages
@@ -59,8 +72,9 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * Feel free to modify this pattern to include more paths.
+     * - auth (authentication pages)
+     * - welcome (welcome page)
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|auth|welcome|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

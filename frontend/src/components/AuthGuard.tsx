@@ -14,12 +14,9 @@ export default function AuthGuard({ children, fallback }: AuthGuardProps) {
   const router = useRouter();
 
   useEffect(() => {
-    // Only redirect if not loading and no user at all
-    // Allow anonymous users to access the app
+    // Redirect to login if not loading and no user
     if (!loading && !user) {
-      // For development, we'll allow access without authentication
-      // You can uncomment the line below to enforce authentication
-      // router.push("/auth/login");
+      router.push("/auth/login");
     }
   }, [user, loading, router]);
 
@@ -31,10 +28,10 @@ export default function AuthGuard({ children, fallback }: AuthGuardProps) {
     );
   }
 
-  // Allow access even without user (anonymous access)
-  // if (!user) {
-  //   return fallback || null;
-  // }
+  // If no user, render fallback or null
+  if (!user) {
+    return fallback || null;
+  }
 
   return <>{children}</>;
 }

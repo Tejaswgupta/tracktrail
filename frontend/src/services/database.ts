@@ -70,7 +70,7 @@ class SimpleCache<T> {
 }
 
 // Create cache instances for different data types
-const transactionCache = new SimpleCache<Transaction[]>(5 * 60 * 1000); // 5 minutes
+const transactionCache = new SimpleCache<Transaction[]>(15 * 60 * 1000); // 5 minutes
 const caseAMLMetadataCache = new SimpleCache<AMLMetadata>(10 * 60 * 1000); // 10 minutes
 const caseTransactionsAnalysisCache = new SimpleCache<Transaction[]>(10 * 60 * 1000); // 10 minutes
 
