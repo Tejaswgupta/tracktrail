@@ -100,59 +100,144 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     fetchData();
   }, [caseId, selectedEntityId]);
 
-  // Fetch counterparty stats from backend
+  // Fetch counterparty stats from backend (or calculate client-side for entity)
   useEffect(() => {
     const fetchCounterpartyStats = async () => {
       try {
         setLoading(true);
-        // Try to get detailed stats first, fallback to basic stats
-        let stats;
-        try {
-          stats = await counterpartyService.getCaseCounterpartyStatsWithDetails(caseId);
-        } catch (error) {
-          console.warn("Detailed counterparty stats not available, using basic stats");
-          const basicStats = await counterpartyService.getCaseCounterpartyStats(caseId);
-          // Transform basic stats to match detailed format
-          stats = basicStats.map(stat => ({
-            counterparty_name: stat.counterparty_name,
-            transaction_count: stat.transaction_count,
-            total_debits: 0,
-            total_credits: Number(stat.total_amount),
-            total_amount: Number(stat.total_amount),
-            net_flow: Number(stat.total_amount),
-            avg_transaction_size: Number(stat.total_amount) / stat.transaction_count,
-            max_transaction_size: 0,
-            first_seen: stat.first_seen,
-            last_seen: stat.last_seen
-          }));
-        }
         
-        // Transform backend data to match our CounterpartyStats interface
-        const transformedStats: CounterpartyStats[] = stats.map(stat => {
-          const daysActive = Math.max(
-            1,
-            Math.ceil(
-              (new Date(stat.last_seen).getTime() - new Date(stat.first_seen).getTime()) / (1000 * 60 * 60 * 24)
-            ) + 1
+        if (selectedEntityId) {
+          // For specific entity, calculate stats client-side from transactions
+          const entityTransactions = await transactionsService.getByEntityId(selectedEntityId);
+          
+          // Group transactions by counterparty
+          const counterpartyMap = new Map<string, {
+            transactions: Transaction[];
+            totalDebit: number;
+            totalCredit: number;
+            totalVolume: number;
+            netFlow: number;
+            firstDate: Date | null;
+            lastDate: Date | null;
+            maxTransaction: number;
+          }>();
+          
+          for (const tx of entityTransactions) {
+            const counterparty = tx.counterparty_merged || "Unknown";
+            if (!counterpartyMap.has(counterparty)) {
+              counterpartyMap.set(counterparty, {
+                transactions: [],
+                totalDebit: 0,
+                totalCredit: 0,
+                totalVolume: 0,
+                netFlow: 0,
+                firstDate: null,
+                lastDate: null,
+                maxTransaction: 0
+              });
+            }
+            
+            const cp = counterpartyMap.get(counterparty)!;
+            cp.transactions.push(tx);
+            
+            // Update financials
+            if (tx.direction === "DR") {
+              cp.totalDebit += tx.amount;
+            } else {
+              cp.totalCredit += tx.amount;
+            }
+            cp.totalVolume += tx.amount;
+            cp.netFlow += tx.direction === "CR" ? tx.amount : -tx.amount;
+            
+            // Update dates
+            const txDate = new Date(tx.tx_date);
+            if (!cp.firstDate || txDate < cp.firstDate) cp.firstDate = txDate;
+            if (!cp.lastDate || txDate > cp.lastDate) cp.lastDate = txDate;
+            
+            // Update max transaction
+            if (tx.amount > cp.maxTransaction) cp.maxTransaction = tx.amount;
+          }
+          
+          // Transform to our CounterpartyStats format
+          const transformedStats: CounterpartyStats[] = Array.from(counterpartyMap.entries()).map(
+            ([name, data]) => {
+              const daysActive = data.firstDate && data.lastDate
+                ? Math.max(
+                    1,
+                    Math.ceil(
+                      (data.lastDate.getTime() - data.firstDate.getTime()) / (1000 * 60 * 60 * 24)
+                    ) + 1
+                  )
+                : 1;
+              
+              return {
+                name,
+                transactionCount: data.transactions.length,
+                totalDebit: data.totalDebit,
+                totalCredit: data.totalCredit,
+                totalVolume: data.totalVolume,
+                netFlow: data.netFlow,
+                avgTransactionSize: data.totalVolume / data.transactions.length,
+                maxTransactionSize: data.maxTransaction,
+                firstTransactionDate: data.firstDate ? data.firstDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                lastTransactionDate: data.lastDate ? data.lastDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                daysActive: daysActive,
+                frequency: data.transactions.length / daysActive
+              };
+            }
           );
           
-          return {
-            name: stat.counterparty_name,
-            transactionCount: stat.transaction_count,
-            totalDebit: Number(stat.total_debits),
-            totalCredit: Number(stat.total_credits),
-            totalVolume: Number(stat.total_amount),
-            netFlow: Number(stat.net_flow),
-            avgTransactionSize: Number(stat.avg_transaction_size),
-            maxTransactionSize: Number(stat.max_transaction_size),
-            firstTransactionDate: stat.first_seen,
-            lastTransactionDate: stat.last_seen,
-            daysActive: daysActive,
-            frequency: stat.transaction_count / daysActive
-          };
-        });
-        
-        setCounterpartyStats(transformedStats);
+          setCounterpartyStats(transformedStats);
+        } else {
+          // For entire case, use backend stats
+          let stats;
+          try {
+            stats = await counterpartyService.getCaseCounterpartyStatsWithDetails(caseId);
+          } catch (error) {
+            console.warn("Detailed counterparty stats not available, using basic stats");
+            const basicStats = await counterpartyService.getCaseCounterpartyStats(caseId);
+            // Transform basic stats to match detailed format
+            stats = basicStats.map(stat => ({
+              counterparty_name: stat.counterparty_name,
+              transaction_count: stat.transaction_count,
+              total_debits: 0,
+              total_credits: Number(stat.total_amount),
+              total_amount: Number(stat.total_amount),
+              net_flow: Number(stat.total_amount),
+              avg_transaction_size: Number(stat.total_amount) / stat.transaction_count,
+              max_transaction_size: 0,
+              first_seen: stat.first_seen,
+              last_seen: stat.last_seen
+            }));
+          }
+          
+          // Transform backend data to match our CounterpartyStats interface
+          const transformedStats: CounterpartyStats[] = stats.map(stat => {
+            const daysActive = Math.max(
+              1,
+              Math.ceil(
+                (new Date(stat.last_seen).getTime() - new Date(stat.first_seen).getTime()) / (1000 * 60 * 60 * 24)
+              ) + 1
+            );
+            
+            return {
+              name: stat.counterparty_name,
+              transactionCount: stat.transaction_count,
+              totalDebit: Number(stat.total_debits),
+              totalCredit: Number(stat.total_credits),
+              totalVolume: Number(stat.total_amount),
+              netFlow: Number(stat.net_flow),
+              avgTransactionSize: Number(stat.avg_transaction_size),
+              maxTransactionSize: Number(stat.max_transaction_size),
+              firstTransactionDate: stat.first_seen,
+              lastTransactionDate: stat.last_seen,
+              daysActive: daysActive,
+              frequency: stat.transaction_count / daysActive
+            };
+          });
+          
+          setCounterpartyStats(transformedStats);
+        }
       } catch (error) {
         console.error("Error fetching counterparty stats:", error);
       } finally {
