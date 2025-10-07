@@ -5,6 +5,7 @@ import { findSimilarCounterparties } from "@/utils/fuzzyMatch";
 interface Counterparty {
   name: string;
   count: number;
+  entity_ids?: string[]; // Added for cross-entity tracking
 }
 
 interface CounterpartyMergeCandidate {
@@ -13,6 +14,7 @@ interface CounterpartyMergeCandidate {
   similarity_scores: number[];
   total_transactions: number;
   potential_savings: number;
+  entity_ids?: string[]; // Added for cross-entity tracking
 }
 
 export function useFrontendCounterpartyMerge(caseId: string) {
@@ -22,32 +24,56 @@ export function useFrontendCounterpartyMerge(caseId: string) {
   const [error, setError] = useState<string | null>(null);
 
   // Load all counterparties for the case
-  const loadCounterparties = useCallback(async () => {
+  const loadCounterparties = useCallback(async (entityIds?: string[]) => {
     try {
       setLoading(true);
       setError(null);
 
-      // Get all transactions for the case to extract counterparties
-      const transactions = await transactionsService.getCaseTransactionsForAnalysis(
-        caseId,
-        ["counterparty_merged"]
-      );
+      let transactions;
+      if (entityIds && entityIds.length > 0) {
+        // If specific entity IDs are provided, filter transactions for those entities
+        transactions = await transactionsService.getCaseTransactionsForAnalysis(
+          caseId,
+          ["counterparty_merged", "entity_id"]
+        );
+        
+        // Filter transactions to only include those from the selected entities
+        transactions = transactions.filter(tx => 
+          entityIds.includes(tx.entity_id)
+        );
+      } else {
+        // Get all transactions for the case to extract counterparties
+        transactions = await transactionsService.getCaseTransactionsForAnalysis(
+          caseId,
+          ["counterparty_merged", "entity_id"]
+        );
+      }
 
       // Extract and count counterparties
-      const counterpartyMap = new Map<string, number>();
+      const counterpartyMap = new Map<string, { count: number; entity_ids: Set<string> }>();
       
       transactions.forEach(tx => {
         if (tx.counterparty_merged) {
-          counterpartyMap.set(
-            tx.counterparty_merged,
-            (counterpartyMap.get(tx.counterparty_merged) || 0) + 1
-          );
+          if (!counterpartyMap.has(tx.counterparty_merged)) {
+            counterpartyMap.set(tx.counterparty_merged, { 
+              count: 0, 
+              entity_ids: new Set<string>() 
+            });
+          }
+          
+          const entry = counterpartyMap.get(tx.counterparty_merged)!;
+          entry.count += 1;
+          entry.entity_ids.add(tx.entity_id);
         }
       });
 
       // Convert to array and sort by count (descending)
       const counterpartyList = Array.from(counterpartyMap.entries())
-        .map(([name, count]) => ({ name, count }))
+        .map(([name, { count, entity_ids }]) => ({ 
+          name, 
+          count,
+          entity_ids: Array.from(entity_ids)
+        }))
         .sort((a, b) => b.count - a.count);
 
       setCounterparties(counterpartyList);
@@ -67,13 +93,34 @@ export function useFrontendCounterpartyMerge(caseId: string) {
     maxResults: number = 100
   ) => {
     try {
+      // Create a copy of counterparties without the entity_ids for the existing algorithm
+      const simplifiedCounterparties = counterparties.map(cp => ({
+        name: cp.name,
+        count: cp.count
+      }));
+      
       const results = findSimilarCounterparties(
-        counterparties,
+        simplifiedCounterparties,
         minSimilarity,
         maxResults
       );
       
-      return results;
+      // Enhance results with entity information
+      const enhancedResults = results.map(result => {
+        return {
+          ...result,
+          // Include the entity_ids from the original counterparties for each similar name
+          entity_ids: result.similar_names.reduce((allEntityIds, similarName) => {
+            const cp = counterparties.find(c => c.name === similarName);
+            if (cp && cp.entity_ids) {
+              return [...new Set([...allEntityIds, ...cp.entity_ids])];
+            }
+            return allEntityIds;
+          }, [] as string[])
+        };
+      });
+      
+      return enhancedResults;
     } catch (err) {
       console.error("Failed to find merge candidates:", err);
       setError(
@@ -93,6 +140,6 @@ export function useFrontendCounterpartyMerge(caseId: string) {
     loading,
     error,
     findMergeCandidates,
-    refresh: loadCounterparties
+    refresh: loadCounterparties // This function is now exposed to allow external refresh with entity filters
   };
 }

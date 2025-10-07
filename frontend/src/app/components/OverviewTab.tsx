@@ -18,6 +18,7 @@ import DetailedOverviewTab from "./DetailedOverviewTab";
 
 interface CounterpartyStats {
   name: string;
+  description?: string;
   transactionCount: number;
   totalDebit: number;
   totalCredit: number;
@@ -170,8 +171,11 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                   )
                 : 1;
               
+              const firstDescription = data.transactions[0]?.description;
+
               return {
                 name,
+                description: name !== firstDescription ? firstDescription : undefined,
                 transactionCount: data.transactions.length,
                 totalDebit: data.totalDebit,
                 totalCredit: data.totalCredit,
@@ -779,7 +783,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                       {sortedCounterparties.map((cp) => (
                         <tr key={cp.name} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {cp.name}
+                            <div>{cp.name}</div>
+                            {cp.description && <div className="text-xs text-gray-500 font-normal truncate" title={cp.description}>{cp.description}</div>}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             {cp.transactionCount.toLocaleString()}

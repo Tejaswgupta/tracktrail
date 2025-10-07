@@ -1,9 +1,15 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { counterpartyService, transactionsService } from "@/services/database";
+import { counterpartyService, entitiesService, transactionsService } from "@/services/database";
 import { useCallback, useEffect, useState } from "react";
 import { useFrontendCounterpartyMerge } from "@/hooks/useFrontendCounterpartyMerge";
+
+interface Entity {
+  entity_id: string;
+  entity_name: string;
+  entity_type: string;
+}
 
 interface CounterpartyMergeCandidate {
   representative: string;
@@ -11,6 +17,7 @@ interface CounterpartyMergeCandidate {
   similarity_scores: number[];
   total_transactions: number;
   potential_savings: number;
+  entity_ids?: string[]; // Added for cross-entity merges
 }
 
 interface EfficientCounterpartyMergeProps {
@@ -37,6 +44,9 @@ export default function EfficientCounterpartyMerge({
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
+  const [availableEntities, setAvailableEntities] = useState<Entity[]>([]);
+  const [selectedEntities, setSelectedEntities] = useState<string[]>([]); // For cross-entity selection
+  const [showEntitySelector, setShowEntitySelector] = useState(false); // Toggle for entity selection
 
   const {
     counterparties,
@@ -47,10 +57,16 @@ export default function EfficientCounterpartyMerge({
     refresh
   } = useFrontendCounterpartyMerge(caseId);
 
+  // Enhanced version that reloads counterparties with entity filter when needed
   const loadCandidates = useCallback(() => {
     try {
       setLoading(true);
       setError(null);
+
+      // If specific entities are selected, we need to refresh the counterparties with the entity filter
+      if (selectedEntities.length > 0) {
+        refresh(selectedEntities);
+      }
 
       // Use frontend implementation instead of backend RPC
       const data = findMergeCandidates(
@@ -67,19 +83,34 @@ export default function EfficientCounterpartyMerge({
     } finally {
       setLoading(false);
     }
-  }, [similarityThreshold, findMergeCandidates]);
+  }, [selectedEntities, similarityThreshold, findMergeCandidates, refresh]);
+
+  // Load entities for cross-entity selection
+  const loadEntities = useCallback(async () => {
+    try {
+      const entities = await entitiesService.getByCaseId(caseId);
+      setAvailableEntities(entities.map(e => ({ 
+        entity_id: e.entity_id, 
+        entity_name: e.entity_name,
+        entity_type: e.entity_type 
+      })))
+    } catch (err) {
+      console.error("Failed to load entities:", err);
+    }
+  }, [caseId]);
 
   const handleThresholdChange = useCallback(
-    async (newThreshold: number) => {
+    (newThreshold: number) => {
       setSimilarityThreshold(newThreshold);
       setCurrentPage(1);
       // Debounce the API call
       const timeoutId = setTimeout(() => {
         loadCandidates();
       }, 500);
+      // Clear the timeout on subsequent calls to avoid multiple API calls
       return () => clearTimeout(timeoutId);
     },
-    []
+    [loadCandidates]
   );
 
   const toggleMergeSelection = useCallback(
@@ -234,6 +265,17 @@ export default function EfficientCounterpartyMerge({
     }
   }, [selectedMerges, candidates, user?.id, loadCandidates]);
 
+  // Toggle entity selection for cross-entity merges
+  const toggleEntitySelection = (entityId: string) => {
+    setSelectedEntities(prev => {
+      if (prev.includes(entityId)) {
+        return prev.filter(id => id !== entityId);
+      } else {
+        return [...prev, entityId];
+      }
+    });
+  };
+
   // Filter candidates based on search term and transaction count
   const filteredCandidates = candidates.filter((candidate) => {
     // Filter by transaction count
@@ -277,11 +319,20 @@ export default function EfficientCounterpartyMerge({
       { totalMerges: 0, totalTransactions: 0 }
     );
 
+  // Update when entity selection changes
+  useEffect(() => {
+    loadCandidates();
+  }, [selectedEntities, loadCandidates]);
+
   useEffect(() => {
     if (!frontendLoading && counterparties.length > 0) {
       loadCandidates();
     }
   }, [frontendLoading, counterparties]);
+
+  useEffect(() => {
+    loadEntities();
+  }, [loadEntities]);
 
   if (loading) {
     return (
@@ -314,6 +365,46 @@ export default function EfficientCounterpartyMerge({
               {candidates.length}
             </div>
           </div>
+        </div>
+
+        {/* Entity selection section for cross-entity merges */}
+        <div className="mb-4 p-4 bg-blue-50 rounded-md">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium text-gray-800">Entity Selection</h3>
+            <button 
+              onClick={() => setShowEntitySelector(!showEntitySelector)}
+              className="text-sm bg-blue-600 text-white px-3 py-1 rounded-md hover:bg-blue-700"
+            >
+              {showEntitySelector ? "Hide" : "Show"} Entity Selector
+            </button>
+          </div>
+          
+          {showEntitySelector && (
+            <div className="mt-3">
+              <p className="text-sm text-gray-600 mb-2">Select entities to merge from:</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-40 overflow-y-auto p-2 border rounded-md">
+                {availableEntities.map(entity => (
+                  <div key={entity.entity_id} className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id={`entity-${entity.entity_id}`}
+                      checked={selectedEntities.includes(entity.entity_id)}
+                      onChange={() => toggleEntitySelection(entity.entity_id)}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor={`entity-${entity.entity_id}`} className="ml-2 text-sm text-gray-700">
+                      {entity.entity_name} ({entity.entity_type})
+                    </label>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-sm text-gray-600">
+                {selectedEntities.length > 0 
+                  ? `${selectedEntities.length} entity${selectedEntities.length > 1 ? 'ies' : ''} selected for cross-entity analysis`
+                  : 'Select entities to enable cross-entity merge analysis'}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Controls */}
