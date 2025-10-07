@@ -15,6 +15,7 @@ import {
   YAxis,
 } from "recharts";
 import DetailedOverviewTab from "./DetailedOverviewTab";
+import EditableCounterpartyName from "./EditableCounterpartyName";
 
 interface CounterpartyStats {
   name: string;
@@ -339,6 +340,64 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
       month: "short",
       day: "numeric",
     });
+  };
+
+  // Function to handle saving updated counterparty names
+  const handleSaveCounterpartyName = async (oldName: string, newName: string) => {
+    try {
+      // Update all transactions with the old counterparty name to the new name
+      const result = await transactionsService.updateTransactionCounterparty(
+        caseId,
+        oldName,
+        newName,
+      );
+
+      // Update the local state to reflect the changes
+      setCounterpartyStats(prevStats => {
+        // Check if there's already a counterparty with the new name
+        const existingIndex = prevStats.findIndex(cp => cp.name === newName);
+        const oldIndex = prevStats.findIndex(cp => cp.name === oldName);
+        
+        if (existingIndex !== -1 && oldIndex !== -1 && existingIndex !== oldIndex) {
+          // Merge the old counterparty into the existing one
+          const updatedStats = [...prevStats];
+          const existingCp = updatedStats[existingIndex];
+          const oldCp = updatedStats[oldIndex];
+          
+          // Create merged counterparty with combined stats
+          const mergedCp: CounterpartyStats = {
+            name: newName,
+            transactionCount: existingCp.transactionCount + oldCp.transactionCount,
+            totalDebit: existingCp.totalDebit + oldCp.totalDebit,
+            totalCredit: existingCp.totalCredit + oldCp.totalCredit,
+            totalVolume: existingCp.totalVolume + oldCp.totalVolume,
+            netFlow: existingCp.netFlow + oldCp.netFlow,
+            avgTransactionSize: (existingCp.totalVolume + oldCp.totalVolume) / (existingCp.transactionCount + oldCp.transactionCount),
+            maxTransactionSize: Math.max(existingCp.maxTransactionSize, oldCp.maxTransactionSize),
+            firstTransactionDate: existingCp.firstTransactionDate < oldCp.firstTransactionDate ? existingCp.firstTransactionDate : oldCp.firstTransactionDate,
+            lastTransactionDate: existingCp.lastTransactionDate > oldCp.lastTransactionDate ? existingCp.lastTransactionDate : oldCp.lastTransactionDate,
+            daysActive: Math.max(existingCp.daysActive, oldCp.daysActive),
+            frequency: (existingCp.transactionCount + oldCp.transactionCount) / Math.max(existingCp.daysActive, oldCp.daysActive),
+            description: existingCp.description || oldCp.description  // Keep the first available description
+          };
+          
+          // Replace the existing counterparty with merged data and remove the old one
+          updatedStats[existingIndex] = mergedCp;
+          return updatedStats.filter((_, index) => index !== oldIndex);
+        } else {
+          // Normal case: just update the name
+          return prevStats.map(cp => 
+            cp.name === oldName ? { ...cp, name: newName } : cp
+          );
+        }
+      });
+
+      console.log(`Successfully renamed counterparty from "${oldName}" to "${newName}", ${result.affectedCount} transactions updated`);
+    } catch (error) {
+      console.error("Error updating counterparty name:", error);
+      alert(`Failed to update counterparty name: ${(error as Error).message}`);
+      throw error; // Re-throw so the child component can handle the error
+    }
   };
 
   if (loading) {
@@ -782,9 +841,12 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {sortedCounterparties.map((cp) => (
                         <tr key={cp.name} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            <div>{cp.name}</div>
-                            {cp.description && <div className="text-xs text-gray-500 font-normal truncate" title={cp.description}>{cp.description}</div>}
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <EditableCounterpartyName
+                              name={cp.name}
+                              description={cp.description}
+                              onSave={(newName) => handleSaveCounterpartyName(cp.name, newName)}
+                            />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             {cp.transactionCount.toLocaleString()}

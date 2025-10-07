@@ -924,27 +924,50 @@ export const transactionsService = {
   },
 
   async updateTransactionCounterparty(
-    transactionId: string,
-    counterpartyName: string,
-    userId: string
-  ): Promise<Transaction> {
+    caseId: string,
+    oldCounterpartyName: string,
+    newCounterpartyName: string,
+  ): Promise<{ affectedCount: number }> {
+
+    console.log(`Updating counterparty from "${oldCounterpartyName}" to "${newCounterpartyName}" for case ${caseId}`);
+    
+    // First get all entity IDs for this case
+    const { data: caseEntities, error: caseError } = await supabase
+      .from("case_entities")
+      .select("entity_id")
+      .eq("case_id", caseId);
+
+    if (caseError) throw caseError;
+
+    if (!caseEntities || caseEntities.length === 0) {
+      return { affectedCount: 0 };
+    }
+
+    const entityIds = caseEntities.map((ce) => ce.entity_id);
+
+    console.log(`Case ${caseId} has ${entityIds.length} entities`);
+
+    const { count: matchingTxCount } = await supabase
+      .from("transactions")
+      .select("*", { count: "exact", head: true })
+      .in("entity_id", entityIds)
+      .eq("counterparty_merged", oldCounterpartyName);
+
+    console.log(`Found ${matchingTxCount} transactions matching criteria`);
+
+    // Update transactions for entities in this case
     const { data, error } = await supabase
       .from("transactions")
       .update({
-        counterparty_merged: counterpartyName,
-        updated_at: new Date().toISOString(),
-        updated_by: userId,
+        counterparty_merged: newCounterpartyName,
       })
-      .eq("transaction_id", transactionId)
-      .select("*")
-      .single();
+      .in("entity_id", entityIds)
+      .eq("counterparty_merged", oldCounterpartyName).select();
 
     if (error) throw error;
     
-    // Invalidate relevant caches
-    transactionCache.clear(); // Clear all transaction caches when updating transactions
     
-    return data;
+    return { affectedCount: data?.length || 0 };
   },
 };
 
