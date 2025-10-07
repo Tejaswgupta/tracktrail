@@ -123,7 +123,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           }>();
           
           for (const tx of entityTransactions) {
-            const counterparty = tx.counterparty_merged || "Unknown";
+            const counterparty = tx.counterparty_merged || tx.description || "Unknown";
             if (!counterpartyMap.has(counterparty)) {
               counterpartyMap.set(counterparty, {
                 transactions: [],
