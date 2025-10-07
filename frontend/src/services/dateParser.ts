@@ -87,7 +87,7 @@ export function tryParseDate(dateString: string) {
     "d-M-yy",
     "d-M-yyyy",
     "dd-MM-yy HH:mm",
-    "dd-MM-yyyy HH:mm",
+    "dd-MM-yyyy HH:mm:ss",
     "MM-dd-yy HH:mm",
     "MM-dd-yyyy HH:mm",
     "yy-MM-dd HH:mm",
