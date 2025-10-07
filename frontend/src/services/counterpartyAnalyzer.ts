@@ -169,24 +169,17 @@ export class CounterpartyAnalyzer {
   /**
    * Get available bank presets
    */
-  static getAvailableBankPresets(): string[] {
-    return ["generic", "axis", "federal", "indian", "jammu_and_kashmir_bank"];
-  }
-
-  /**
-   * Get bank preset display names
-   */
-  static getBankPresetDisplayName(preset: string): string {
-    const displayNames: Record<string, string> = {
-      generic: "Generic (All Banks)",
+  static getAvailableBankPresets(): Record<string, string> {
+    return {
+      generic: "Generic",
       axis: "Axis Bank",
       federal: "Federal Bank",
-      indian: "Indian Banks (Generic)",
+      indian: "Indian Bank",
       jammu_and_kashmir_bank: "Jammu & Kashmir Bank",
+      idfc: "IDFC First Bank",
     };
-
-    return displayNames[preset] || preset;
   }
+
 
   /**
    * Find similar counterparties for a given query (useful for UI suggestions)

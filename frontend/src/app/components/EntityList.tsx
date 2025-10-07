@@ -8,11 +8,13 @@ import EntityCard from "./EntityCard";
 interface EntityListProps {
   caseId: string;
   onEntityDeleted?: () => void;
+  onEntityUpdated?: () => void;
 }
 
 export default function EntityList({
   caseId,
   onEntityDeleted,
+  onEntityUpdated,
 }: EntityListProps) {
   const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +45,11 @@ export default function EntityList({
   const handleEntityDeleted = () => {
     setRefreshTrigger((prev) => prev + 1);
     onEntityDeleted?.();
+  };
+
+  const handleEntityUpdated = () => {
+    setRefreshTrigger((prev) => prev + 1);
+    onEntityUpdated?.();
   };
 
   if (loading) {
@@ -111,6 +118,7 @@ export default function EntityList({
           entity={entity}
           caseId={caseId}
           onEntityDeleted={handleEntityDeleted}
+          onEntityUpdated={handleEntityUpdated}
         />
       ))}
     </div>

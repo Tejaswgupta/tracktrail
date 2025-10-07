@@ -9,7 +9,8 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppHeader from "../../components/AppHeader";
 import CreateEntityModal from "../../components/CreateEntityModal";
-import EntityList from "../../components/EntityList";
+import EntityList from "@/app/components/EntityList";
+
 
 interface Case {
   id: string;
@@ -327,6 +328,7 @@ export default function CaseDetailPage() {
               caseId={caseData.id}
               key={refreshTrigger}
               onEntityDeleted={handleEntityDeleted}
+              onEntityUpdated={() => setRefreshTrigger((prev) => prev + 1)}
             />
           </div>
         )}

@@ -352,6 +352,18 @@ export const entitiesService = {
 
     if (error) throw error;
   },
+
+  async update(entityId: string, updates: Partial<Omit<Entity, "entity_id" | "created_at">>): Promise<Entity> {
+    const { data, error } = await supabase
+      .from("entities")
+      .update({ ...updates })
+      .eq("entity_id", entityId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
 };
 
 // Accounts

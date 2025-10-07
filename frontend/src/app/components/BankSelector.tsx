@@ -1,5 +1,6 @@
 "use client";
 
+import { CounterpartyAnalyzer } from "@/services/counterpartyAnalyzer";
 import { transactionExtractorService } from "@/services/transactionExtractor";
 import { useEffect, useRef, useState } from "react";
 
@@ -29,8 +30,8 @@ export default function BankSelector({
   const [testResult, setTestResult] = useState<{ extracted: number; failed: number } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const banks = transactionExtractorService.getAvailableBanks();
-  const selectedBankInfo = banks.find((bank) => bank.value === selectedBank);
+  const banks = CounterpartyAnalyzer.getAvailableBankPresets();
+  const selectedBankInfo = Object.keys(banks).find((key) => banks[key] === selectedBank);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -94,7 +95,7 @@ export default function BankSelector({
       >
         <div className="flex items-center">
           <span className="block truncate">
-            {selectedBankInfo?.label || "Select a bank"}
+            {selectedBank && banks[selectedBank] ? banks[selectedBank] : "Select a bank type"}
           </span>
         </div>
         <span className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
@@ -118,12 +119,12 @@ export default function BankSelector({
 
       {isOpen && (
         <div className="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none">
-          {banks.map((bank) => (
-            <div
-              key={bank.value}
-              onClick={() => handleBankSelect(bank.value)}
+            {Object.entries(banks).map(([value, label]) => (
+              <div
+                key={value}
+                onClick={() => handleBankSelect(value)}
               className={`cursor-pointer select-none relative py-3 pl-3 pr-9 hover:bg-blue-50 ${
-                selectedBank === bank.value
+                selectedBank === value
                   ? "text-blue-900 bg-blue-50"
                   : "text-gray-900"
               }`}
@@ -131,18 +132,16 @@ export default function BankSelector({
               <div className="flex flex-col">
                 <span
                   className={`block truncate ${
-                    selectedBank === bank.value
+                    selectedBank === value
                       ? "font-semibold"
                       : "font-normal"
                   }`}
                 >
-                  {bank.label}
+                  {label}
                 </span>
-                <span className="text-xs text-gray-500 mt-1">
-                  {bank.description}
-                </span>
+              
               </div>
-              {selectedBank === bank.value && (
+              {selectedBank === value && (
                 <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-blue-600">
                   <svg
                     className="h-5 w-5"
@@ -162,11 +161,7 @@ export default function BankSelector({
         </div>
       )}
 
-      {selectedBankInfo && (
-        <p className="mt-2 text-sm text-gray-600">
-          {selectedBankInfo.description}
-        </p>
-      )}
+
 
       {/* Custom Regex Input */}
       <div className="mt-4">

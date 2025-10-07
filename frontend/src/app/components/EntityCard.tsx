@@ -10,16 +10,21 @@ interface EntityCardProps {
   entity: EntityWithAccounts;
   caseId?: string;
   onEntityDeleted?: () => void;
+  onEntityUpdated?: () => void;
 }
 
 export default function EntityCard({
   entity,
   caseId,
   onEntityDeleted,
+  onEntityUpdated,
 }: EntityCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(entity.entity_name);
+  const [isSaving, setIsSaving] = useState(false);
 
   const getEntityIcon = (type: EntityType) => {
     switch (type) {
@@ -122,6 +127,42 @@ export default function EntityCard({
     }
   };
 
+  const handleNameEdit = async () => {
+    if (!editName.trim() || editName === entity.entity_name) {
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Update the entity name in the database
+      await entitiesService.update(entity.entity_id, {
+        entity_name: editName.trim(),
+      });
+      // Call the callback to notify parent component of the update
+      onEntityUpdated?.();
+    } catch (error) {
+      console.error("Error updating entity name:", error);
+      alert("Failed to update entity name. Please try again.");
+    } finally {
+      setIsSaving(false);
+      setIsEditing(false);
+    }
+  };
+
+  const handleEditCancel = () => {
+    setEditName(entity.entity_name);
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      handleNameEdit();
+    } else if (e.key === "Escape") {
+      handleEditCancel();
+    }
+  };
+
   return (
     <div className="border border-gray-200 rounded-lg bg-white">
       <div className="p-4">
@@ -134,9 +175,20 @@ export default function EntityCard({
             </div>
             <div className="flex-1">
               <div className="flex items-center space-x-2 mb-1">
-                <h4 className="text-lg font-medium text-gray-900">
-                  {entity.entity_name}
-                </h4>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    className="flex-1 text-lg font-medium text-gray-900 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autoFocus
+                  />
+                ) : (
+                  <h4 className="text-lg font-medium text-gray-900">
+                    {entity.entity_name}
+                  </h4>
+                )}
                 <span
                   className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getTypeColor(
                     entity.entity_type
@@ -144,6 +196,70 @@ export default function EntityCard({
                 >
                   {entity.entity_type}
                 </span>
+                {isEditing ? (
+                  <div className="flex space-x-1">
+                    <button
+                      onClick={handleNameEdit}
+                      disabled={isSaving}
+                      className="p-1 text-green-600 hover:text-green-800 rounded-full hover:bg-green-50 disabled:opacity-50"
+                      title="Save"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={handleEditCancel}
+                      disabled={isSaving}
+                      className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 disabled:opacity-50"
+                      title="Cancel"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                    title="Edit entity name"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                      />
+                    </svg>
+                  </button>
+                )}
               </div>
               <p className="text-sm text-gray-600 mb-1">
                 {entity.pan || entity.cin || "No identifier"}

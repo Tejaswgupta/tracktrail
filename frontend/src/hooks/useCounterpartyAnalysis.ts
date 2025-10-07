@@ -142,9 +142,9 @@ export function useCounterpartyAnalysis(
   // Computed values
   const availablePresets = useMemo(
     () =>
-      CounterpartyAnalyzer.getAvailableBankPresets().map((preset) => ({
-        value: preset,
-        label: CounterpartyAnalyzer.getBankPresetDisplayName(preset),
+      Object.entries(CounterpartyAnalyzer.getAvailableBankPresets()).map(([value, label]) => ({
+        value,
+        label,
       })),
     []
   );

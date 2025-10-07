@@ -48,36 +48,6 @@ export const transactionExtractorService = {
     }
   },
 
-  getAvailableBanks() {
-    return [
-      {
-        value: "generic",
-        label: "Generic Bank",
-        description: "Standard format for most banks",
-      },
-      {
-        value: "axis",
-        label: "Axis Bank",
-        description: "Optimized for Axis Bank statements",
-      },
-      {
-        value: "federal",
-        label: "Federal Bank",
-        description: "Optimized for Federal Bank statements",
-      },
-      {
-        value: "indian",
-        label: "Indian Bank",
-        description: "Optimized for Indian Bank statements",
-      },
-      {
-        value: "jammu_and_kashmir_bank",
-        label: "Jammu & Kashmir Bank",
-        description: "Optimized for J&K Bank statements",
-      },
-    ];
-  },
-
   async extractFromFile(
     file: File,
     accountId: string,
@@ -1184,69 +1154,53 @@ export const transactionExtractorService = {
       return undefined;
     }
 
-    // Bank-specific regex patterns based on Python implementation
-    const bankPatterns: Record<string, RegExp[]> = {
+    // Bank-specific regex patterns (stored as strings now)
+    // Patterns are converted to RegExp at match time with the 'i' flag
+    const bankPatterns: Record<string, string[]> = {
       generic: [
-        /UPI\/([^\/]+)\/[^\/]+\/?/i, // UPI/COUNTERPARTY/number/optional
-        /(?:NEFT|RTGS)\/[^\/]+\/([^\/\n]+)\/?/i,
-        /POS\/([^\/\n]+)\/?/i,
-        /IMPS(?:-[A-Z]+)?\/[^\/]+\/[^\/]+\/([^\/\n]+)\/?/i,
-        /(?:.*\/)?([^\/\n]+)$/i, // General fallback: last segment after slash
+        "UPI\\/([^\\/]+)\\/[^\\/]+\\/?", // UPI/COUNTERPARTY/number/optional
+        "(?:NEFT|RTGS)\\/[^\\/]+\\/([^\\\\n]+)\\/?",
+        "POS\\/([^\\\\n]+)\\/?",
+        "IMPS(?:-[A-Z]+)?\\/[^\\/]+\\/[^\\/]+\\/([^\\\\n]+)\\/?",
+        "(?:.*\\/)?([^\\\\n]+)$", // General fallback: last segment after slash
       ],
       axis: [
-        // INB/RTGS/{ref}/{name}/... (MOST SPECIFIC FIRST)
-        /^INB\/RTGS\/[^\/]+\/([^\/]+)\//i,
-        /^INB\/RTGS\/[^\/]+\/([^\/]+)$/i,
-        // INB/NEFT/{ref}/{name}/...
-        /^INB\/NEFT\/[^\/]+\/([^\/]+)\//i,
-        /^INB\/NEFT\/[^\/]+\/([^\/]+)$/i,
-        // INB/IFT/{name}/TPARTY TRANSFER
-        /^INB\/IFT\/([^\/]+)\/TPARTY TRANSFER/i,
-        // RTGS patterns
-        /^RTGS\/[^\/]+\/[^\/]+\/([^\/]+)\/[^\/]+/i,
-        /^RTGS\/[^\/]+\/[^\/]+\/([^\/]+)$/i,
-        /^RTGS\/[^\/]+\/([^\/]+)\/[^\/]+/i,
-        /^RTGS\/[^\/]+\/([^\/]+)$/i,
-        // NEFT patterns
-        /^NEFT\/RETURN\/[^\/]+\/[^\/]+\/([^\/]+)/i,
-        /^NEFT\/[^\/]+\/([^\/]+)\/[^\/]+\/\/ATTN\/\/INB/i,
-        /^NEFT\/IC\/[^\/]+\/([^\/]+)/i,
-        /^NEFT\/[^\/]+\/([^\/]+)\/[^\/]+\/\/URGENT\//i,
-        // IMPS patterns
-        /^IMPS\/P2A\/[^\/]+\/([^\/]+)\/[^\/]+\//i,
-        /^IMPS\/P2A\/[^\/]+\/\/[^\/]+\/[^\/]+\/([^\/]+)/i,
-        /^IMPS\/P2A\/[^\/]+\/\/([^\/]+)/i,
-        // GENERAL INB PATTERN (NOW LAST)
-        /^INB\/[^\/]+\/([^\/]+)\//i,
-        /^INB\/[^\/]+\/\/([^\/]+)/i,
-        // Other patterns
-        /^DD ISSUED\/[^\/]+\/([^,]+), PAYABLE AT/i,
-        /^ICONN REF\/[^\/]+\/([^\/]+)\//i,
-        /^BY CASH DEPOSIT[^\/]+\/[^\/]+\/[^\/]+\/[^\/]+\/([^\/]+)$/i,
-        /^SAK\/CASH WDL\/[^\/]+\/[^\/]+\/[^\/]+\/WD BY(.+)$/i,
-        /^BRN-CLG-CHQ PAID TO ([^ \/]+)/i,
+        "^NEFT/[A-Z0-9/]+/([^/]+)",
+        "^INB/NEFT/[A-Z0-9/]+/([^/]+)",
+        "^INB/RTGS/[A-Z0-9/]+/([^/]+)",
+        "^RTGS/[A-Z0-9/]+/([^/]+)",
+        "^IMPS/P2A/[0-9]+(?:/[^/]*)*/([^/]+)$",
+        "^TRF/[^/]+/([^/]+)",
+      ],
+      idfc: [
+          "^(?:NEFT|RTGS)/[^/]+/([^/]+)/[^/]+",
+        "^IMPS-[^/]+/Fund Trf/[^/]+/([^/]+)/",
+        "^TRANSFER (?:TO|FROM) DEPOSIT: CHEQUE NO\\. \\d+/FT TO (.+)",
+        "^IFT/[^/]+/([^/\\r\\n]*)",
+        "^CHQ Paid/[^/]+/([^/]+)/",
+        "^CASH DEPOSIT AT [^/]+ BY (.+)"
       ],
       federal: [
-        /^(?:RTG|NFT|FTIMPS|IFN\/CHRG|CHRG|dd\sissue|DD:|BBYT:|TFR:?)\/?:?\s*(?:IFI\/\d+\/)?([^\/,:\n]+)/i,
-        /^(ALLOYS?|LLP|BANK|ICICI|SBI|HDFC|PAYMENT?|Pymt|SELF)$/i,
-        /^(?:TFR:|ID\s*:\s*\[[^\]]*\]\s*:|BillId\s*:\s*\[[^\]]*\]\s*:)\s*"?([^",:\n\/]+?)"?$/i,
-        /^FT?\s*IMPS\/IFI\/\d+\/([^\/]+)\/SUPP/i,
+        "^(?:RTG|NFT|FTIMPS|IFN\\/CHRG|CHRG|dd\\sissue|DD:|BBYT:|TFR:?)\\/:?:\\s*(?:IFI\\/\\d+\\/)?([^\\/,:\\n]+)",
+        "^(ALLOYS?|LLP|BANK|ICICI|SBI|HDFC|PAYMENT?|Pymt|SELF)$",
+        "^(?:TFR:|ID\\s*:\\s*\\[[^\\]]*\\]\\s*:|BillId\\s*:\\s*\\[[^\\]]*\\]\\s*:)\\s*\"?([^\",:\\n\\/]+?)\"?$",
+        "^FT?\\s*IMPS\\/IFI\\/\\d+\\/([^\\/]+)\\/SUPP",
       ],
       indian: [
-        /\/[A-Z]{3,}\/([^\/-]+)(?:\/-)?$/i,
-        /RTGS\s+\S+\s+(.+)$/i,
-        /^TRANSFER (?:TO|FROM) \d+ [^\/]*?\/P[Aa]y\/([^\/\r\n"]+?)(?:\/|$)/i,
-        /^TRANSFER (?:TO|FROM) \d+ [^\/]*?\/IMPS\/P2A\/\d+\/ \/P[Aa]y\/([^\/]+?)\s*\/BRANCH/i,
-        /\s([A-Z][A-Z0-9 &]+)$/,
-        /FROM (\d{8,15})$/i,
-        /^TRANSFER TO (\d{8,15})/i,
-        /Paid to SELF \/BRANCH\s*:\s*([^\/]+)/i,
+        "\\/[A-Z]{3,}\\/([^\\\/-]+)(?:\\/-)?$",
+        "RTGS\\s+\\S+\\s+(.+)$",
+        "^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/P[Aa]y\\/([^\\\/\\r\\n\"]+?)(?:\\/|$)",
+        "^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/IMPS\\/P2A\\/\\d+\\/ \\/P[Aa]y\\/([^\\/]+?)\\s*\\/BRANCH",
+        "\\s([A-Z][A-Z0-9 &]+)$",
+        "FROM (\\d{8,15})$",
+        "^TRANSFER TO (\\d{8,15})",
+        "Paid to SELF \\/BRANCH\\s*:\\s*([^\\/]+)",
       ],
       jammu_and_kashmir_bank: [
-        /^UPI\/[A-Z]+\/\d+\/[CD]R\/([^\/]+)\/P2M/i, // UPI
-        /^NEFT-[A-Z0-9]+-([A-Za-z][A-Za-z\s]*[A-Za-z])/i, // NEFT
-        /^RTGS-[A-Z0-9]+-([A-Za-z][A-Za-z\s]*[A-Za-z])/i, // RTGS
-        /^mTFR\/\d+\/([A-Za-z][A-Za-z\s]*[A-Za-z])/i, // IMPS/mTFR
+        "^UPI\\/[A-Z]+\\/\\d+\\/[CD]R\\/([^\\/]+)\\/P2M", // UPI
+        "^NEFT-[A-Z0-9]+-([A-Za-z][A-Za-z\\s]*[A-Za-z])", // NEFT
+        "^RTGS-[A-Z0-9]+-([A-Za-z][A-Za-z\\s]*[A-Za-z])", // RTGS
+        "^mTFR\\/\\d+\\/([A-Za-z][A-Za-z\\s]*[A-Za-z])", // IMPS/mTFR
       ],
     };
 
@@ -1255,13 +1209,19 @@ export const transactionExtractorService = {
     console.log(`Using patterns for bank preset "${bankPreset}":`, patterns);
 
     for (const pattern of patterns) {
-      const match = cleanDesc.match(pattern);
-    
-      console.log(`Trying pattern:`, pattern, `Match:`, match);
+      // Build RegExp from the stored string pattern. Use 'i' to preserve case-insensitive behavior.
+      let re: RegExp;
+      try {
+        re = new RegExp(pattern, 'i');
+      } catch (err) {
+        console.warn('Invalid regex pattern for bank preset', bankPreset, pattern, err);
+        continue;
+      }
+
+      const match = cleanDesc.match(re);
+      console.log(`Trying pattern:`, pattern, `RegExp:`, re, `Match:`, match);
       if (match && match[1]) {
         const extracted = match[1].trim();
-
-        // Filter out invalid extractions
         return extracted;
       }
     }
