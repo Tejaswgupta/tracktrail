@@ -72,8 +72,8 @@ export function extractKeyEntity(name: string): string {
   const normalized = normalizeForAML(name);
   const words = normalized.split(' ').filter(w => w.length > 2);
   
-  // For AML, focus on first 2-3 significant words
-  return words.slice(0, 3).join(' ');
+  // Return just the first significant word as the key entity
+  return words.length > 0 ? words[0] : normalized.split(' ')[0] || '';
 }
 
 // Find similar counterparties with Union-Find to prevent duplicates
