@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { counterpartyService } from "@/services/database";
+import { supabase } from "@/services/database";
 import { useCallback, useEffect, useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Search, Filter, Users, CheckCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Search, Filter, Users, CheckCircle, AlertCircle, ChevronDown, ChevronUp, Building2, User, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CounterpartyMergeCandidate {
@@ -21,6 +22,23 @@ interface CounterpartyMergeCandidate {
   total_transactions: number;
   potential_savings: number;
   entity_ids?: string[];
+  // Enhanced data for display
+  representativeTransactionCount: number;
+  representativeEntities?: Array<{
+    entity_id: string;
+    entity_name: string;
+    entity_type: string;
+  }>;
+  similarNameDetails: Array<{
+    name: string;
+    transactionCount: number;
+    similarityScore: number;
+    linkedEntities: Array<{
+      entity_id: string;
+      entity_name: string;
+      entity_type: string;
+    }>;
+  }>;
 }
 
 interface ProcessingOptions {
@@ -125,13 +143,61 @@ export default function EfficientCounterpartyMerge({
       .trim();
   };
 
+  interface BasicMergeCandidate {
+    representative: string;
+    similar_names: string[];
+    similarity_scores: number[];
+    total_transactions: number;
+    potential_savings: number;
+  }
+
   // Batch processing function to find similar counterparties
   const findSimilarCounterparties = useCallback(async (
     partyStats: CounterpartyStats[],
     opts: ProcessingOptions
-  ): Promise<CounterpartyMergeCandidate[]> => {
-    const candidates: CounterpartyMergeCandidate[] = [];
+  ): Promise<BasicMergeCandidate[]> => {
+    const candidates: BasicMergeCandidate[] = [];
     const processed = new Set<string>();
+
+    // Pre-process to find exact case-insensitive matches and group them
+    const exactMatches = new Map<string, CounterpartyStats[]>();
+    const processedNormalized = new Set<string>();
+
+    for (const party of partyStats) {
+      const normalized = party.normalized;
+      if (!processedNormalized.has(normalized)) {
+        const matchingParties = partyStats.filter(p => p.normalized === normalized);
+        if (matchingParties.length > 1) {
+          exactMatches.set(normalized, matchingParties);
+        }
+        processedNormalized.add(normalized);
+      }
+    }
+
+    // Create candidates for exact case-insensitive matches
+    for (const [, matchingParties] of exactMatches) {
+      // Sort by transaction count to pick the one with most transactions as representative
+      const sorted = [...matchingParties].sort((a, b) => b.count - a.count);
+      const representative = sorted[0];
+      const similarParties = sorted.slice(1);
+
+      if (representative.count >= opts.minTransactionCount && similarParties.length > 0) {
+        const similarNames = similarParties.map(p => p.name);
+        const similarityScores = similarNames.map(() => 1.0); // 100% similarity for exact matches
+        const totalTransactions = sorted.reduce((sum, p) => sum + p.count, 0);
+
+        candidates.push({
+          representative: representative.name,
+          similar_names: similarNames,
+          similarity_scores: similarityScores,
+          total_transactions: totalTransactions,
+          potential_savings: similarNames.length,
+        });
+
+        // Mark all as processed
+        sorted.forEach(p => processed.add(p.name));
+      }
+    }
 
     // Group by first word if enabled (more accurate than first character)
     const groups = opts.firstWordFilter
@@ -226,6 +292,152 @@ export default function EfficientCounterpartyMerge({
     return candidates;
   }, []);
 
+  // Fetch entity information for a counterparty name
+  const fetchEntitiesForCounterparty = useCallback(async (counterpartyName: string) => {
+    try {
+
+      // First, get all entities in the case
+      const { data: caseEntities, error: entityError } = await supabase
+        .from("case_entities")
+        .select(`
+          entity_id,
+          entities!inner (
+            entity_id,
+            entity_name,
+            entity_type
+          )
+        `)
+        .eq("case_id", caseId);
+
+      if (entityError) throw entityError;
+
+      const entities = caseEntities?.map((ce: any) => ce.entities) || [];
+
+      if (entities.length === 0) {
+        return [];
+      }
+
+      const entityIds = entities.map(e => e.entity_id);
+
+      // Get accounts for these entities
+      const { data: accounts, error: accountError } = await supabase
+        .from("accounts")
+        .select("account_id, entity_id")
+        .in("entity_id", entityIds);
+
+      if (accountError) throw accountError;
+
+      const accountIds = accounts?.map(a => a.account_id) || [];
+
+      if (accountIds.length === 0) {
+        return [];
+      }
+
+      // Check if any transactions match this counterparty name for these accounts
+      const { data: transactions, error: transactionError } = await supabase
+        .from("transactions")
+        .select("entity_id")
+        .in("account_id", accountIds)
+        .eq("counterparty_merged", counterpartyName)
+        .limit(1);
+
+      if (transactionError) throw transactionError;
+
+      if (!transactions || transactions.length === 0) {
+        return [];
+      }
+
+      // Return unique entities that have transactions with this counterparty
+      const uniqueEntityIds = [...new Set(transactions.map(t => t.entity_id))];
+      const matchingEntities = entities.filter(e => uniqueEntityIds.includes(e.entity_id));
+
+      return matchingEntities.map(entity => ({
+        entity_id: entity.entity_id,
+        entity_name: entity.entity_name,
+        entity_type: entity.entity_type,
+      }));
+
+    } catch (error) {
+      console.error(`Error fetching entities for ${counterpartyName}:`, error);
+      return [];
+    }
+  }, [caseId]);
+
+  // Enhanced batch processing to fetch entity information
+  const enhanceCandidatesWithEntityData = useCallback(async (
+    candidates: BasicMergeCandidate[],
+    partyStats: CounterpartyStats[]
+  ): Promise<CounterpartyMergeCandidate[]> => {
+    const enhancedCandidates: CounterpartyMergeCandidate[] = [];
+
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      setProcessingStage(`Fetching entity details for ${candidate.representative}...`);
+      setProcessingProgress((i / candidates.length) * 100);
+
+      // Get transaction count for representative
+      const representativeStats = partyStats.find(p => p.name === candidate.representative);
+      const representativeTransactionCount = representativeStats?.count || 0;
+
+      // Get entities for representative
+      const representativeEntities = await fetchEntitiesForCounterparty(candidate.representative);
+
+      // Get details for similar names
+      const similarNameDetails: Array<{
+        name: string;
+        transactionCount: number;
+        similarityScore: number;
+        linkedEntities: Array<{
+          entity_id: string;
+          entity_name: string;
+          entity_type: string;
+        }>;
+      }> = [];
+      for (let j = 0; j < candidate.similar_names.length; j++) {
+        const similarName = candidate.similar_names[j];
+        const similarStats = partyStats.find(p => p.name === similarName);
+        const transactionCount = similarStats?.count || 0;
+        const linkedEntities = await fetchEntitiesForCounterparty(similarName);
+
+        similarNameDetails.push({
+          name: similarName,
+          transactionCount,
+          similarityScore: candidate.similarity_scores[j],
+          linkedEntities,
+        });
+      }
+
+      enhancedCandidates.push({
+        ...candidate,
+        representativeTransactionCount,
+        similarNameDetails,
+        // Store representative entities in a way that can be accessed in the UI
+        representativeEntities,
+      });
+
+      // Small delay to prevent UI freezing
+      if (i % 5 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+
+    return enhancedCandidates;
+  }, [fetchEntitiesForCounterparty]);
+
+  // Get entity icon component
+  const getEntityIconComponent = (entityType: string) => {
+    switch (entityType.toLowerCase()) {
+      case "company":
+        return <Building2 className="w-3 h-3 inline mr-1" />;
+      case "individual":
+        return <User className="w-3 h-3 inline mr-1" />;
+      case "trust":
+        return <Shield className="w-3 h-3 inline mr-1" />;
+      default:
+        return <Building2 className="w-3 h-3 inline mr-1" />;
+    }
+  };
+
   // Load counterparties for the case
   const loadCounterparties = useCallback(async () => {
     if (!caseId) return;
@@ -249,7 +461,13 @@ export default function EfficientCounterpartyMerge({
       setProcessingStage("Finding similar counterparties...");
 
       // Process in batches to find similar counterparties
-      const candidates = await findSimilarCounterparties(partyStats, options);
+      const basicCandidates = await findSimilarCounterparties(partyStats, options);
+
+      setProcessingStage("Fetching entity information...");
+      setProcessingProgress(50);
+
+      // Enhance candidates with entity data
+      const candidates = await enhanceCandidatesWithEntityData(basicCandidates, partyStats);
       setMergeCandidates(candidates);
       setProcessingProgress(100);
 
@@ -261,7 +479,7 @@ export default function EfficientCounterpartyMerge({
       setLoading(false);
       setProcessingStage("");
     }
-  }, [caseId, findSimilarCounterparties, options]);
+  }, [caseId, findSimilarCounterparties, options, enhanceCandidatesWithEntityData]);
 
   // Toggle candidate selection
   const toggleCandidateSelection = (representative: string) => {
@@ -580,10 +798,10 @@ export default function EfficientCounterpartyMerge({
                         onChange={() => toggleCandidateSelection(candidate.representative)}
                         className="rounded"
                       />
-                      <div>
+                      <div className="flex-1">
                         <h3 className="font-semibold text-lg">{candidate.representative}</h3>
                         <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                          <span>{candidate.total_transactions} transactions</span>
+                          <span>{candidate.representativeTransactionCount} transactions</span>
                           <span>•</span>
                           <span>{candidate.similar_names.length + 1} similar names</span>
                           <span>•</span>
@@ -602,18 +820,79 @@ export default function EfficientCounterpartyMerge({
 
                   {/* Similar Names */}
                   {isExpanded && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="text-sm font-medium">Similar names to be merged:</div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {candidate.similar_names.map((name, index) => (
-                          <div
-                            key={name}
-                            className="flex items-center justify-between p-2 bg-muted rounded"
-                          >
-                            <span className="text-sm">{name}</span>
-                            <Badge variant="secondary">
-                              {(candidate.similarity_scores[index] * 100).toFixed(1)}%
+
+                      {/* Representative Name Details */}
+                      <div className="border-l-2 border-blue-500 pl-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-blue-700">{candidate.representative}</span>
+                          <div className="flex items-center space-x-2">
+                            <Badge variant="default" className="bg-blue-100 text-blue-800">
+                              {candidate.representativeTransactionCount} transactions
                             </Badge>
+                            <Badge variant="secondary">
+                              Representative
+                            </Badge>
+                          </div>
+                        </div>
+                        {candidate.representativeEntities && candidate.representativeEntities.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {candidate.representativeEntities.map((entity, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs">
+                                {getEntityIconComponent(entity.entity_type)}
+                                {entity.entity_name}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+
+                        {(!candidate.representativeEntities || candidate.representativeEntities.length === 0) && (
+                          <div className="text-xs text-gray-400 italic">
+                            No linked entities found
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Similar Names with Details */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {candidate.similarNameDetails.map((detail) => (
+                          <div
+                            key={detail.name}
+                            className="border border-gray-200 rounded-lg p-3 bg-white hover:bg-gray-50 transition-colors"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-sm">{detail.name}</span>
+                              <div className="flex items-center space-x-2">
+                                <Badge variant="outline">
+                                  {detail.transactionCount} transactions
+                                </Badge>
+                                <Badge variant="secondary">
+                                  {(detail.similarityScore * 100).toFixed(1)}%
+                                </Badge>
+                              </div>
+                            </div>
+
+                            {/* Linked Entities */}
+                            {detail.linkedEntities.length > 0 && (
+                              <div className="space-y-1">
+                                <div className="text-xs text-gray-500 font-medium">Linked entities:</div>
+                                <div className="flex flex-wrap gap-1">
+                                  {detail.linkedEntities.map((entity, idx) => (
+                                    <Badge key={idx} variant="outline" className="text-xs">
+                                      {getEntityIconComponent(entity.entity_type)}
+                                      {entity.entity_name}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {detail.linkedEntities.length === 0 && (
+                              <div className="text-xs text-gray-400 italic">
+                                No linked entities found
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
