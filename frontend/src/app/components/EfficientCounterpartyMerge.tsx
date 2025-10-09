@@ -340,97 +340,50 @@ export default function EfficientCounterpartyMerge({
     return candidates;
   }, []);
 
-  // Fetch entity information for a counterparty name
-  const fetchEntitiesForCounterparty = useCallback(async (counterpartyName: string) => {
-    try {
-
-      // First, get all entities in the case
-      const { data: caseEntities, error: entityError } = await supabase
-        .from("case_entities")
-        .select(`
-          entity_id,
-          entities!inner (
-            entity_id,
-            entity_name,
-            entity_type
-          )
-        `)
-        .eq("case_id", caseId);
-
-      if (entityError) throw entityError;
-
-      const entities = caseEntities?.map((ce: any) => ce.entities) || [];
-
-      if (entities.length === 0) {
-        return [];
-      }
-
-      const entityIds = entities.map(e => e.entity_id);
-
-      // Get accounts for these entities
-      const { data: accounts, error: accountError } = await supabase
-        .from("accounts")
-        .select("account_id, entity_id")
-        .in("entity_id", entityIds);
-
-      if (accountError) throw accountError;
-
-      const accountIds = accounts?.map(a => a.account_id) || [];
-
-      if (accountIds.length === 0) {
-        return [];
-      }
-
-      // Check if any transactions match this counterparty name for these accounts
-      const { data: transactions, error: transactionError } = await supabase
-        .from("transactions")
-        .select("entity_id")
-        .in("account_id", accountIds)
-        .eq("counterparty_merged", counterpartyName)
-        .limit(1);
-
-      if (transactionError) throw transactionError;
-
-      if (!transactions || transactions.length === 0) {
-        return [];
-      }
-
-      // Return unique entities that have transactions with this counterparty
-      const uniqueEntityIds = [...new Set(transactions.map(t => t.entity_id))];
-      const matchingEntities = entities.filter(e => uniqueEntityIds.includes(e.entity_id));
-
-      return matchingEntities.map(entity => ({
-        entity_id: entity.entity_id,
-        entity_name: entity.entity_name,
-        entity_type: entity.entity_type,
-      }));
-
-    } catch (error) {
-      console.error(`Error fetching entities for ${counterpartyName}:`, error);
-      return [];
-    }
-  }, [caseId]);
-
-  // Enhanced batch processing to fetch entity information
+  // Enhanced batch processing to fetch entity information using optimized batch queries
   const enhanceCandidatesWithEntityData = useCallback(async (
     candidates: BasicMergeCandidate[],
     partyStats: CounterpartyStats[]
   ): Promise<CounterpartyMergeCandidate[]> => {
+    setProcessingStage("Collecting all counterparty names...");
+    setProcessingProgress(10);
+
+    // Collect all unique counterparty names (representatives + similar names)
+    const allCounterpartyNames = new Set<string>();
+    candidates.forEach(candidate => {
+      allCounterpartyNames.add(candidate.representative);
+      candidate.similar_names.forEach(name => allCounterpartyNames.add(name));
+    });
+
+    const counterpartyNamesArray = Array.from(allCounterpartyNames);
+    console.log(`Fetching entities for ${counterpartyNamesArray.length} unique counterparties...`);
+
+    setProcessingStage("Fetching entity information in batch...");
+    setProcessingProgress(30);
+
+    // Single batch query to get all entity information
+    const entityMap = await counterpartyService.getEntitiesForMultipleCounterparties(
+      caseId,
+      counterpartyNamesArray
+    );
+
+    setProcessingStage("Processing candidate details...");
+    setProcessingProgress(60);
+
     const enhancedCandidates: CounterpartyMergeCandidate[] = [];
 
+    // Process candidates using the batch-fetched data
     for (let i = 0; i < candidates.length; i++) {
       const candidate = candidates[i];
-      setProcessingStage(`Fetching entity details for ${candidate.representative}...`);
-      setProcessingProgress((i / candidates.length) * 100);
 
       // Get transaction count for representative
       const representativeStats = partyStats.find(p => p.name === candidate.representative);
       const representativeTransactionCount = representativeStats?.count || 0;
 
-      // Get entities for representative
-      const representativeEntities = await fetchEntitiesForCounterparty(candidate.representative);
+      // Get entities for representative from batch-fetched data
+      const representativeEntities = entityMap.get(candidate.representative) || [];
 
-      // Get details for similar names
+      // Get details for similar names using batch-fetched data
       const similarNameDetails: Array<{
         name: string;
         transactionCount: number;
@@ -441,11 +394,12 @@ export default function EfficientCounterpartyMerge({
           entity_type: string;
         }>;
       }> = [];
+
       for (let j = 0; j < candidate.similar_names.length; j++) {
         const similarName = candidate.similar_names[j];
         const similarStats = partyStats.find(p => p.name === similarName);
         const transactionCount = similarStats?.count || 0;
-        const linkedEntities = await fetchEntitiesForCounterparty(similarName);
+        const linkedEntities = entityMap.get(similarName) || [];
 
         similarNameDetails.push({
           name: similarName,
@@ -459,18 +413,18 @@ export default function EfficientCounterpartyMerge({
         ...candidate,
         representativeTransactionCount,
         similarNameDetails,
-        // Store representative entities in a way that can be accessed in the UI
         representativeEntities,
       });
 
-      // Small delay to prevent UI freezing
-      if (i % 5 === 0) {
-        await new Promise(resolve => setTimeout(resolve, 0));
-      }
+      // Update progress
+      const progress = 60 + ((i + 1) / candidates.length) * 40;
+      setProcessingProgress(progress);
     }
 
+    console.log(`Enhanced ${candidates.length} candidates with entity data using ${counterpartyNamesArray.length} batch queries instead of ${candidates.reduce((sum, c) => sum + 1 + c.similar_names.length, 0)} individual queries`);
+
     return enhancedCandidates;
-  }, [fetchEntitiesForCounterparty]);
+  }, [caseId]);
 
   // Get entity icon component
   const getEntityIconComponent = (entityType: string) => {

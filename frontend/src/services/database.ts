@@ -1184,6 +1184,104 @@ export const counterpartyService = {
 
     return { totalAffected, errors };
   },
+
+  // Batch fetch entity information for multiple counterparties in a single query
+  async getEntitiesForMultipleCounterparties(
+    caseId: string,
+    counterpartyNames: string[]
+  ): Promise<Map<string, Array<{ entity_id: string; entity_name: string; entity_type: string }>>> {
+    if (counterpartyNames.length === 0) {
+      return new Map();
+    }
+
+    try {
+      // First, get all entities in the case
+      const { data: caseEntities, error: entityError } = await supabase
+        .from("case_entities")
+        .select(`
+          entity_id,
+          entities!inner (
+            entity_id,
+            entity_name,
+            entity_type
+          )
+        `)
+        .eq("case_id", caseId);
+
+      if (entityError) throw entityError;
+
+      const entities = caseEntities?.map((ce: any) => ce.entities) || [];
+
+      if (entities.length === 0) {
+        return new Map();
+      }
+
+      const entityIds = entities.map(e => e.entity_id);
+
+      // Get accounts for these entities
+      const { data: accounts, error: accountError } = await supabase
+        .from("accounts")
+        .select("account_id, entity_id")
+        .in("entity_id", entityIds);
+
+      if (accountError) throw accountError;
+
+      const accountIds = accounts?.map(a => a.account_id) || [];
+
+      if (accountIds.length === 0) {
+        return new Map();
+      }
+
+      // Get all transactions for these accounts that match any of the counterparty names
+      const { data: transactions, error: transactionError } = await supabase
+        .from("transactions")
+        .select("counterparty_merged, entity_id")
+        .in("account_id", accountIds)
+        .in("counterparty_merged", counterpartyNames);
+
+      if (transactionError) throw transactionError;
+
+      // Create a map of counterparty -> entity_id list
+      const counterpartyToEntityIds = new Map<string, Set<string>>();
+
+      transactions?.forEach((tx: any) => {
+        if (tx.counterparty_merged && tx.entity_id) {
+          if (!counterpartyToEntityIds.has(tx.counterparty_merged)) {
+            counterpartyToEntityIds.set(tx.counterparty_merged, new Set());
+          }
+          counterpartyToEntityIds.get(tx.counterparty_merged)!.add(tx.entity_id);
+        }
+      });
+
+      // Create the final result map
+      const result = new Map<string, Array<{ entity_id: string; entity_name: string; entity_type: string }>>();
+
+      // Create entity lookup map for quick access
+      const entityLookup = new Map(entities.map((e: any) => [e.entity_id, e]));
+
+      // For each counterparty name, find its entities
+      counterpartyNames.forEach(name => {
+        const entityIds = counterpartyToEntityIds.get(name) || new Set();
+        const entityDetails = Array.from(entityIds).map(entityId => {
+          const entity = entityLookup.get(entityId);
+          return entity ? {
+            entity_id: entity.entity_id,
+            entity_name: entity.entity_name,
+            entity_type: entity.entity_type,
+          } : null;
+        }).filter(Boolean) as Array<{ entity_id: string; entity_name: string; entity_type: string }>;
+
+        result.set(name, entityDetails);
+      });
+
+      return result;
+
+    } catch (error) {
+      console.error("Error fetching entities for multiple counterparties:", error);
+      // Return empty map on error
+      return new Map();
+    }
+  },
 };
 
 // Entity Mapping Operations
