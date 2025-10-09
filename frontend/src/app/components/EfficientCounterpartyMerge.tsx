@@ -1,15 +1,18 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { counterpartyService, entitiesService, transactionsService } from "@/services/database";
-import { useCallback, useEffect, useState } from "react";
-import { useFrontendCounterpartyMerge } from "@/hooks/useFrontendCounterpartyMerge";
-
-interface Entity {
-  entity_id: string;
-  entity_name: string;
-  entity_type: string;
-}
+import { counterpartyService } from "@/services/database";
+import { useCallback, useEffect, useState, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
+import { Loader2, Search, Filter, Users, CheckCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface CounterpartyMergeCandidate {
   representative: string;
@@ -17,866 +20,621 @@ interface CounterpartyMergeCandidate {
   similarity_scores: number[];
   total_transactions: number;
   potential_savings: number;
-  entity_ids?: string[]; // Added for cross-entity merges
+  entity_ids?: string[];
 }
 
-interface EfficientCounterpartyMergeProps {
-  caseId: string;
+interface ProcessingOptions {
+  similarityThreshold: number;
+  firstWordFilter: boolean;
+  minTransactionCount: number;
+  sortBy: "transaction_count" | "similarity_score" | "alphabetical";
+  sortOrder: "desc" | "asc";
+  batchSize: number;
 }
+
+interface CounterpartyStats {
+  name: string;
+  count: number;
+  firstWord: string;
+  firstChar: string;
+  normalized: string;
+}
+
+const DEFAULT_OPTIONS: ProcessingOptions = {
+  similarityThreshold: 0.8,
+  firstWordFilter: true,
+  minTransactionCount: 2,
+  sortBy: "transaction_count",
+  sortOrder: "desc",
+  batchSize: 500,
+};
 
 export default function EfficientCounterpartyMerge({
   caseId,
-}: EfficientCounterpartyMergeProps) {
+}: {
+  caseId: string;
+}) {
   const { user } = useAuth();
-  const [candidates, setCandidates] = useState<CounterpartyMergeCandidate[]>(
-    []
-  );
-  const [selectedMerges, setSelectedMerges] = useState<Set<string>>(new Set());
-  const [selectedNames, setSelectedNames] = useState<Map<string, Set<string>>>(
-    new Map()
-  );
-  const [similarityThreshold, setSimilarityThreshold] = useState(80);
-  const [minTransactionCount, setMinTransactionCount] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [counterparties, setCounterparties] = useState<CounterpartyStats[]>([]);
+  const [mergeCandidates, setMergeCandidates] = useState<CounterpartyMergeCandidate[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [processingStage, setProcessingStage] = useState("");
+  const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
+  const [expandedCandidates, setExpandedCandidates] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(10);
-  const [availableEntities, setAvailableEntities] = useState<Entity[]>([]);
-  const [selectedEntities, setSelectedEntities] = useState<string[]>([]); // For cross-entity selection
-  const [showEntitySelector, setShowEntitySelector] = useState(false); // Toggle for entity selection
+  const [options, setOptions] = useState<ProcessingOptions>(DEFAULT_OPTIONS);
+  const [mergeProgress, setMergeProgress] = useState(0);
+  const [merging, setMerging] = useState(false);
 
-  const {
-    counterparties,
-    candidates: frontendCandidates,
-    loading: frontendLoading,
-    error: frontendError,
-    findMergeCandidates,
-    refresh
-  } = useFrontendCounterpartyMerge(caseId);
+  // Levenshtein distance algorithm for string similarity
+  const levenshteinDistance = (str1: string, str2: string): number => {
+    const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
 
-  // Enhanced version that reloads counterparties with entity filter when needed
-  const loadCandidates = useCallback(() => {
-    try {
-      setLoading(true);
-      setError(null);
+    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
 
-      // If specific entities are selected, we need to refresh the counterparties with the entity filter
-      if (selectedEntities.length > 0) {
-        refresh(selectedEntities);
+    for (let j = 1; j <= str2.length; j++) {
+      for (let i = 1; i <= str1.length; i++) {
+        const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        matrix[j][i] = Math.min(
+          matrix[j][i - 1] + 1, // deletion
+          matrix[j - 1][i] + 1, // insertion
+          matrix[j - 1][i - 1] + indicator // substitution
+        );
       }
-
-      // Use frontend implementation instead of backend RPC
-      const data = findMergeCandidates(
-        similarityThreshold / 100, // Convert percentage to decimal
-        100 // Limit to top 100 candidates
-      );
-
-      setCandidates(data);
-    } catch (err) {
-      console.error("Failed to load merge candidates:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to load candidates"
-      );
-    } finally {
-      setLoading(false);
     }
-  }, [selectedEntities, similarityThreshold, findMergeCandidates, refresh]);
 
-  // Load entities for cross-entity selection
-  const loadEntities = useCallback(async () => {
-    try {
-      const entities = await entitiesService.getByCaseId(caseId);
-      setAvailableEntities(entities.map(e => ({ 
-        entity_id: e.entity_id, 
-        entity_name: e.entity_name,
-        entity_type: e.entity_type 
-      })))
-    } catch (err) {
-      console.error("Failed to load entities:", err);
-    }
-  }, [caseId]);
+    return matrix[str2.length][str1.length];
+  };
 
-  const handleThresholdChange = useCallback(
-    (newThreshold: number) => {
-      setSimilarityThreshold(newThreshold);
-      setCurrentPage(1);
-      // Debounce the API call
-      const timeoutId = setTimeout(() => {
-        loadCandidates();
-      }, 500);
-      // Clear the timeout on subsequent calls to avoid multiple API calls
-      return () => clearTimeout(timeoutId);
-    },
-    [loadCandidates]
-  );
+  // Calculate similarity between two strings (0-1 scale)
+  const calculateSimilarity = (str1: string, str2: string): number => {
+    const s1 = str1.toLowerCase().trim();
+    const s2 = str2.toLowerCase().trim();
 
-  const toggleMergeSelection = useCallback(
-    (representative: string) => {
-      setSelectedMerges((prev) => {
-        const newSelected = new Set(prev);
-        if (newSelected.has(representative)) {
-          newSelected.delete(representative);
-          // Also remove from selectedNames when deselecting the group
-          setSelectedNames((prevNames) => {
-            const newNames = new Map(prevNames);
-            newNames.delete(representative);
-            return newNames;
-          });
-        } else {
-          newSelected.add(representative);
-          // Auto-select all names when selecting the group
-          const candidate = candidates.find(
-            (c) => c.representative === representative
-          );
-          if (candidate) {
-            setSelectedNames((prevNames) => {
-              const newNames = new Map(prevNames);
-              newNames.set(representative, new Set(candidate.similar_names));
-              return newNames;
-            });
+    // If strings are the same when case-insensitive, they're 100% similar (automatic merge)
+    if (s1 === s2) return 1.0;
+
+    const maxLength = Math.max(s1.length, s2.length);
+    if (maxLength === 0) return 1.0;
+
+    const distance = levenshteinDistance(s1, s2);
+    return 1 - distance / maxLength;
+  };
+
+  // Get first word from counterparty name (less aggressive normalization)
+  const getFirstWord = (name: string): string => {
+    // Clean up but preserve word boundaries better
+    const cleaned = name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ') // Replace non-alphanumeric with spaces instead of removing
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const words = cleaned.split(' ').filter(word => word.length > 0);
+    return words[0] || cleaned;
+  };
+
+  // Normalize counterparty name for comparison
+  const normalizeName = (name: string): string => {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '') // Remove non-alphanumeric characters
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  // Batch processing function to find similar counterparties
+  const findSimilarCounterparties = useCallback(async (
+    partyStats: CounterpartyStats[],
+    opts: ProcessingOptions
+  ): Promise<CounterpartyMergeCandidate[]> => {
+    const candidates: CounterpartyMergeCandidate[] = [];
+    const processed = new Set<string>();
+
+    // Group by first word if enabled (more accurate than first character)
+    const groups = opts.firstWordFilter
+      ? partyStats.reduce((acc, party) => {
+          const key = party.firstWord.toUpperCase();
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(party);
+          return acc;
+        }, {} as Record<string, CounterpartyStats[]>)
+      : { 'ALL': partyStats };
+
+    let totalGroups = Object.keys(groups).length;
+    let processedGroups = 0;
+
+    for (const [groupKey, groupParties] of Object.entries(groups)) {
+      setProcessingStage(`Processing group "${groupKey}"...`);
+      setProcessingProgress((processedGroups / totalGroups) * 100);
+
+      // Sort group by transaction count for efficiency
+      const sortedGroup = [...groupParties].sort((a, b) => b.count - a.count);
+
+      for (let i = 0; i < sortedGroup.length; i++) {
+        const party1 = sortedGroup[i];
+
+        if (processed.has(party1.name) || party1.count < opts.minTransactionCount) {
+          continue;
+        }
+
+        const similarNames: string[] = [];
+        const similarityScores: number[] = [];
+        let totalTransactions = party1.count;
+
+        for (let j = i + 1; j < sortedGroup.length; j++) {
+          const party2 = sortedGroup[j];
+
+          if (processed.has(party2.name) || party2.count < opts.minTransactionCount) {
+            continue;
+          }
+
+          const similarity = calculateSimilarity(party1.normalized, party2.normalized);
+
+          if (similarity >= opts.similarityThreshold) {
+            similarNames.push(party2.name);
+            similarityScores.push(similarity);
+            totalTransactions += party2.count;
+            processed.add(party2.name);
           }
         }
-        return newSelected;
-      });
-    },
-    [candidates]
-  );
 
-  const toggleNameSelection = useCallback(
-    (representative: string, name: string) => {
-      setSelectedNames((prev) => {
-        const newNames = new Map(prev);
-        const currentNames = newNames.get(representative) || new Set();
-        const updatedNames = new Set(currentNames);
-
-        if (updatedNames.has(name)) {
-          updatedNames.delete(name);
-        } else {
-          updatedNames.add(name);
-        }
-
-        if (updatedNames.size === 0) {
-          newNames.delete(representative);
-          // Also deselect the group if no names are selected
-          setSelectedMerges((prevMerges) => {
-            const newMerges = new Set(prevMerges);
-            newMerges.delete(representative);
-            return newMerges;
-          });
-        } else {
-          newNames.set(representative, updatedNames);
-          // Ensure the group is selected if names are selected
-          setSelectedMerges((prevMerges) => {
-            const newMerges = new Set(prevMerges);
-            newMerges.add(representative);
-            return newMerges;
+        if (similarNames.length > 0) {
+          candidates.push({
+            representative: party1.name,
+            similar_names: similarNames,
+            similarity_scores: similarityScores,
+            total_transactions: totalTransactions,
+            potential_savings: similarNames.length,
           });
         }
 
-        return newNames;
-      });
-    },
-    []
-  );
+        processed.add(party1.name);
+      }
 
-  const selectAllVisible = useCallback(() => {
-    const visibleCandidates = filteredCandidates.slice(
-      (currentPage - 1) * itemsPerPage,
-      currentPage * itemsPerPage
-    );
+      processedGroups++;
 
-    setSelectedMerges((prev) => {
-      const newSelected = new Set(prev);
-      visibleCandidates.forEach((candidate) => {
-        newSelected.add(candidate.representative);
-      });
-      return newSelected;
+      // Small delay to prevent UI freezing
+      if (processedGroups % 10 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+
+    // Sort candidates based on options
+    candidates.sort((a, b) => {
+      let compareValue = 0;
+
+      switch (opts.sortBy) {
+        case "transaction_count":
+          compareValue = b.total_transactions - a.total_transactions;
+          break;
+        case "similarity_score":
+          const avgSimA = a.similarity_scores.reduce((sum, score) => sum + score, 0) / a.similarity_scores.length;
+          const avgSimB = b.similarity_scores.reduce((sum, score) => sum + score, 0) / b.similarity_scores.length;
+          compareValue = avgSimB - avgSimA;
+          break;
+        case "alphabetical":
+          compareValue = a.representative.localeCompare(b.representative);
+          break;
+      }
+
+      return opts.sortOrder === "asc" ? -compareValue : compareValue;
     });
-  }, [candidates, currentPage, itemsPerPage, searchTerm]);
 
-  const clearSelection = useCallback(() => {
-    setSelectedMerges(new Set());
-    setSelectedNames(new Map());
+    return candidates;
   }, []);
 
-  const applyMerges = useCallback(async () => {
-    if (!user?.id || selectedMerges.size === 0) {
-      setError("No merges selected or user not authenticated");
-      return;
-    }
+  // Load counterparties for the case
+  const loadCounterparties = useCallback(async () => {
+    if (!caseId) return;
+
+    setLoading(true);
+    setProcessingStage("Loading counterparty data...");
+    setProcessingProgress(0);
 
     try {
-      setProcessing(true);
-      setError(null);
+      const stats = await counterpartyService.getCaseCounterpartyStats(caseId);
 
-      const mergeOperations: Array<{ from: string; to: string }> = [];
+      const partyStats: CounterpartyStats[] = stats.map(stat => ({
+        name: stat.counterparty_name,
+        count: stat.transaction_count,
+        firstWord: getFirstWord(stat.counterparty_name),
+        firstChar: stat.counterparty_name.charAt(0),
+        normalized: normalizeName(stat.counterparty_name),
+      }));
 
-      // Build merge operations from selected candidates and names
-      candidates.forEach((candidate) => {
-        if (selectedMerges.has(candidate.representative)) {
-          const selectedNamesForGroup = selectedNames.get(
-            candidate.representative
-          );
-          if (selectedNamesForGroup && selectedNamesForGroup.size > 0) {
-            selectedNamesForGroup.forEach((similarName) => {
-              mergeOperations.push({
-                from: similarName,
-                to: candidate.representative,
-              });
-            });
-          }
-        }
-      });
+      setCounterparties(partyStats);
+      setProcessingStage("Finding similar counterparties...");
 
-      if (mergeOperations.length === 0) {
-        setError("No merge operations to perform");
-        return;
-      }
+      // Process in batches to find similar counterparties
+      const candidates = await findSimilarCounterparties(partyStats, options);
+      setMergeCandidates(candidates);
+      setProcessingProgress(100);
 
-      // Apply merges using the existing service
-      const result = await counterpartyService.batchMergeCounterparties(
-        mergeOperations,
-        user.id
-      );
-
-      if (result.errors.length > 0) {
-        setError(`Some merges failed: ${result.errors.join(", ")}`);
-      }
-
-      if (result.totalAffected > 0) {
-        setSuccessMessage(
-          `Successfully merged ${mergeOperations.length} counterparty names affecting ${result.totalAffected} transactions`
-        );
-
-        // Reload candidates after successful merge
-        setTimeout(() => {
-          loadCandidates();
-          setSelectedMerges(new Set());
-          setSelectedNames(new Map());
-        }, 2000);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to apply merges");
+      toast.success(`Found ${candidates.length} merge candidates`);
+    } catch (error) {
+      console.error("Error loading counterparties:", error);
+      toast.error("Failed to load counterparties");
     } finally {
-      setProcessing(false);
+      setLoading(false);
+      setProcessingStage("");
     }
-  }, [selectedMerges, candidates, user?.id, loadCandidates]);
+  }, [caseId, findSimilarCounterparties, options]);
 
-  // Toggle entity selection for cross-entity merges
-  const toggleEntitySelection = (entityId: string) => {
-    setSelectedEntities(prev => {
-      if (prev.includes(entityId)) {
-        return prev.filter(id => id !== entityId);
+  // Toggle candidate selection
+  const toggleCandidateSelection = (representative: string) => {
+    setSelectedCandidates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(representative)) {
+        newSet.delete(representative);
       } else {
-        return [...prev, entityId];
+        newSet.add(representative);
       }
+      return newSet;
     });
   };
 
-  // Filter candidates based on search term and transaction count
-  const filteredCandidates = candidates.filter((candidate) => {
-    // Filter by transaction count
-    if (candidate.total_transactions < minTransactionCount) return false;
+  // Toggle candidate expansion
+  const toggleCandidateExpansion = (representative: string) => {
+    setExpandedCandidates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(representative)) {
+        newSet.delete(representative);
+      } else {
+        newSet.add(representative);
+      }
+      return newSet;
+    });
+  };
 
-    // Filter by search term
-    if (!searchTerm) return true;
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      candidate.representative.toLowerCase().includes(searchLower) ||
-      candidate.similar_names.some((name) =>
-        name.toLowerCase().includes(searchLower)
-      )
-    );
-  });
-
-  // Pagination
-  const totalPages = Math.ceil(filteredCandidates.length / itemsPerPage);
-  const paginatedCandidates = filteredCandidates.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  // Calculate totals for selected merges
-  const selectedStats = candidates
-    .filter((candidate) => selectedMerges.has(candidate.representative))
-    .reduce(
-      (acc, candidate) => {
-        const selectedNamesForGroup = selectedNames.get(
-          candidate.representative
-        );
-        const selectedCount = selectedNamesForGroup
-          ? selectedNamesForGroup.size
-          : 0;
-        return {
-          totalMerges: acc.totalMerges + selectedCount,
-          totalTransactions:
-            acc.totalTransactions + candidate.total_transactions,
-        };
-      },
-      { totalMerges: 0, totalTransactions: 0 }
-    );
-
-  // Update when entity selection changes
-  useEffect(() => {
-    loadCandidates();
-  }, [selectedEntities, loadCandidates]);
-
-  useEffect(() => {
-    if (!frontendLoading && counterparties.length > 0) {
-      loadCandidates();
+  // Apply selected merges
+  const applyMerges = async () => {
+    if (selectedCandidates.size === 0 || !user) {
+      toast.error("No candidates selected");
+      return;
     }
-  }, [frontendLoading, counterparties]);
 
-  useEffect(() => {
-    loadEntities();
-  }, [loadEntities]);
+    setMerging(true);
+    setMergeProgress(0);
 
-  if (loading) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="text-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Analyzing counterparties...</p>
-        </div>
-      </div>
+    const selectedMergeData = mergeCandidates.filter(candidate =>
+      selectedCandidates.has(candidate.representative)
     );
-  }
+
+    let completedMerges = 0;
+    const totalMerges = selectedMergeData.length;
+
+    try {
+      for (const candidate of selectedMergeData) {
+        const merges = candidate.similar_names.map(name => ({
+          from: name,
+          to: candidate.representative,
+        }));
+
+        const result = await counterpartyService.batchMergeCounterparties(merges, user.id);
+
+        if (result.errors.length > 0) {
+          console.error("Merge errors:", result.errors);
+          toast.error(`Some merges failed: ${result.errors.join(", ")}`);
+        }
+
+        completedMerges++;
+        setMergeProgress((completedMerges / totalMerges) * 100);
+      }
+
+      toast.success(`Successfully merged ${completedMerges} counterparty groups`);
+      setSelectedCandidates(new Set());
+      await loadCounterparties(); // Reload data
+    } catch (error) {
+      console.error("Error applying merges:", error);
+      toast.error("Failed to apply some merges");
+    } finally {
+      setMerging(false);
+      setMergeProgress(0);
+    }
+  };
+
+  // Filter candidates based on search term
+  const filteredCandidates = useMemo(() => {
+    if (!searchTerm) return mergeCandidates;
+
+    const term = searchTerm.toLowerCase();
+    return mergeCandidates.filter(candidate =>
+      candidate.representative.toLowerCase().includes(term) ||
+      candidate.similar_names.some(name => name.toLowerCase().includes(term))
+    );
+  }, [mergeCandidates, searchTerm]);
+
+  // Initial load
+  useEffect(() => {
+    loadCounterparties();
+  }, [loadCounterparties]);
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <h2 className="text-lg font-medium text-gray-900">
-              Efficient Counterparty Merge
-            </h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Database-powered counterparty analysis with intelligent similarity
-              matching
-            </p>
-          </div>
-          <div className="text-right">
-            <div className="text-sm text-gray-500">Merge Candidates</div>
-            <div className="text-2xl font-bold text-gray-900">
-              {candidates.length}
-            </div>
-          </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">Counterparty Merge Analysis</h2>
+          <p className="text-muted-foreground">
+            Identify and merge similar counterparty names to reduce duplication
+          </p>
         </div>
-
-        {/* Entity selection section for cross-entity merges */}
-        <div className="mb-4 p-4 bg-blue-50 rounded-md">
-          <div className="flex items-center justify-between">
-            <h3 className="font-medium text-gray-800">Entity Selection</h3>
-            <button 
-              onClick={() => setShowEntitySelector(!showEntitySelector)}
-              className="text-sm bg-blue-600 text-white px-3 py-1 rounded-md hover:bg-blue-700"
-            >
-              {showEntitySelector ? "Hide" : "Show"} Entity Selector
-            </button>
-          </div>
-          
-          {showEntitySelector && (
-            <div className="mt-3">
-              <p className="text-sm text-gray-600 mb-2">Select entities to merge from:</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-40 overflow-y-auto p-2 border rounded-md">
-                {availableEntities.map(entity => (
-                  <div key={entity.entity_id} className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id={`entity-${entity.entity_id}`}
-                      checked={selectedEntities.includes(entity.entity_id)}
-                      onChange={() => toggleEntitySelection(entity.entity_id)}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor={`entity-${entity.entity_id}`} className="ml-2 text-sm text-gray-700">
-                      {entity.entity_name} ({entity.entity_type})
-                    </label>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-2 text-sm text-gray-600">
-                {selectedEntities.length > 0 
-                  ? `${selectedEntities.length} entity${selectedEntities.length > 1 ? 'ies' : ''} selected for cross-entity analysis`
-                  : 'Select entities to enable cross-entity merge analysis'}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Controls */}
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Similarity Threshold
-            </label>
-            <input
-              type="range"
-              min="70"
-              max="95"
-              value={similarityThreshold}
-              onChange={(e) => handleThresholdChange(Number(e.target.value))}
-              className="w-full"
-              disabled={loading}
-            />
-            <div className="text-sm text-gray-500 mt-1">
-              {similarityThreshold}%
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Min Transactions
-            </label>
-            <input
-              type="number"
-              min="1"
-              value={minTransactionCount}
-              onChange={(e) => {
-                setMinTransactionCount(Number(e.target.value));
-                setCurrentPage(1);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="1"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Search
-            </label>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search names..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div className="flex items-end">
-            <button
-              onClick={selectAllVisible}
-              disabled={paginatedCandidates.length === 0}
-              className="w-full bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            >
-              Select Page
-            </button>
-          </div>
-
-          <div className="flex items-end">
-            <button
-              onClick={clearSelection}
-              disabled={selectedMerges.size === 0}
-              className="w-full bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            >
-              Clear All
-            </button>
-          </div>
-
-          <div className="flex items-end">
-            <button
-              onClick={applyMerges}
-              disabled={processing || selectedMerges.size === 0}
-              className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {processing
-                ? "Processing..."
-                : `Merge (${selectedStats.totalMerges})`}
-            </button>
-          </div>
-        </div>
+        <Button onClick={loadCounterparties} disabled={loading}>
+          {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+          Refresh Analysis
+        </Button>
       </div>
 
-      {/* Messages */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg
-                className="h-5 w-5 text-red-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
+      {/* Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Filter className="h-5 w-5" />
+            Analysis Configuration
+          </CardTitle>
+          <CardDescription>
+            Configure the similarity detection parameters and processing options
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="similarityThreshold">Similarity Threshold</Label>
+              <Select
+                value={options.similarityThreshold.toString()}
+                onValueChange={(value) => setOptions(prev => ({ ...prev, similarityThreshold: parseFloat(value) }))}
               >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                  clipRule="evenodd"
-                />
-              </svg>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0.9">Very High (90%)</SelectItem>
+                  <SelectItem value="0.8">High (80%)</SelectItem>
+                  <SelectItem value="0.7">Medium (70%)</SelectItem>
+                  <SelectItem value="0.6">Low (60%)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div className="ml-3">
-              <p className="text-sm text-red-800">{error}</p>
-              <button
-                onClick={() => setError(null)}
-                className="text-sm text-red-600 underline mt-1"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {successMessage && (
-        <div className="bg-green-50 border border-green-200 rounded-md p-4">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg
-                className="h-5 w-5 text-green-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                  clipRule="evenodd"
-                />
-              </svg>
+            <div>
+              <Label htmlFor="minTransactionCount">Min Transaction Count</Label>
+              <Input
+                type="number"
+                min="1"
+                value={options.minTransactionCount}
+                onChange={(e) => setOptions(prev => ({ ...prev, minTransactionCount: parseInt(e.target.value) || 1 }))}
+              />
             </div>
-            <div className="ml-3">
-              <p className="text-sm text-green-800">{successMessage}</p>
+
+            <div>
+              <Label htmlFor="sortBy">Sort By</Label>
+              <Select
+                value={options.sortBy}
+                onValueChange={(value: any) => setOptions(prev => ({ ...prev, sortBy: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="transaction_count">Transaction Count</SelectItem>
+                  <SelectItem value="similarity_score">Similarity Score</SelectItem>
+                  <SelectItem value="alphabetical">Alphabetical</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        </div>
+
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="firstWordFilter"
+                checked={options.firstWordFilter}
+                onChange={(e) => setOptions(prev => ({ ...prev, firstWordFilter: e.target.checked }))}
+                className="rounded"
+              />
+              <Label htmlFor="firstWordFilter">
+                Group by first word (recommended for large datasets)
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground ml-6">
+              {options.firstWordFilter
+                ? "Only names with the same first word will be compared (e.g., 'TOPON' vs 'TOPON MEDI')"
+                : "All names will be compared against each other (more thorough but slower)"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Processing Progress */}
+      {loading && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">{processingStage}</span>
+                <span className="text-sm text-muted-foreground">{Math.round(processingProgress)}%</span>
+              </div>
+              <Progress value={processingProgress} className="w-full" />
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-2xl font-bold text-gray-900">
-            {candidates.length}
-          </div>
-          <div className="text-sm text-gray-600">Merge Groups Found</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-2xl font-bold text-gray-900">
-            {selectedMerges.size}
-          </div>
-          <div className="text-sm text-gray-600">Groups Selected</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-2xl font-bold text-gray-900">
-            {selectedStats.totalMerges}
-          </div>
-          <div className="text-sm text-gray-600">Names to Merge</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-2xl font-bold text-gray-900">
-            {selectedStats.totalTransactions}
-          </div>
-          <div className="text-sm text-gray-600">Transactions Affected</div>
-        </div>
-      </div>
-
-      {/* Candidates List */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-gray-900">
-              Merge Candidates
-            </h3>
-            <div className="text-sm text-gray-500">
-              Page {currentPage} of {totalPages} ({filteredCandidates.length}{" "}
-              total)
-            </div>
-          </div>
-        </div>
-
-        {paginatedCandidates.length === 0 ? (
-          <div className="text-center py-8">
-            <svg
-              className="mx-auto h-12 w-12 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            <h3 className="mt-2 text-sm font-medium text-gray-900">
-              No merge candidates found
-            </h3>
-            <p className="mt-1 text-sm text-gray-500">
-              Try adjusting the similarity threshold to find more matches.
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-200">
-            {paginatedCandidates.map((candidate) => (
-              <MergeCandidateCard
-                key={candidate.representative}
-                candidate={candidate}
-                selected={selectedMerges.has(candidate.representative)}
-                selectedNames={
-                  selectedNames.get(candidate.representative) || new Set()
-                }
-                onToggle={() => toggleMergeSelection(candidate.representative)}
-                onToggleName={(name) =>
-                  toggleNameSelection(candidate.representative, name)
-                }
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
-            <div className="flex-1 flex justify-between sm:hidden">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                }
-                disabled={currentPage === totalPages}
-                className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2">
+              <Users className="h-5 w-5 text-blue-500" />
               <div>
-                <p className="text-sm text-gray-700">
-                  Showing{" "}
-                  <span className="font-medium">
-                    {(currentPage - 1) * itemsPerPage + 1}
-                  </span>{" "}
-                  to{" "}
-                  <span className="font-medium">
-                    {Math.min(
-                      currentPage * itemsPerPage,
-                      filteredCandidates.length
-                    )}
-                  </span>{" "}
-                  of{" "}
-                  <span className="font-medium">
-                    {filteredCandidates.length}
-                  </span>{" "}
-                  results
+                <p className="text-sm font-medium">Total Counterparties</p>
+                <p className="text-2xl font-bold">{counterparties.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2">
+              <Search className="h-5 w-5 text-orange-500" />
+              <div>
+                <p className="text-sm font-medium">Merge Candidates</p>
+                <p className="text-2xl font-bold">{mergeCandidates.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              <div>
+                <p className="text-sm font-medium">Selected for Merge</p>
+                <p className="text-2xl font-bold">{selectedCandidates.size}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2">
+              <AlertCircle className="h-5 w-5 text-purple-500" />
+              <div>
+                <p className="text-sm font-medium">Potential Reduction</p>
+                <p className="text-2xl font-bold">
+                  {mergeCandidates.reduce((sum, c) => sum + c.potential_savings, 0)}
                 </p>
               </div>
-              <div>
-                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                  <button
-                    onClick={() =>
-                      setCurrentPage((prev) => Math.max(prev - 1, 1))
-                    }
-                    disabled={currentPage === 1}
-                    className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Previous
-                  </button>
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let pageNum;
-                    if (totalPages <= 5) {
-                      pageNum = i + 1;
-                    } else if (currentPage <= 3) {
-                      pageNum = i + 1;
-                    } else if (currentPage >= totalPages - 2) {
-                      pageNum = totalPages - 4 + i;
-                    } else {
-                      pageNum = currentPage - 2 + i;
-                    }
-
-                    return (
-                      <button
-                        key={pageNum}
-                        onClick={() => setCurrentPage(pageNum)}
-                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                          currentPage === pageNum
-                            ? "z-10 bg-blue-50 border-blue-500 text-blue-600"
-                            : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50"
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
-                  <button
-                    onClick={() =>
-                      setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                    }
-                    disabled={currentPage === totalPages}
-                    className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Next
-                  </button>
-                </nav>
-              </div>
             </div>
-          </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Search */}
+      <div className="flex space-x-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search counterparty names..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Button
+          onClick={applyMerges}
+          disabled={selectedCandidates.size === 0 || merging}
+          variant="default"
+        >
+          {merging ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <CheckCircle className="mr-2 h-4 w-4" />
+          )}
+          Merge Selected ({selectedCandidates.size})
+        </Button>
+      </div>
+
+      {/* Merge Progress */}
+      {merging && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Applying merges...</span>
+                <span className="text-sm text-muted-foreground">{Math.round(mergeProgress)}%</span>
+              </div>
+              <Progress value={mergeProgress} className="w-full" />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Results */}
+      <div className="space-y-4">
+        {filteredCandidates.map((candidate) => {
+          const isSelected = selectedCandidates.has(candidate.representative);
+          const isExpanded = expandedCandidates.has(candidate.representative);
+          const avgSimilarity = candidate.similarity_scores.reduce((sum, score) => sum + score, 0) / candidate.similarity_scores.length;
+
+          return (
+            <Card key={candidate.representative} className={cn(
+              "transition-all hover:shadow-md",
+              isSelected && "ring-2 ring-blue-500"
+            )}>
+              <CardContent className="pt-6">
+                <div className="space-y-4">
+                  {/* Header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleCandidateSelection(candidate.representative)}
+                        className="rounded"
+                      />
+                      <div>
+                        <h3 className="font-semibold text-lg">{candidate.representative}</h3>
+                        <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                          <span>{candidate.total_transactions} transactions</span>
+                          <span>•</span>
+                          <span>{candidate.similar_names.length + 1} similar names</span>
+                          <span>•</span>
+                          <span>Avg similarity: {(avgSimilarity * 100).toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toggleCandidateExpansion(candidate.representative)}
+                    >
+                      {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
+                  </div>
+
+                  {/* Similar Names */}
+                  {isExpanded && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Similar names to be merged:</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {candidate.similar_names.map((name, index) => (
+                          <div
+                            key={name}
+                            className="flex items-center justify-between p-2 bg-muted rounded"
+                          >
+                            <span className="text-sm">{name}</span>
+                            <Badge variant="secondary">
+                              {(candidate.similarity_scores[index] * 100).toFixed(1)}%
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+
+        {filteredCandidates.length === 0 && !loading && (
+          <Card>
+            <CardContent className="pt-6 text-center">
+              <p className="text-muted-foreground">
+                {searchTerm ? "No merge candidates found matching your search." : "No merge candidates found with current settings."}
+              </p>
+            </CardContent>
+          </Card>
         )}
       </div>
-    </div>
-  );
-}
-
-interface MergeCandidateCardProps {
-  candidate: CounterpartyMergeCandidate;
-  selected: boolean;
-  selectedNames: Set<string>;
-  onToggle: () => void;
-  onToggleName: (name: string) => void;
-}
-
-function MergeCandidateCard({
-  candidate,
-  selected,
-  selectedNames,
-  onToggle,
-  onToggleName,
-}: MergeCandidateCardProps) {
-  const [expanded, setExpanded] = useState(false);
-  const avgSimilarity =
-    candidate.similarity_scores.reduce((a, b) => a + b, 0) /
-    candidate.similarity_scores.length;
-
-  return (
-    <div
-      className={`p-6 transition-colors ${
-        selected ? "bg-blue-50 border-l-4 border-blue-500" : ""
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggle}
-            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-          />
-          <div>
-            <h3 className="text-lg font-medium text-gray-900">
-              {candidate.representative}
-            </h3>
-            <p className="text-sm text-gray-600">
-              {candidate.similar_names.length} similar names •{" "}
-              {candidate.total_transactions} transactions
-              {selected && selectedNames.size > 0 && (
-                <span className="ml-2 text-blue-600 font-medium">
-                  ({selectedNames.size} selected for merge)
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          <span
-            className={`px-2 py-1 text-xs font-medium rounded-full ${
-              avgSimilarity >= 90
-                ? "bg-green-100 text-green-800"
-                : avgSimilarity >= 80
-                ? "bg-yellow-100 text-yellow-800"
-                : "bg-red-100 text-red-800"
-            }`}
-          >
-            {Math.round(avgSimilarity * 100)}% avg
-          </span>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <svg
-              className={`h-5 w-5 transform transition-transform ${
-                expanded ? "rotate-180" : ""
-              }`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="mt-4 pt-4 border-t border-gray-200">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-sm font-medium text-gray-900">
-              Similar Names to Merge:
-            </h4>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => {
-                  candidate.similar_names.forEach((name) => {
-                    if (!selectedNames.has(name)) {
-                      onToggleName(name);
-                    }
-                  });
-                }}
-                className="text-xs text-blue-600 hover:text-blue-800 underline"
-                disabled={selectedNames.size === candidate.similar_names.length}
-              >
-                Select All
-              </button>
-              <button
-                onClick={() => {
-                  candidate.similar_names.forEach((name) => {
-                    if (selectedNames.has(name)) {
-                      onToggleName(name);
-                    }
-                  });
-                }}
-                className="text-xs text-gray-600 hover:text-gray-800 underline"
-                disabled={selectedNames.size === 0}
-              >
-                Clear All
-              </button>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {candidate.similar_names.map((name, index) => (
-              <div
-                key={index}
-                className={`flex items-center justify-between p-2 rounded transition-colors ${
-                  selectedNames.has(name)
-                    ? "bg-blue-50 border border-blue-200"
-                    : "bg-gray-50 hover:bg-gray-100"
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedNames.has(name)}
-                    onChange={() => onToggleName(name)}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <span className="text-sm text-gray-700">{name}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs text-gray-500">
-                    {Math.round(candidate.similarity_scores[index] * 100)}%
-                    match
-                  </span>
-                  <span className="text-xs text-gray-400">
-                    → {candidate.representative}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
