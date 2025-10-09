@@ -106,7 +106,7 @@ export default function EfficientCounterpartyMerge({
     return matrix[str2.length][str1.length];
   };
 
-  // Calculate similarity between two strings (0-1 scale)
+  // Calculate similarity between two strings (0-1 scale) with improved algorithm
   const calculateSimilarity = (str1: string, str2: string): number => {
     const s1 = str1.toLowerCase().trim();
     const s2 = str2.toLowerCase().trim();
@@ -114,11 +114,54 @@ export default function EfficientCounterpartyMerge({
     // If strings are the same when case-insensitive, they're 100% similar (automatic merge)
     if (s1 === s2) return 1.0;
 
+    // Substring match - very high similarity for containing relationships
+    if (s1.includes(s2) || s2.includes(s1)) {
+      // Calculate similarity based on length ratio for substring matches
+      const shorter = s1.length < s2.length ? s1 : s2;
+      const longer = s1.length < s2.length ? s2 : s1;
+      const lengthRatio = shorter.length / longer.length;
+      // Base similarity of 85% + up to 10% bonus based on length ratio
+      return 0.85 + (lengthRatio * 0.10);
+    }
+
+    // Prefix matching bonus
+    const commonPrefixLength = getCommonPrefixLength(s1, s2);
+    const minLen = Math.min(s1.length, s2.length);
+    if (commonPrefixLength > 0 && minLen > 0) {
+      const prefixRatio = commonPrefixLength / minLen;
+      // If they share a significant prefix, give bonus points
+      if (prefixRatio >= 0.5) {
+        // Continue with normal calculation but we'll add this as a bonus later
+      }
+    }
+
     const maxLength = Math.max(s1.length, s2.length);
     if (maxLength === 0) return 1.0;
 
     const distance = levenshteinDistance(s1, s2);
-    return 1 - distance / maxLength;
+    let baseSimilarity = 1 - distance / maxLength;
+
+    // Add prefix bonus if applicable
+    if (commonPrefixLength > 0 && minLen > 0) {
+      const prefixRatio = commonPrefixLength / minLen;
+      if (prefixRatio >= 0.5) {
+        // Add up to 15% bonus for shared prefixes
+        const prefixBonus = prefixRatio * 0.15;
+        baseSimilarity = Math.min(1.0, baseSimilarity + prefixBonus);
+      }
+    }
+
+    return baseSimilarity;
+  };
+
+  // Helper function to get common prefix length
+  const getCommonPrefixLength = (str1: string, str2: string): number => {
+    const minLen = Math.min(str1.length, str2.length);
+    let i = 0;
+    while (i < minLen && str1[i] === str2[i]) {
+      i++;
+    }
+    return i;
   };
 
   // Get first word from counterparty name (less aggressive normalization)
