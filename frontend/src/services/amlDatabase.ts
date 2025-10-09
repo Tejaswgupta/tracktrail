@@ -17,8 +17,6 @@ export interface AMLAlertRecord {
   resolution_notes?: string;
   created_at: string;
   created_by: string;
-  updated_at?: string;
-  updated_by?: string;
   resolved_at?: string;
 }
 
@@ -202,8 +200,6 @@ class AMLDatabaseService {
     try {
       const updateData: any = {
         status,
-        updated_at: new Date().toISOString(),
-        updated_by: updatedBy,
       };
 
       if (assignedTo) updateData.assigned_to = assignedTo;

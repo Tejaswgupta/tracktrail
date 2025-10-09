@@ -1,5 +1,7 @@
 "use client";
 
+//TODO: Improve efficiency.
+
 import { useAuth } from "@/contexts/AuthContext";
 import { counterpartyService } from "@/services/database";
 import { supabase } from "@/services/database";
@@ -84,6 +86,9 @@ export default function EfficientCounterpartyMerge({
   const [options, setOptions] = useState<ProcessingOptions>(DEFAULT_OPTIONS);
   const [mergeProgress, setMergeProgress] = useState(0);
   const [merging, setMerging] = useState(false);
+  const [mergeMode, setMergeMode] = useState<"individual" | "group">("individual");
+  const [showGroupMergeDialog, setShowGroupMergeDialog] = useState(false);
+  const [groupMergeTarget, setGroupMergeTarget] = useState<string>("");
 
   // Levenshtein distance algorithm for string similarity
   const levenshteinDistance = (str1: string, str2: string): number => {
@@ -550,8 +555,8 @@ export default function EfficientCounterpartyMerge({
     });
   };
 
-  // Apply selected merges
-  const applyMerges = async () => {
+  // Apply selected merges (individual mode)
+  const applyIndividualMerges = async () => {
     if (selectedCandidates.size === 0 || !user) {
       toast.error("No candidates selected");
       return;
@@ -594,6 +599,73 @@ export default function EfficientCounterpartyMerge({
     } finally {
       setMerging(false);
       setMergeProgress(0);
+    }
+  };
+
+  // Apply group merge
+  const applyGroupMerge = async () => {
+    if (selectedCandidates.size < 2 || !user || !groupMergeTarget) {
+      toast.error("Please select at least 2 groups and choose a target name");
+      return;
+    }
+
+    setMerging(true);
+    setMergeProgress(0);
+
+    const selectedGroups = mergeCandidates.filter(candidate =>
+      selectedCandidates.has(candidate.representative)
+    );
+
+    // Collect all names that need to be merged
+    const allNamesToMerge: string[] = [];
+    selectedGroups.forEach(group => {
+      if (group.representative !== groupMergeTarget) {
+        allNamesToMerge.push(group.representative);
+      }
+      group.similar_names.forEach(name => {
+        if (name !== groupMergeTarget) {
+          allNamesToMerge.push(name);
+        }
+      });
+    });
+
+    const merges = allNamesToMerge.map(name => ({
+      from: name,
+      to: groupMergeTarget,
+    }));
+
+    try {
+      const result = await counterpartyService.batchMergeCounterparties(merges, user.id);
+
+      if (result.errors.length > 0) {
+        console.error("Merge errors:", result.errors);
+        toast.error(`Some merges failed: ${result.errors.join(", ")}`);
+      }
+
+      toast.success(`Successfully merged ${selectedGroups.length} groups into "${groupMergeTarget}"`);
+      setSelectedCandidates(new Set());
+      setShowGroupMergeDialog(false);
+      setGroupMergeTarget("");
+      await loadCounterparties(); // Reload data
+    } catch (error) {
+      console.error("Error applying group merge:", error);
+      toast.error("Failed to apply group merge");
+    } finally {
+      setMerging(false);
+      setMergeProgress(0);
+    }
+  };
+
+  // Apply merges based on current mode
+  const applyMerges = async () => {
+    if (mergeMode === "group") {
+      if (selectedCandidates.size >= 2) {
+        setShowGroupMergeDialog(true);
+      } else {
+        toast.error("Please select at least 2 groups to merge together");
+      }
+    } else {
+      await applyIndividualMerges();
     }
   };
 
@@ -756,8 +828,15 @@ export default function EfficientCounterpartyMerge({
             <div className="flex items-center space-x-2">
               <CheckCircle className="h-5 w-5 text-green-500" />
               <div>
-                <p className="text-sm font-medium">Selected for Merge</p>
+                <p className="text-sm font-medium">
+                  {mergeMode === "group" ? "Selected Groups" : "Selected for Merge"}
+                </p>
                 <p className="text-2xl font-bold">{selectedCandidates.size}</p>
+                {mergeMode === "group" && selectedCandidates.size > 1 && (
+                  <p className="text-xs text-green-600 mt-1">
+                    Ready to merge together
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -778,6 +857,97 @@ export default function EfficientCounterpartyMerge({
         </Card>
       </div>
 
+      {/* Merge Mode Selection */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Merge Mode</CardTitle>
+          <CardDescription>
+            Choose how you want to merge the selected counterparty groups
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex space-x-4">
+            <div className="flex items-center space-x-2">
+              <input
+                type="radio"
+                id="individualMode"
+                name="mergeMode"
+                checked={mergeMode === "individual"}
+                onChange={() => setMergeMode("individual")}
+                className="rounded"
+              />
+              <Label htmlFor="individualMode">
+                Individual Merge
+                <span className="text-xs text-muted-foreground block ml-1">
+                  Merge each selected group separately (similar names → representative)
+                </span>
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="radio"
+                id="groupMode"
+                name="mergeMode"
+                checked={mergeMode === "group"}
+                onChange={() => setMergeMode("group")}
+                className="rounded"
+              />
+              <Label htmlFor="groupMode">
+                Group Merge
+                <span className="text-xs text-muted-foreground block ml-1">
+                  Merge multiple groups together into a single group
+                </span>
+              </Label>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Mode-specific hints */}
+      {mergeMode === "group" && (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="pt-6">
+            <div className="flex items-start space-x-2">
+              <div className="text-blue-600 mt-1">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="font-medium text-blue-900">Group Merge Mode</h4>
+                <p className="text-sm text-blue-800 mt-1">
+                  Select multiple counterparty groups and merge them all into a single target name.
+                  This is useful when you have groups that should be combined together.
+                </p>
+                <p className="text-xs text-blue-700 mt-2">
+                  💡 Select at least 2 groups, then click "Merge Groups Together" to choose a target name.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Group mode selection feedback */}
+      {mergeMode === "group" && selectedCandidates.size === 1 && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="pt-6">
+            <div className="flex items-start space-x-2">
+              <div className="text-amber-600 mt-1">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="font-medium text-amber-900">Need More Groups</h4>
+                <p className="text-sm text-amber-800 mt-1">
+                  Please select at least 2 groups to merge them together.
+                </p>
+                <p className="text-xs text-amber-700 mt-2">
+                  Current selection: {selectedCandidates.size} group selected
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Search */}
       <div className="flex space-x-2">
         <div className="relative flex-1">
@@ -791,7 +961,11 @@ export default function EfficientCounterpartyMerge({
         </div>
         <Button
           onClick={applyMerges}
-          disabled={selectedCandidates.size === 0 || merging}
+          disabled={
+            merging ||
+            selectedCandidates.size === 0 ||
+            (mergeMode === "group" && selectedCandidates.size < 2)
+          }
           variant="default"
         >
           {merging ? (
@@ -799,7 +973,10 @@ export default function EfficientCounterpartyMerge({
           ) : (
             <CheckCircle className="mr-2 h-4 w-4" />
           )}
-          Merge Selected ({selectedCandidates.size})
+          {mergeMode === "group"
+            ? `Merge Groups Together (${selectedCandidates.size})`
+            : `Merge Selected (${selectedCandidates.size})`
+          }
         </Button>
       </div>
 
@@ -957,6 +1134,110 @@ export default function EfficientCounterpartyMerge({
           </Card>
         )}
       </div>
+
+      {/* Group Merge Dialog */}
+      {showGroupMergeDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <CardHeader>
+              <CardTitle className="text-xl">Merge Groups Together</CardTitle>
+              <CardDescription>
+                Select a target name for the merged group
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Selected Groups Summary */}
+              <div>
+                <h3 className="font-semibold mb-3">Selected Groups ({selectedCandidates.size})</h3>
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {mergeCandidates
+                    .filter(candidate => selectedCandidates.has(candidate.representative))
+                    .map(candidate => (
+                      <div key={candidate.representative} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <div>
+                          <span className="font-medium">{candidate.representative}</span>
+                          <span className="text-sm text-muted-foreground ml-2">
+                            ({candidate.representativeTransactionCount} transactions, {candidate.similar_names.length + 1} names)
+                          </span>
+                        </div>
+                        <Badge variant="outline">
+                          {candidate.similar_names.length + 1} names
+                        </Badge>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Target Name Selection */}
+              <div>
+                <Label htmlFor="targetName" className="font-semibold">
+                  Target Name (all selected groups will be merged into this name)
+                </Label>
+                <Select
+                  value={groupMergeTarget}
+                  onValueChange={setGroupMergeTarget}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select a target name..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {mergeCandidates
+                      .filter(candidate => selectedCandidates.has(candidate.representative))
+                      .map(candidate => (
+                        <SelectItem key={candidate.representative} value={candidate.representative}>
+                          {candidate.representative}
+                          <span className="text-muted-foreground ml-2">
+                            ({candidate.representativeTransactionCount} transactions)
+                          </span>
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Choose which name will be the final representative name for the merged group.
+                  All other names will be merged into this one.
+                </p>
+              </div>
+
+              {/* Preview */}
+              {groupMergeTarget && (
+                <div className="border rounded-lg p-4 bg-blue-50">
+                  <h4 className="font-medium text-blue-900 mb-2">Merge Preview</h4>
+                  <p className="text-sm text-blue-800">
+                    All names from the selected {selectedCandidates.size} groups will be merged into:
+                  </p>
+                  <p className="font-semibold text-blue-900 mt-1">"{groupMergeTarget}"</p>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowGroupMergeDialog(false);
+                    setGroupMergeTarget("");
+                  }}
+                  disabled={merging}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={applyGroupMerge}
+                  disabled={!groupMergeTarget || merging}
+                >
+                  {merging ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                  )}
+                  Confirm Merge
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

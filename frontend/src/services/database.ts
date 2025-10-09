@@ -105,7 +105,7 @@ export const casesService = {
   },
 
   async create(
-    caseData: Omit<Case, "case_id" | "created_at" | "updated_at">
+    caseData: Omit<Case, "case_id" | "created_at" >
   ): Promise<Case> {
     const { data, error } = await supabase
       .from("cases")
@@ -120,7 +120,7 @@ export const casesService = {
   async update(caseId: string, updates: Partial<Case>): Promise<Case> {
     const { data, error } = await supabase
       .from("cases")
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update({ ...updates })
       .eq("case_id", caseId)
       .select()
       .single();
@@ -301,7 +301,7 @@ export const entitiesService = {
   },
 
   async create(
-    entityData: Omit<Entity, "entity_id" | "created_at" | "updated_at">
+    entityData: Omit<Entity, "entity_id" | "created_at">
   ): Promise<Entity> {
     const { data, error } = await supabase
       .from("entities")
@@ -1149,8 +1149,6 @@ export const counterpartyService = {
       .from("transactions")
       .update({
         counterparty_merged: toName,
-        updated_at: new Date().toISOString(),
-        updated_by: userId,
       })
       .eq("counterparty_merged", fromName)
       .select("*");

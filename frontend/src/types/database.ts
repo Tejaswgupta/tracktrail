@@ -14,8 +14,6 @@ export interface Case {
   closed_date?: string;
   created_at: string;
   created_by: string;
-  updated_at?: string;
-  updated_by?: string;
 }
 
 export enum EntityType {
@@ -50,8 +48,6 @@ export interface Entity {
   metadata?: Record<string, any>;
   created_at: string;
   created_by: string;
-  updated_at?: string;
-  updated_by?: string;
 }
 
 export interface Account {
