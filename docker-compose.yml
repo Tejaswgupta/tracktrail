@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  tracktrail:
+    build:
+      context: .
+      dockerfile: DOCKERFILE
+    ports:
+      - "3000:3000"  # Frontend (Next.js)
+      - "8000:8000"  # Backend (FastAPI)
+    environment:
+      - NODE_ENV=production
+      - PYTHONPATH=/app/backend
+      - PYTHONUNBUFFERED=1
+      # Backend environment variables
+      - APP_NAME=Financial Analysis API
+      - APP_VERSION=1.0.0
+      - DEBUG=false
+      - API_V1_PREFIX=/api/v1
+      - SUPABASE_URL=${SUPABASE_URL:-https://bouniuqsbzluhnqrgses.supabase.co}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJvdW5pdXFzYnpsdWhucXJnc2VzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0MDM5MDEsImV4cCI6MjA3MDk3OTkwMX0.UM0a1ibnB-3CWmSqMaIhLypa3vlB7smp6ts0xhWGtMY}
+      - DATABASE_POOL_SIZE=10
+      - DATABASE_MAX_OVERFLOW=20
+      - DATABASE_TIMEOUT=30
+      - CORS_ORIGINS=*
+      - MAX_REQUEST_SIZE=10485760
+      - MAX_ENTITIES_PER_REQUEST=50
+      - MAX_DATE_RANGE_DAYS=365
+      - ENABLE_METRICS=true
+      - LOG_LEVEL=INFO
+      # OpenAI configuration (optional)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://model.thevotum.com/v1}
+    volumes:
+      - /var/log/supervisor:/var/log/supervisor
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:8000/health && curl -f http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 60s
+
+  # Development services (uncomment for development)
+  # tracktrail-dev:
+  #   build:
+  #     context: .
+  #     dockerfile: DOCKERFILE
+  #     target: backend-base
+  #   ports:
+  #     - "8001:8000"
+  #   environment:
+  #     - DEBUG=true
+  #     - LOG_LEVEL=DEBUG
+  #   volumes:
+  #     - ./backend:/app/backend
+  #   command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+  #   profiles:
+  #     - dev
+
+  # frontend-dev:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: ../DOCKERFILE
+  #     target: frontend-builder
+  #   ports:
+  #     - "3001:3000"
+  #   volumes:
+  #     - ./frontend:/app/frontend
+  #     - /app/frontend/node_modules
+  #   command: pnpm dev
+  #   profiles:
+  #     - dev
+
+networks:
+  default:
+    name: tracktrail-network
+
+volumes:
+  supervisor_logs:
+    driver: local

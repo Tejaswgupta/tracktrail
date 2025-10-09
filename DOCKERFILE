@@ -1,0 +1,106 @@
+# Multi-stage Dockerfile for running both frontend and backend services
+# Stage 1: Build the frontend
+FROM node:18-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Install pnpm globally
+RUN npm install -g pnpm@9.15.1
+
+# Copy package files
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy frontend source
+COPY frontend/ ./
+
+# Build the frontend
+RUN pnpm build
+
+# Stage 2: Backend base with Python
+FROM python:3.11-slim AS backend-base
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libc-dev \
+    libffi-dev \
+    libssl-dev \
+    curl \
+    wget \
+    default-jre \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for faster Python package installation
+RUN pip install uv
+
+WORKDIR /app/backend
+
+# Copy backend requirements and install dependencies
+COPY backend/requirements.txt backend/pyproject.toml ./
+RUN uv pip install --system -r requirements.txt
+
+# Copy backend source
+COPY backend/ ./
+
+# Stage 3: Production image with both services
+FROM node:18-alpine AS production
+
+# Install Python and system dependencies
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    gcc \
+    g++ \
+    musl-dev \
+    libffi-dev \
+    openssl-dev \
+    default-jre \
+    supervisor \
+    && ln -sf python3 /usr/bin/python
+
+# Install pnpm globally
+RUN npm install -g pnpm@9.15.1
+
+# Create app directory
+WORKDIR /app
+
+# Install uv for Python package management
+RUN pip install uv
+
+# Copy backend from backend-base stage
+COPY --from=backend-base /app/backend ./backend
+COPY --from=backend-base /usr/local/lib/python3.11/site-packages /usr/lib/python3.11/site-packages
+COPY --from=backend-base /usr/local/bin /usr/local/bin
+
+# Copy built frontend from frontend-builder stage
+COPY --from=frontend-builder /app/frontend ./frontend
+
+# Install Python dependencies in production environment
+WORKDIR /app/backend
+RUN uv pip install --system -r requirements.txt
+
+# Copy supervisor configuration
+WORKDIR /app
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Create necessary directories
+RUN mkdir -p /var/log/supervisor
+
+# Expose ports
+EXPOSE 3000 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health && curl -f http://localhost:3000 || exit 1
+
+# Environment variables
+ENV NODE_ENV=production
+ENV PYTHONPATH=/app/backend
+ENV PYTHONUNBUFFERED=1
+
+# Default command
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
