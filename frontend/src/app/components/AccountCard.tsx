@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import ConfirmationDialog from "./ConfirmationDialog";
 import StatementList from "./StatementList";
 import TransactionsTable from "./TransactionsTable";
+import TransactionFixer from "./TransactionFixer";
 import type { Transaction } from "@/types/database";
 
 interface Account {
@@ -32,7 +33,7 @@ export default function AccountCard({
   caseId,
 }: AccountCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<"statements" | "transactions">(
+  const [activeTab, setActiveTab] = useState<"statements" | "transactions" | "fix_failed">(
     "statements"
   );
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -372,13 +373,25 @@ export default function AccountCard({
               >
                 Transactions
               </button>
+              <button
+                onClick={() => setActiveTab("fix_failed")}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  activeTab === "fix_failed"
+                    ? "bg-red-100 text-red-700"
+                    : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                Fix Failed ({transactionStats.failed})
+              </button>
             </div>
 
             {/* Tab Content */}
             {activeTab === "statements" ? (
               <StatementList accountId={account.id} />
-            ) : (
+            ) : activeTab === "transactions" ? (
               <TransactionsTable accountId={account.id} caseId={caseId} />
+            ) : (
+              <TransactionFixer accountId={account.id} caseId={caseId} />
             )}
           </div>
         </div>

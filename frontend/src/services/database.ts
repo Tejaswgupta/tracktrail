@@ -727,11 +727,30 @@ export const transactionsService = {
       .select();
 
     if (error) throw error;
-    
+
     // Invalidate relevant caches
     transactionCache.clear(); // Clear all transaction caches when adding new transactions
-    
+
     return data || [];
+  },
+
+  async updateTransaction(
+    transactionId: string,
+    updates: Partial<Omit<Transaction, "transaction_id" | "created_at" | "account_id" | "entity_id" | "statement_id" | "original_index">>
+  ): Promise<Transaction> {
+    const { data, error } = await supabase
+      .from("transactions")
+      .update(updates)
+      .eq("transaction_id", transactionId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Invalidate relevant caches
+    transactionCache.clear(); // Clear all transaction caches when updating transactions
+
+    return data;
   },
 
   async getTransactionSummary(accountId: string) {
