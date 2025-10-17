@@ -1,6 +1,10 @@
 "use client";
 
-import { entitiesService, transactionsService, counterpartyService } from "@/services/database";
+import {
+  entitiesService,
+  transactionsService,
+  counterpartyService,
+} from "@/services/database";
 import type { Entity, Transaction } from "@/types/database";
 import { useEffect, useState, useMemo } from "react";
 // Import Recharts components
@@ -20,7 +24,7 @@ import {
 } from "recharts";
 import DetailedOverviewTab from "./DetailedOverviewTab";
 import EditableTransactionType from "./EditableTransactionType";
-
+import EditableCounterpartyName from "./EditableCounterpartyName";
 
 interface CounterpartyStats {
   name: string;
@@ -68,15 +72,21 @@ interface OverviewTabProps {
 
 export default function OverviewTab({ caseId }: OverviewTabProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [counterpartyStats, setCounterpartyStats] = useState<CounterpartyStats[]>([]);
+  const [counterpartyStats, setCounterpartyStats] = useState<
+    CounterpartyStats[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] =
     useState<NumericCounterpartyStatsKeys>("totalVolume");
   const [showTopN, setShowTopN] = useState(10);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<"summary" | "detailed" | "types">("summary");
-  const [transactionTypeStats, setTransactionTypeStats] = useState<TransactionTypeStats[]>([]);
+  const [activeSubTab, setActiveSubTab] = useState<
+    "summary" | "detailed" | "types"
+  >("summary");
+  const [transactionTypeStats, setTransactionTypeStats] = useState<
+    TransactionTypeStats[]
+  >([]);
   const [transactionTypesLoading, setTransactionTypesLoading] = useState(false);
 
   useEffect(() => {
@@ -105,11 +115,10 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           data = await transactionsService.getByEntityId(selectedEntityId);
         } else {
           // For large datasets, we'll only fetch a sample or use optimized queries
-          data = await transactionsService.getCaseTransactionsForAnalysis(caseId, [
-            "transaction_id",
-            "amount",
-            "direction"
-          ]);
+          data = await transactionsService.getCaseTransactionsForAnalysis(
+            caseId,
+            ["transaction_id", "amount", "direction"]
+          );
         }
         setTransactions(data);
       } catch (error) {
@@ -127,25 +136,31 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     const fetchCounterpartyStats = async () => {
       try {
         setLoading(true);
-        
+
         if (selectedEntityId) {
           // For specific entity, calculate stats client-side from transactions
-          const entityTransactions = await transactionsService.getByEntityId(selectedEntityId);
-          
+          const entityTransactions = await transactionsService.getByEntityId(
+            selectedEntityId
+          );
+
           // Group transactions by counterparty
-          const counterpartyMap = new Map<string, {
-            transactions: Transaction[];
-            totalDebit: number;
-            totalCredit: number;
-            totalVolume: number;
-            netFlow: number;
-            firstDate: Date | null;
-            lastDate: Date | null;
-            maxTransaction: number;
-          }>();
-          
+          const counterpartyMap = new Map<
+            string,
+            {
+              transactions: Transaction[];
+              totalDebit: number;
+              totalCredit: number;
+              totalVolume: number;
+              netFlow: number;
+              firstDate: Date | null;
+              lastDate: Date | null;
+              maxTransaction: number;
+            }
+          >();
+
           for (const tx of entityTransactions) {
-            const counterparty = tx.counterparty_merged || tx.description || "Unknown";
+            const counterparty =
+              tx.counterparty_merged || tx.description || "Unknown";
             if (!counterpartyMap.has(counterparty)) {
               counterpartyMap.set(counterparty, {
                 transactions: [],
@@ -155,13 +170,13 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                 netFlow: 0,
                 firstDate: null,
                 lastDate: null,
-                maxTransaction: 0
+                maxTransaction: 0,
               });
             }
-            
+
             const cp = counterpartyMap.get(counterparty)!;
             cp.transactions.push(tx);
-            
+
             // Update financials
             if (tx.direction === "DR") {
               cp.totalDebit += tx.amount;
@@ -170,81 +185,97 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
             }
             cp.totalVolume += tx.amount;
             cp.netFlow += tx.direction === "CR" ? tx.amount : -tx.amount;
-            
+
             // Update dates
             const txDate = new Date(tx.tx_date);
             if (!cp.firstDate || txDate < cp.firstDate) cp.firstDate = txDate;
             if (!cp.lastDate || txDate > cp.lastDate) cp.lastDate = txDate;
-            
+
             // Update max transaction
             if (tx.amount > cp.maxTransaction) cp.maxTransaction = tx.amount;
           }
-          
+
           // Transform to our CounterpartyStats format
-          const transformedStats: CounterpartyStats[] = Array.from(counterpartyMap.entries()).map(
-            ([name, data]) => {
-              const daysActive = data.firstDate && data.lastDate
+          const transformedStats: CounterpartyStats[] = Array.from(
+            counterpartyMap.entries()
+          ).map(([name, data]) => {
+            const daysActive =
+              data.firstDate && data.lastDate
                 ? Math.max(
                     1,
                     Math.ceil(
-                      (data.lastDate.getTime() - data.firstDate.getTime()) / (1000 * 60 * 60 * 24)
+                      (data.lastDate.getTime() - data.firstDate.getTime()) /
+                        (1000 * 60 * 60 * 24)
                     ) + 1
                   )
                 : 1;
-              
-              const firstDescription = data.transactions[0]?.description;
 
-              return {
-                name,
-                description: name !== firstDescription ? firstDescription : undefined,
-                transactionCount: data.transactions.length,
-                totalDebit: data.totalDebit,
-                totalCredit: data.totalCredit,
-                totalVolume: data.totalVolume,
-                netFlow: data.netFlow,
-                avgTransactionSize: data.totalVolume / data.transactions.length,
-                maxTransactionSize: data.maxTransaction,
-                firstTransactionDate: data.firstDate ? data.firstDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                lastTransactionDate: data.lastDate ? data.lastDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                daysActive: daysActive,
-                frequency: data.transactions.length / daysActive
-              };
-            }
-          );
-          
+            const firstDescription = data.transactions[0]?.description;
+
+            return {
+              name,
+              description:
+                name !== firstDescription ? firstDescription : undefined,
+              transactionCount: data.transactions.length,
+              totalDebit: data.totalDebit,
+              totalCredit: data.totalCredit,
+              totalVolume: data.totalVolume,
+              netFlow: data.netFlow,
+              avgTransactionSize: data.totalVolume / data.transactions.length,
+              maxTransactionSize: data.maxTransaction,
+              firstTransactionDate: data.firstDate
+                ? data.firstDate.toISOString().split("T")[0]
+                : new Date().toISOString().split("T")[0],
+              lastTransactionDate: data.lastDate
+                ? data.lastDate.toISOString().split("T")[0]
+                : new Date().toISOString().split("T")[0],
+              daysActive: daysActive,
+              frequency: data.transactions.length / daysActive,
+            };
+          });
+
           setCounterpartyStats(transformedStats);
         } else {
           // For entire case, use backend stats
           let stats;
           try {
-            stats = await counterpartyService.getCaseCounterpartyStatsWithDetails(caseId);
+            stats =
+              await counterpartyService.getCaseCounterpartyStatsWithDetails(
+                caseId
+              );
           } catch (error) {
-            console.warn("Detailed counterparty stats not available, using basic stats");
-            const basicStats = await counterpartyService.getCaseCounterpartyStats(caseId);
+            console.warn(
+              "Detailed counterparty stats not available, using basic stats"
+            );
+            const basicStats =
+              await counterpartyService.getCaseCounterpartyStats(caseId);
             // Transform basic stats to match detailed format
-            stats = basicStats.map(stat => ({
+            stats = basicStats.map((stat) => ({
               counterparty_name: stat.counterparty_name,
               transaction_count: stat.transaction_count,
               total_debits: 0,
               total_credits: Number(stat.total_amount),
               total_amount: Number(stat.total_amount),
               net_flow: Number(stat.total_amount),
-              avg_transaction_size: Number(stat.total_amount) / stat.transaction_count,
+              avg_transaction_size:
+                Number(stat.total_amount) / stat.transaction_count,
               max_transaction_size: 0,
               first_seen: stat.first_seen,
-              last_seen: stat.last_seen
+              last_seen: stat.last_seen,
             }));
           }
-          
+
           // Transform backend data to match our CounterpartyStats interface
-          const transformedStats: CounterpartyStats[] = stats.map(stat => {
+          const transformedStats: CounterpartyStats[] = stats.map((stat) => {
             const daysActive = Math.max(
               1,
               Math.ceil(
-                (new Date(stat.last_seen).getTime() - new Date(stat.first_seen).getTime()) / (1000 * 60 * 60 * 24)
+                (new Date(stat.last_seen).getTime() -
+                  new Date(stat.first_seen).getTime()) /
+                  (1000 * 60 * 60 * 24)
               ) + 1
             );
-            
+
             return {
               name: stat.counterparty_name,
               transactionCount: stat.transaction_count,
@@ -257,10 +288,10 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
               firstTransactionDate: stat.first_seen,
               lastTransactionDate: stat.last_seen,
               daysActive: daysActive,
-              frequency: stat.transaction_count / daysActive
+              frequency: stat.transaction_count / daysActive,
             };
           });
-          
+
           setCounterpartyStats(transformedStats);
         }
       } catch (error) {
@@ -284,12 +315,10 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           data = await transactionsService.getByEntityId(selectedEntityId);
         } else {
           // Fetch transactions for the entire case
-          data = await transactionsService.getCaseTransactionsForAnalysis(caseId, [
-            "transaction_id",
-            "amount",
-            "direction",
-            "description"
-          ]);
+          data = await transactionsService.getCaseTransactionsForAnalysis(
+            caseId,
+            ["transaction_id", "amount", "direction", "description"]
+          );
         }
 
         if (data.length === 0) {
@@ -298,15 +327,18 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         }
 
         // Group transactions by type
-        const typeMap = new Map<string, {
-          transactions: Transaction[];
-          totalAmount: number;
-          totalDebits: number;
-          totalCredits: number;
-          netFlow: number;
-          maxAmount: number;
-          minAmount: number;
-        }>();
+        const typeMap = new Map<
+          string,
+          {
+            transactions: Transaction[];
+            totalAmount: number;
+            totalDebits: number;
+            totalCredits: number;
+            netFlow: number;
+            maxAmount: number;
+            minAmount: number;
+          }
+        >();
 
         for (const tx of data) {
           const type = extractTransactionType(tx.description || "");
@@ -319,7 +351,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
               totalCredits: 0,
               netFlow: 0,
               maxAmount: 0,
-              minAmount: Infinity
+              minAmount: Infinity,
             });
           }
 
@@ -339,20 +371,20 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         }
 
         // Transform to TransactionTypeStats format
-        const typeStats: TransactionTypeStats[] = Array.from(typeMap.entries()).map(
-          ([type, data]) => ({
-            type,
-            count: data.transactions.length,
-            totalAmount: data.totalAmount,
-            totalDebits: data.totalDebits,
-            totalCredits: data.totalCredits,
-            netFlow: data.netFlow,
-            avgAmount: data.totalAmount / data.transactions.length,
-            maxAmount: data.maxAmount,
-            minAmount: data.minAmount === Infinity ? 0 : data.minAmount,
-            description: data.transactions[0]?.description
-          })
-        );
+        const typeStats: TransactionTypeStats[] = Array.from(
+          typeMap.entries()
+        ).map(([type, data]) => ({
+          type,
+          count: data.transactions.length,
+          totalAmount: data.totalAmount,
+          totalDebits: data.totalDebits,
+          totalCredits: data.totalCredits,
+          netFlow: data.netFlow,
+          avgAmount: data.totalAmount / data.transactions.length,
+          maxAmount: data.maxAmount,
+          minAmount: data.minAmount === Infinity ? 0 : data.minAmount,
+          description: data.transactions[0]?.description,
+        }));
 
         // Sort by total amount (descending)
         typeStats.sort((a, b) => b.totalAmount - a.totalAmount);
@@ -374,10 +406,22 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     // For transaction types tab, use transactionTypeStats data
     if (activeSubTab === "types") {
       return {
-        totalTransactions: transactionTypeStats.reduce((sum, type) => sum + type.count, 0),
-        totalDebits: transactionTypeStats.reduce((sum, type) => sum + type.totalDebits, 0),
-        totalCredits: transactionTypeStats.reduce((sum, type) => sum + type.totalCredits, 0),
-        netFlow: transactionTypeStats.reduce((sum, type) => sum + type.netFlow, 0),
+        totalTransactions: transactionTypeStats.reduce(
+          (sum, type) => sum + type.count,
+          0
+        ),
+        totalDebits: transactionTypeStats.reduce(
+          (sum, type) => sum + type.totalDebits,
+          0
+        ),
+        totalCredits: transactionTypeStats.reduce(
+          (sum, type) => sum + type.totalCredits,
+          0
+        ),
+        netFlow: transactionTypeStats.reduce(
+          (sum, type) => sum + type.netFlow,
+          0
+        ),
       };
     }
 
@@ -424,29 +468,32 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     "WIRE",
     "ACH",
     "SWIFT",
-    "OTHER"
+    "OTHER",
   ];
 
   // Colors for transaction types
   const TRANSACTION_TYPE_COLORS: { [key: string]: string } = {
-    "NEFT": "#3B82F6",
-    "RTGS": "#10B981",
-    "IMPS": "#F59E0B",
-    "UPI": "#8B5CF6",
-    "CHQ": "#EF4444",
-    "CASH": "#F97316",
-    "DD": "#06B6D4",
-    "MOB": "#EC4899",
-    "NET": "#6366F1",
-    "CARD": "#84CC16",
-    "WIRE": "#14B8A6",
-    "ACH": "#A855F7",
-    "SWIFT": "#F43F5E",
-    "OTHER": "#6B7280"
+    NEFT: "#3B82F6",
+    RTGS: "#10B981",
+    IMPS: "#F59E0B",
+    UPI: "#8B5CF6",
+    CHQ: "#EF4444",
+    CASH: "#F97316",
+    DD: "#06B6D4",
+    MOB: "#EC4899",
+    NET: "#6366F1",
+    CARD: "#84CC16",
+    WIRE: "#14B8A6",
+    ACH: "#A855F7",
+    SWIFT: "#F43F5E",
+    OTHER: "#6B7280",
   };
 
   // Extract transaction type from description
-  const extractTransactionType = (description: string, remarks?: string): string => {
+  const extractTransactionType = (
+    description: string,
+    remarks?: string
+  ): string => {
     if (!description && !remarks) return "OTHER";
 
     const text = `${description} ${remarks}`.toUpperCase();
@@ -454,18 +501,33 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     // Define transaction type patterns with their keywords
     const typePatterns = [
       { type: "NEFT", keywords: ["NEFT", "NATIONAL ELECTRONIC FUND TRANSFER"] },
-      { type: "RTGS", keywords: ["RTGS", "REAL TIME GROSS SETTLEMENT", "REAL-TIME"] },
+      {
+        type: "RTGS",
+        keywords: ["RTGS", "REAL TIME GROSS SETTLEMENT", "REAL-TIME"],
+      },
       { type: "IMPS", keywords: ["IMPS", "IMMEDIATE PAYMENT"] },
-      { type: "UPI", keywords: ["UPI", "UNIFIED PAYMENTS INTERFACE", "@", "UPI/"] },
-      { type: "CHQ", keywords: ["CHEQUE", "CHQ", "CHEQUE NO", "CHEQUE NO.", "CHQ NO"] },
+      {
+        type: "UPI",
+        keywords: ["UPI", "UNIFIED PAYMENTS INTERFACE", "@", "UPI/"],
+      },
+      {
+        type: "CHQ",
+        keywords: ["CHEQUE", "CHQ", "CHEQUE NO", "CHEQUE NO.", "CHQ NO"],
+      },
       { type: "CASH", keywords: ["CASH", "ATM", "WITHDRAWAL", "DEPOSIT"] },
       { type: "DD", keywords: ["DEMAND DRAFT", "DD", "DD NO", "DD NO."] },
       { type: "MOB", keywords: ["MOBILE", "MOB", "MOBILE BANKING"] },
-      { type: "NET", keywords: ["NET BANKING", "NETBANKING", "INTERNET BANKING", "ONLINE"] },
-      { type: "CARD", keywords: ["CARD", "DEBIT CARD", "CREDIT CARD", "ATM CARD"] },
+      {
+        type: "NET",
+        keywords: ["NET BANKING", "NETBANKING", "INTERNET BANKING", "ONLINE"],
+      },
+      {
+        type: "CARD",
+        keywords: ["CARD", "DEBIT CARD", "CREDIT CARD", "ATM CARD"],
+      },
       { type: "WIRE", keywords: ["WIRE", "WIRE TRANSFER"] },
       { type: "ACH", keywords: ["ACH", "AUTOMATIC CLEARING HOUSE"] },
-      { type: "SWIFT", keywords: ["SWIFT", "MT103", "MT202"] }
+      { type: "SWIFT", keywords: ["SWIFT", "MT103", "MT202"] },
     ];
 
     // Check each pattern
@@ -494,12 +556,22 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     if (activeSubTab === "types") {
       // Since we don't have individual transaction descriptions in transactionTypeStats,
       // we'll use a proportional split based on typical patterns
-      const totalTransactions = transactionTypeStats.reduce((sum, type) => sum + type.count, 0);
+      const totalTransactions = transactionTypeStats.reduce(
+        (sum, type) => sum + type.count,
+        0
+      );
       const estimatedCashTransactions = Math.floor(totalTransactions * 0.15); // 15% estimate for cash
-      const estimatedBankTransactions = totalTransactions - estimatedCashTransactions;
+      const estimatedBankTransactions =
+        totalTransactions - estimatedCashTransactions;
 
-      const totalDebits = transactionTypeStats.reduce((sum, type) => sum + type.totalDebits, 0);
-      const totalCredits = transactionTypeStats.reduce((sum, type) => sum + type.totalCredits, 0);
+      const totalDebits = transactionTypeStats.reduce(
+        (sum, type) => sum + type.totalDebits,
+        0
+      );
+      const totalCredits = transactionTypeStats.reduce(
+        (sum, type) => sum + type.totalCredits,
+        0
+      );
 
       const cashRatio = estimatedCashTransactions / totalTransactions;
       const bankRatio = estimatedBankTransactions / totalTransactions;
@@ -562,7 +634,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     };
   }, [transactions, transactionTypeStats, activeSubTab]);
 
-    // Use backend counterparty stats instead of client-side calculation
+  // Use backend counterparty stats instead of client-side calculation
   const sortedCounterparties = [...counterpartyStats]
     .sort((a, b) => b[sortBy] - a[sortBy])
     .slice(0, showTopN);
@@ -585,19 +657,28 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   };
 
   // Function to handle saving updated transaction type names
-  const handleSaveTransactionType = async (oldType: string, newType: string) => {
+  const handleSaveTransactionType = async (
+    oldType: string,
+    newType: string
+  ) => {
     try {
       // Update all transactions with the old type to the new type
       // Note: Since transaction types are calculated on the fly from descriptions,
       // we need to store the mapping or update the actual description fields
       // For now, we'll update the local state to reflect the change
 
-      setTransactionTypeStats(prevStats => {
+      setTransactionTypeStats((prevStats) => {
         // Check if there's already a type with the new name
-        const existingIndex = prevStats.findIndex(type => type.type === newType);
-        const oldIndex = prevStats.findIndex(type => type.type === oldType);
+        const existingIndex = prevStats.findIndex(
+          (type) => type.type === newType
+        );
+        const oldIndex = prevStats.findIndex((type) => type.type === oldType);
 
-        if (existingIndex !== -1 && oldIndex !== -1 && existingIndex !== oldIndex) {
+        if (
+          existingIndex !== -1 &&
+          oldIndex !== -1 &&
+          existingIndex !== oldIndex
+        ) {
           // Merge the old type into the existing one
           const updatedStats = [...prevStats];
           const existingType = updatedStats[existingIndex];
@@ -611,10 +692,12 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
             totalDebits: existingType.totalDebits + oldTypeData.totalDebits,
             totalCredits: existingType.totalCredits + oldTypeData.totalCredits,
             netFlow: existingType.netFlow + oldTypeData.netFlow,
-            avgAmount: (existingType.totalAmount + oldTypeData.totalAmount) / (existingType.count + oldTypeData.count),
+            avgAmount:
+              (existingType.totalAmount + oldTypeData.totalAmount) /
+              (existingType.count + oldTypeData.count),
             maxAmount: Math.max(existingType.maxAmount, oldTypeData.maxAmount),
             minAmount: Math.min(existingType.minAmount, oldTypeData.minAmount),
-            description: existingType.description || oldTypeData.description
+            description: existingType.description || oldTypeData.description,
           };
 
           // Replace the existing type with merged data and remove the old one
@@ -622,13 +705,15 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           return updatedStats.filter((_, index) => index !== oldIndex);
         } else {
           // Normal case: just update the name
-          return prevStats.map(type =>
+          return prevStats.map((type) =>
             type.type === oldType ? { ...type, type: newType } : type
           );
         }
       });
 
-      console.log(`Successfully renamed transaction type from "${oldType}" to "${newType}"`);
+      console.log(
+        `Successfully renamed transaction type from "${oldType}" to "${newType}"`
+      );
     } catch (error) {
       console.error("Error updating transaction type:", error);
       alert(`Failed to update transaction type: ${(error as Error).message}`);
@@ -637,56 +722,79 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   };
 
   // Function to handle saving updated counterparty names
-  const handleSaveCounterpartyName = async (oldName: string, newName: string) => {
+  const handleSaveCounterpartyName = async (
+    oldName: string,
+    newName: string
+  ) => {
     try {
       // Update all transactions with the old counterparty name to the new name
       const result = await transactionsService.updateTransactionCounterparty(
         caseId,
         oldName,
-        newName,
+        newName
       );
 
       // Update the local state to reflect the changes
-      setCounterpartyStats(prevStats => {
+      setCounterpartyStats((prevStats) => {
         // Check if there's already a counterparty with the new name
-        const existingIndex = prevStats.findIndex(cp => cp.name === newName);
-        const oldIndex = prevStats.findIndex(cp => cp.name === oldName);
-        
-        if (existingIndex !== -1 && oldIndex !== -1 && existingIndex !== oldIndex) {
+        const existingIndex = prevStats.findIndex((cp) => cp.name === newName);
+        const oldIndex = prevStats.findIndex((cp) => cp.name === oldName);
+
+        if (
+          existingIndex !== -1 &&
+          oldIndex !== -1 &&
+          existingIndex !== oldIndex
+        ) {
           // Merge the old counterparty into the existing one
           const updatedStats = [...prevStats];
           const existingCp = updatedStats[existingIndex];
           const oldCp = updatedStats[oldIndex];
-          
+
           // Create merged counterparty with combined stats
           const mergedCp: CounterpartyStats = {
             name: newName,
-            transactionCount: existingCp.transactionCount + oldCp.transactionCount,
+            transactionCount:
+              existingCp.transactionCount + oldCp.transactionCount,
             totalDebit: existingCp.totalDebit + oldCp.totalDebit,
             totalCredit: existingCp.totalCredit + oldCp.totalCredit,
             totalVolume: existingCp.totalVolume + oldCp.totalVolume,
             netFlow: existingCp.netFlow + oldCp.netFlow,
-            avgTransactionSize: (existingCp.totalVolume + oldCp.totalVolume) / (existingCp.transactionCount + oldCp.transactionCount),
-            maxTransactionSize: Math.max(existingCp.maxTransactionSize, oldCp.maxTransactionSize),
-            firstTransactionDate: existingCp.firstTransactionDate < oldCp.firstTransactionDate ? existingCp.firstTransactionDate : oldCp.firstTransactionDate,
-            lastTransactionDate: existingCp.lastTransactionDate > oldCp.lastTransactionDate ? existingCp.lastTransactionDate : oldCp.lastTransactionDate,
+            avgTransactionSize:
+              (existingCp.totalVolume + oldCp.totalVolume) /
+              (existingCp.transactionCount + oldCp.transactionCount),
+            maxTransactionSize: Math.max(
+              existingCp.maxTransactionSize,
+              oldCp.maxTransactionSize
+            ),
+            firstTransactionDate:
+              existingCp.firstTransactionDate < oldCp.firstTransactionDate
+                ? existingCp.firstTransactionDate
+                : oldCp.firstTransactionDate,
+            lastTransactionDate:
+              existingCp.lastTransactionDate > oldCp.lastTransactionDate
+                ? existingCp.lastTransactionDate
+                : oldCp.lastTransactionDate,
             daysActive: Math.max(existingCp.daysActive, oldCp.daysActive),
-            frequency: (existingCp.transactionCount + oldCp.transactionCount) / Math.max(existingCp.daysActive, oldCp.daysActive),
-            description: existingCp.description || oldCp.description  // Keep the first available description
+            frequency:
+              (existingCp.transactionCount + oldCp.transactionCount) /
+              Math.max(existingCp.daysActive, oldCp.daysActive),
+            description: existingCp.description || oldCp.description, // Keep the first available description
           };
-          
+
           // Replace the existing counterparty with merged data and remove the old one
           updatedStats[existingIndex] = mergedCp;
           return updatedStats.filter((_, index) => index !== oldIndex);
         } else {
           // Normal case: just update the name
-          return prevStats.map(cp => 
+          return prevStats.map((cp) =>
             cp.name === oldName ? { ...cp, name: newName } : cp
           );
         }
       });
 
-      console.log(`Successfully renamed counterparty from "${oldName}" to "${newName}", ${result.affectedCount} transactions updated`);
+      console.log(
+        `Successfully renamed counterparty from "${oldName}" to "${newName}", ${result.affectedCount} transactions updated`
+      );
     } catch (error) {
       console.error("Error updating counterparty name:", error);
       alert(`Failed to update counterparty name: ${(error as Error).message}`);
@@ -703,8 +811,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   }
 
   return (
-
-<div className="space-y-6">
+    <div className="space-y-6">
       {/* Subtabs */}
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
@@ -796,7 +903,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                   </div>
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Debits</p>
+                  <p className="text-sm font-medium text-gray-600">
+                    Total Debits
+                  </p>
                   <p className="text-2xl font-semibold text-gray-900">
                     {formatCurrency(summaryMetrics.totalDebits)}
                   </p>
@@ -824,7 +933,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                   </div>
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Credits</p>
+                  <p className="text-sm font-medium text-gray-600">
+                    Total Credits
+                  </p>
                   <p className="text-2xl font-semibold text-gray-900">
                     {formatCurrency(summaryMetrics.totalCredits)}
                   </p>
@@ -837,7 +948,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                 <div className="flex-shrink-0">
                   <div
                     className={`w-8 h-8 ${
-                      summaryMetrics.netFlow >= 0 ? "bg-green-100" : "bg-red-100"
+                      summaryMetrics.netFlow >= 0
+                        ? "bg-green-100"
+                        : "bg-red-100"
                     } rounded-md flex items-center justify-center`}
                   >
                     <svg
@@ -984,7 +1097,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                 <div className="flex items-center space-x-2">
                   <select
                     value={selectedEntityId || ""}
-                    onChange={(e) => setSelectedEntityId(e.target.value || null)}
+                    onChange={(e) =>
+                      setSelectedEntityId(e.target.value || null)
+                    }
                     className="border border-gray-300 rounded-md px-3 py-2 text-sm"
                   >
                     <option value="">All Entities</option>
@@ -1049,8 +1164,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                       <YAxis
                         domain={[
                           0,
-                          Math.max(...sortedCounterparties.map((c) => c[sortBy])) *
-                            1.1,
+                          Math.max(
+                            ...sortedCounterparties.map((c) => c[sortBy])
+                          ) * 1.1,
                         ]}
                       />
                       <Tooltip
@@ -1146,7 +1262,13 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                       {sortedCounterparties.map((cp) => (
                         <tr key={cp.name} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <p className="font-medium">{cp.name}</p>
+                            <EditableCounterpartyName
+                              name={cp.name}
+                              description={cp.description}
+                              onSave={(newName) =>
+                                handleSaveCounterpartyName(cp.name, newName)
+                              }
+                            />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             {cp.transactionCount.toLocaleString()}
@@ -1162,7 +1284,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                           </td>
                           <td
                             className={`px-6 py-4 whitespace-nowrap text-sm ${
-                              cp.netFlow >= 0 ? "text-green-600" : "text-red-600"
+                              cp.netFlow >= 0
+                                ? "text-green-600"
+                                : "text-red-600"
                             }`}
                           >
                             {formatCurrency(cp.netFlow)}
@@ -1305,7 +1429,12 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                         Total Volume
                       </p>
                       <p className="text-2xl font-semibold text-gray-900">
-                        {formatCurrency(transactionTypeStats.reduce((sum, type) => sum + type.totalAmount, 0))}
+                        {formatCurrency(
+                          transactionTypeStats.reduce(
+                            (sum, type) => sum + type.totalAmount,
+                            0
+                          )
+                        )}
                       </p>
                     </div>
                   </div>
@@ -1353,24 +1482,37 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
-                          data={transactionTypeStats.map(stat => ({
+                          data={transactionTypeStats.map((stat) => ({
                             name: stat.type,
                             value: stat.count,
-                            fill: TRANSACTION_TYPE_COLORS[stat.type] || "#6B7280"
+                            fill:
+                              TRANSACTION_TYPE_COLORS[stat.type] || "#6B7280",
                           }))}
                           cx="50%"
                           cy="50%"
                           labelLine={false}
-                          label={({ name, percent }) => `${name} ${((percent as number) * 100).toFixed(0)}%`}
+                          label={({ name, percent }) =>
+                            `${name} ${((percent as number) * 100).toFixed(0)}%`
+                          }
                           outerRadius={80}
                           fill="#8884d8"
                           dataKey="value"
                         >
                           {transactionTypeStats.map((entry, index) => (
-                            <PieCell key={`cell-${index}`} fill={TRANSACTION_TYPE_COLORS[entry.type] || "#6B7280"} />
+                            <PieCell
+                              key={`cell-${index}`}
+                              fill={
+                                TRANSACTION_TYPE_COLORS[entry.type] || "#6B7280"
+                              }
+                            />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value) => [`${value} transactions`, "Count"]} />
+                        <Tooltip
+                          formatter={(value) => [
+                            `${value} transactions`,
+                            "Count",
+                          ]}
+                        />
                         <RechartsLegend />
                       </PieChart>
                     </ResponsiveContainer>
@@ -1385,9 +1527,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={transactionTypeStats.map(stat => ({
+                        data={transactionTypeStats.map((stat) => ({
                           ...stat,
-                          fill: TRANSACTION_TYPE_COLORS[stat.type] || "#6B7280"
+                          fill: TRANSACTION_TYPE_COLORS[stat.type] || "#6B7280",
                         }))}
                         margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
                       >
@@ -1400,10 +1542,20 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                           tick={{ fontSize: 12 }}
                         />
                         <YAxis />
-                        <Tooltip formatter={(value) => [formatCurrency(Number(value)), "Total Amount"]} />
+                        <Tooltip
+                          formatter={(value) => [
+                            formatCurrency(Number(value)),
+                            "Total Amount",
+                          ]}
+                        />
                         <Bar dataKey="totalAmount" name="Total Amount">
                           {transactionTypeStats.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={TRANSACTION_TYPE_COLORS[entry.type] || "#6B7280"} />
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={
+                                TRANSACTION_TYPE_COLORS[entry.type] || "#6B7280"
+                              }
+                            />
                           ))}
                         </Bar>
                       </BarChart>
@@ -1457,12 +1609,21 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                             <div className="flex items-center">
                               <div
                                 className="w-3 h-3 rounded-full mr-2"
-                                style={{ backgroundColor: TRANSACTION_TYPE_COLORS[typeStat.type] || "#6B7280" }}
+                                style={{
+                                  backgroundColor:
+                                    TRANSACTION_TYPE_COLORS[typeStat.type] ||
+                                    "#6B7280",
+                                }}
                               ></div>
                               <EditableTransactionType
                                 type={typeStat.type}
                                 description={typeStat.description}
-                                onSave={(newType) => handleSaveTransactionType(typeStat.type, newType)}
+                                onSave={(newType) =>
+                                  handleSaveTransactionType(
+                                    typeStat.type,
+                                    newType
+                                  )
+                                }
                                 predefinedTypes={PREDEFINED_TRANSACTION_TYPES}
                               />
                             </div>
@@ -1481,7 +1642,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                           </td>
                           <td
                             className={`px-6 py-4 whitespace-nowrap text-sm ${
-                              typeStat.netFlow >= 0 ? "text-green-600" : "text-red-600"
+                              typeStat.netFlow >= 0
+                                ? "text-green-600"
+                                : "text-red-600"
                             }`}
                           >
                             {formatCurrency(typeStat.netFlow)}

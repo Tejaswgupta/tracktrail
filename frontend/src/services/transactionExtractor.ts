@@ -38,7 +38,7 @@ export const transactionExtractorService = {
   setCustomRegexPattern(pattern: string | null) {
     if (pattern) {
       try {
-        this.customRegexPattern = new RegExp(pattern, 'i');
+        this.customRegexPattern = new RegExp(pattern, "i");
       } catch (error) {
         console.error("Invalid regex pattern:", error);
         this.customRegexPattern = null;
@@ -128,7 +128,9 @@ export const transactionExtractorService = {
           ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
           : -1,
         DIRECTION: columnMapping.DIRECTION
-          ? headers.findIndex((h) => h.trim() === columnMapping.DIRECTION?.trim())
+          ? headers.findIndex(
+              (h) => h.trim() === columnMapping.DIRECTION?.trim()
+            )
           : -1,
       };
       console.log("Using column mapping:", columnIndices);
@@ -270,7 +272,10 @@ export const transactionExtractorService = {
 
       // If a direction column is mapped, prefer it
       let directionFromCol: "DR" | "CR" | null = null;
-      if (columnIndices.DIRECTION !== undefined && columnIndices.DIRECTION >= 0) {
+      if (
+        columnIndices.DIRECTION !== undefined &&
+        columnIndices.DIRECTION >= 0
+      ) {
         const rawDir = columns[columnIndices.DIRECTION]?.trim() || "";
         directionFromCol = this.parseDirection(rawDir);
       }
@@ -311,9 +316,7 @@ export const transactionExtractorService = {
       throw new Error("No amount columns found or mapped");
     }
 
-    const counterparty = this.extractCounterparty(
-      description,
-      this.bankPreset);
+    const counterparty = this.extractCounterparty(description, this.bankPreset);
 
     console.log(
       `Parsed line ${lineNumber}: date=${txDate}, desc="${description}", amount=${amount}, direction=${direction}, counterparty="${counterparty}"`
@@ -475,11 +478,11 @@ export const transactionExtractorService = {
           inQuotes = !inQuotes;
           current += ch;
         }
-      } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+      } else if ((ch === "\n" || ch === "\r") && !inQuotes) {
         rows.push(current);
         current = "";
         // swallow CRLF pair
-        if (ch === '\r' && csvText[i + 1] === '\n') {
+        if (ch === "\r" && csvText[i + 1] === "\n") {
           i++;
         }
       } else {
@@ -512,20 +515,25 @@ export const transactionExtractorService = {
         errText = await response.text();
       } catch {}
       throw new Error(
-        `PDF preview extraction failed (${response.status}): ${errText || response.statusText}`
+        `PDF preview extraction failed (${response.status}): ${
+          errText || response.statusText
+        }`
       );
     }
 
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("text/csv")) {
       const body = await response.text().catch(() => "");
-      throw new Error(`Unexpected content-type from preview: ${contentType}. Body: ${body}`);
+      throw new Error(
+        `Unexpected content-type from preview: ${contentType}. Body: ${body}`
+      );
     }
 
     let csvText = await response.text();
     if (csvText.charCodeAt(0) === 0xfeff) csvText = csvText.slice(1);
     const lines = this.splitCSVRows(csvText);
-    if (lines.length === 0) throw new Error("No CSV content returned from PDF extraction");
+    if (lines.length === 0)
+      throw new Error("No CSV content returned from PDF extraction");
 
     const headers = this.parseCSVColumns(lines[0]);
 
@@ -557,8 +565,12 @@ export const transactionExtractorService = {
     try {
       // Set bank preset
       this.setBankPreset(bankPreset);
-      console.log(`Previewing transactions with bank preset:`,bankPreset,file,columnMapping);
-      
+      console.log(
+        `Previewing transactions with bank preset:`,
+        bankPreset,
+        file,
+        columnMapping
+      );
 
       // For PDF files, we need to first convert to CSV
       if (file.type === "application/pdf") {
@@ -579,14 +591,18 @@ export const transactionExtractorService = {
             errText = await response.text();
           } catch {}
           throw new Error(
-            `PDF extraction failed (${response.status}): ${errText || response.statusText}`
+            `PDF extraction failed (${response.status}): ${
+              errText || response.statusText
+            }`
           );
         }
 
         const contentType = response.headers.get("content-type") || "";
         if (!contentType.includes("text/csv")) {
           const body = await response.text().catch(() => "");
-          throw new Error(`Unexpected content-type: ${contentType}. Body: ${body}`);
+          throw new Error(
+            `Unexpected content-type: ${contentType}. Body: ${body}`
+          );
         }
 
         let csvText = await response.text();
@@ -601,37 +617,54 @@ export const transactionExtractorService = {
         const headers = this.parseCSVColumns(lines[0]);
 
         // Determine column indices either from provided mapping or via auto-detection
-        let columnIndices: Record<string, number> = {} as Record<string, number>;
+        let columnIndices: Record<string, number> = {} as Record<
+          string,
+          number
+        >;
         if (columnMapping) {
           // Use provided column mapping with exact string matching
           columnIndices = {
-            DATE: headers.findIndex((h) => h.trim() === columnMapping.DATE.trim()),
+            DATE: headers.findIndex(
+              (h) => h.trim() === columnMapping.DATE.trim()
+            ),
             DESCRIPTION: headers.findIndex(
               (h) => h.trim() === columnMapping.DESCRIPTION.trim()
             ),
             DEBIT: columnMapping.DEBIT
-              ? headers.findIndex((h) => h.trim() === columnMapping.DEBIT.trim())
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.DEBIT.trim()
+                )
               : -1,
             CREDIT: columnMapping.CREDIT
-              ? headers.findIndex((h) => h.trim() === columnMapping.CREDIT.trim())
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.CREDIT.trim()
+                )
               : -1,
             AMOUNT: columnMapping.AMOUNT
-              ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.AMOUNT?.trim()
+                )
               : -1,
             DIRECTION: columnMapping.DIRECTION
-              ? headers.findIndex((h) => h.trim() === columnMapping.DIRECTION?.trim())
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.DIRECTION?.trim()
+                )
               : -1,
           };
 
           // Validate that required columns were found
           if (columnIndices.DATE === -1) {
             throw new Error(
-              `Date column "${columnMapping.DATE}" not found in extracted headers: ${headers.join(", ")}`
+              `Date column "${
+                columnMapping.DATE
+              }" not found in extracted headers: ${headers.join(", ")}`
             );
           }
           if (columnIndices.DESCRIPTION === -1) {
             throw new Error(
-              `Description column "${columnMapping.DESCRIPTION}" not found in extracted headers: ${headers.join(", ")}`
+              `Description column "${
+                columnMapping.DESCRIPTION
+              }" not found in extracted headers: ${headers.join(", ")}`
             );
           }
           if (
@@ -646,7 +679,9 @@ export const transactionExtractorService = {
             if (columnMapping.AMOUNT && columnIndices.AMOUNT === -1)
               missingCols.push(`"${columnMapping.AMOUNT}"`);
             throw new Error(
-              `Amount columns not found: ${missingCols.join(", ")}. Headers: ${headers.join(", ")}`
+              `Amount columns not found: ${missingCols.join(
+                ", "
+              )}. Headers: ${headers.join(", ")}`
             );
           }
         } else {
@@ -655,7 +690,11 @@ export const transactionExtractorService = {
 
           if (!validation.isValid) {
             const missing = validation.missingColumns.join(", ");
-            throw new Error(`Extracted CSV missing required columns: ${missing}. Headers: ${headers.join(", ")}`);
+            throw new Error(
+              `Extracted CSV missing required columns: ${missing}. Headers: ${headers.join(
+                ", "
+              )}`
+            );
           }
 
           columnIndices = {
@@ -665,30 +704,27 @@ export const transactionExtractorService = {
             DESCRIPTION: headers.findIndex(
               (h) => h.trim() === validation.requiredColumns.DESCRIPTION.trim()
             ),
-            DEBIT:
-              validation.requiredColumns.DEBIT
-                ? headers.findIndex(
-                    (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
-                  )
-                : -1,
-            CREDIT:
-              validation.requiredColumns.CREDIT
-                ? headers.findIndex(
-                    (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
-                  )
-                : -1,
-            AMOUNT:
-              validation.requiredColumns.AMOUNT
-                ? headers.findIndex(
-                    (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
-                  )
-                : -1,
-            DIRECTION:
-              validation.requiredColumns.DIRECTION
-                ? headers.findIndex(
-                    (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
-                  )
-                : -1,
+            DEBIT: validation.requiredColumns.DEBIT
+              ? headers.findIndex(
+                  (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
+                )
+              : -1,
+            CREDIT: validation.requiredColumns.CREDIT
+              ? headers.findIndex(
+                  (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
+                )
+              : -1,
+            AMOUNT: validation.requiredColumns.AMOUNT
+              ? headers.findIndex(
+                  (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
+                )
+              : -1,
+            DIRECTION: validation.requiredColumns.DIRECTION
+              ? headers.findIndex(
+                  (h) =>
+                    h.trim() === validation.requiredColumns.DIRECTION!.trim()
+                )
+              : -1,
           };
         }
 
@@ -710,7 +746,9 @@ export const transactionExtractorService = {
             if (tx) transactions.push(tx);
           } catch (err) {
             errors.push(
-              `Line ${i + 1}: ${err instanceof Error ? err.message : "Unknown error"}`
+              `Line ${i + 1}: ${
+                err instanceof Error ? err.message : "Unknown error"
+              }`
             );
           }
         }
@@ -729,9 +767,8 @@ export const transactionExtractorService = {
         const transactions: ExtractedTransaction[] = [];
         const errors: string[] = [];
 
-
         // Parse header row to get column indices
-        console.log(`headers`,lines[0])
+        console.log(`headers`, lines[0]);
         const headers = this.parseCSVColumns(lines[0]);
 
         let columnIndices: Record<string, number> = {};
@@ -739,33 +776,47 @@ export const transactionExtractorService = {
         if (columnMapping) {
           // Use provided column mapping with exact string matching
           columnIndices = {
-            DATE: headers.findIndex((h) => h.trim() === columnMapping.DATE.trim()),
+            DATE: headers.findIndex(
+              (h) => h.trim() === columnMapping.DATE.trim()
+            ),
             DESCRIPTION: headers.findIndex(
               (h) => h.trim() === columnMapping.DESCRIPTION.trim()
             ),
             DEBIT: columnMapping.DEBIT
-              ? headers.findIndex((h) => h.trim() === columnMapping.DEBIT.trim())
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.DEBIT.trim()
+                )
               : -1,
             CREDIT: columnMapping.CREDIT
-              ? headers.findIndex((h) => h.trim() === columnMapping.CREDIT.trim())
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.CREDIT.trim()
+                )
               : -1,
             AMOUNT: columnMapping.AMOUNT
-              ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.AMOUNT?.trim()
+                )
               : -1,
             DIRECTION: columnMapping.DIRECTION
-              ? headers.findIndex((h) => h.trim() === columnMapping.DIRECTION?.trim())
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.DIRECTION?.trim()
+                )
               : -1,
           };
 
           // Validate that required columns were found
           if (columnIndices.DATE === -1) {
             throw new Error(
-              `Date column "${columnMapping.DATE}" not found in CSV headers: ${headers.join(", ")}`
+              `Date column "${
+                columnMapping.DATE
+              }" not found in CSV headers: ${headers.join(", ")}`
             );
           }
           if (columnIndices.DESCRIPTION === -1) {
             throw new Error(
-              `Description column "${columnMapping.DESCRIPTION}" not found in CSV headers: ${headers.join(", ")}`
+              `Description column "${
+                columnMapping.DESCRIPTION
+              }" not found in CSV headers: ${headers.join(", ")}`
             );
           }
           if (
@@ -780,7 +831,9 @@ export const transactionExtractorService = {
             if (columnMapping.AMOUNT && columnIndices.AMOUNT === -1)
               missingCols.push(`"${columnMapping.AMOUNT}"`);
             throw new Error(
-              `Amount columns not found: ${missingCols.join(", ")} in CSV headers: ${headers.join(", ")}`
+              `Amount columns not found: ${missingCols.join(
+                ", "
+              )} in CSV headers: ${headers.join(", ")}`
             );
           }
         } else {
@@ -790,7 +843,9 @@ export const transactionExtractorService = {
             const mapping = validation.suggestedMapping;
             columnIndices = {
               DATE: headers.findIndex((h) => h.trim() === mapping.DATE.trim()),
-              DESCRIPTION: headers.findIndex((h) => h.trim() === mapping.DESCRIPTION.trim()),
+              DESCRIPTION: headers.findIndex(
+                (h) => h.trim() === mapping.DESCRIPTION.trim()
+              ),
               DEBIT: mapping.DEBIT
                 ? headers.findIndex((h) => h.trim() === mapping.DEBIT.trim())
                 : -1,
@@ -801,7 +856,9 @@ export const transactionExtractorService = {
                 ? headers.findIndex((h) => h.trim() === mapping.AMOUNT?.trim())
                 : -1,
               DIRECTION: mapping.DIRECTION
-                ? headers.findIndex((h) => h.trim() === mapping.DIRECTION?.trim())
+                ? headers.findIndex(
+                    (h) => h.trim() === mapping.DIRECTION?.trim()
+                  )
                 : -1,
             };
           } else {
@@ -838,7 +895,7 @@ export const transactionExtractorService = {
           }
         }
 
-        console.log(`transactions`,transactions, errors);
+        console.log(`transactions`, transactions, errors);
 
         return this.buildExtractionResult(transactions, errors);
       } else {
@@ -847,7 +904,9 @@ export const transactionExtractorService = {
     } catch (error) {
       return {
         transactions: [],
-        errors: [error instanceof Error ? error.message : "Unknown preview error"],
+        errors: [
+          error instanceof Error ? error.message : "Unknown preview error",
+        ],
         summary: {
           totalTransactions: 0,
           totalCredits: 0,
@@ -902,7 +961,9 @@ export const transactionExtractorService = {
           errText = await response.text();
         } catch {}
         throw new Error(
-          `PDF extraction failed (${response.status}): ${errText || response.statusText}`
+          `PDF extraction failed (${response.status}): ${
+            errText || response.statusText
+          }`
         );
       }
 
@@ -910,7 +971,9 @@ export const transactionExtractorService = {
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.includes("text/csv")) {
         const body = await response.text().catch(() => "");
-        throw new Error(`Unexpected content-type: ${contentType}. Body: ${body}`);
+        throw new Error(
+          `Unexpected content-type: ${contentType}. Body: ${body}`
+        );
       }
 
       let csvText = await response.text();
@@ -921,7 +984,7 @@ export const transactionExtractorService = {
       // Split into lines while respecting quoted newlines
       const lines = this.splitCSVRows(csvText);
 
-      console.log(`lines`, lines)
+      console.log(`lines`, lines);
 
       if (lines.length === 0) {
         throw new Error("No CSV content returned from PDF extraction");
@@ -929,14 +992,16 @@ export const transactionExtractorService = {
 
       // 3) Parse headers
       const headers = this.parseCSVColumns(lines[0]);
-      console.log(`headers`, headers)
+      console.log(`headers`, headers);
 
       // 4) Determine column indices either from provided mapping or via auto-detection
       let columnIndices: Record<string, number> = {} as Record<string, number>;
       if (columnMapping) {
         // Use provided column mapping with exact string matching (same as CSV flow)
         columnIndices = {
-          DATE: headers.findIndex((h) => h.trim() === columnMapping.DATE.trim()),
+          DATE: headers.findIndex(
+            (h) => h.trim() === columnMapping.DATE.trim()
+          ),
           DESCRIPTION: headers.findIndex(
             (h) => h.trim() === columnMapping.DESCRIPTION.trim()
           ),
@@ -947,10 +1012,14 @@ export const transactionExtractorService = {
             ? headers.findIndex((h) => h.trim() === columnMapping.CREDIT.trim())
             : -1,
           AMOUNT: columnMapping.AMOUNT
-            ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
+            ? headers.findIndex(
+                (h) => h.trim() === columnMapping.AMOUNT?.trim()
+              )
             : -1,
           DIRECTION: columnMapping.DIRECTION
-            ? headers.findIndex((h) => h.trim() === columnMapping.DIRECTION?.trim())
+            ? headers.findIndex(
+                (h) => h.trim() === columnMapping.DIRECTION?.trim()
+              )
             : -1,
         };
 
@@ -975,12 +1044,16 @@ export const transactionExtractorService = {
         // Validate that required columns were found
         if (columnIndices.DATE === -1) {
           throw new Error(
-            `Date column "${columnMapping.DATE}" not found in extracted headers: ${headers.join(", ")}`
+            `Date column "${
+              columnMapping.DATE
+            }" not found in extracted headers: ${headers.join(", ")}`
           );
         }
         if (columnIndices.DESCRIPTION === -1) {
           throw new Error(
-            `Description column "${columnMapping.DESCRIPTION}" not found in extracted headers: ${headers.join(", ")}`
+            `Description column "${
+              columnMapping.DESCRIPTION
+            }" not found in extracted headers: ${headers.join(", ")}`
           );
         }
         if (
@@ -995,7 +1068,9 @@ export const transactionExtractorService = {
           if (columnMapping.AMOUNT && columnIndices.AMOUNT === -1)
             missingCols.push(`"${columnMapping.AMOUNT}"`);
           throw new Error(
-            `Amount columns not found: ${missingCols.join(", ")}. Headers: ${headers.join(", ")}`
+            `Amount columns not found: ${missingCols.join(
+              ", "
+            )}. Headers: ${headers.join(", ")}`
           );
         }
       } else {
@@ -1008,7 +1083,9 @@ export const transactionExtractorService = {
           return {
             transactions: [],
             errors: [
-              `Extracted CSV missing required columns: ${missing}. Headers: ${headers.join(", ")}`,
+              `Extracted CSV missing required columns: ${missing}. Headers: ${headers.join(
+                ", "
+              )}`,
             ],
             summary: {
               totalTransactions: 0,
@@ -1026,30 +1103,26 @@ export const transactionExtractorService = {
           DESCRIPTION: headers.findIndex(
             (h) => h.trim() === validation.requiredColumns.DESCRIPTION.trim()
           ),
-          DEBIT:
-            validation.requiredColumns.DEBIT
-              ? headers.findIndex(
-                  (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
-                )
-              : -1,
-          CREDIT:
-            validation.requiredColumns.CREDIT
-              ? headers.findIndex(
-                  (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
-                )
-              : -1,
-          AMOUNT:
-            validation.requiredColumns.AMOUNT
-              ? headers.findIndex(
-                  (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
-                )
-              : -1,
-          DIRECTION:
-            validation.requiredColumns.DIRECTION
-              ? headers.findIndex(
-                  (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
-                )
-              : -1,
+          DEBIT: validation.requiredColumns.DEBIT
+            ? headers.findIndex(
+                (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
+              )
+            : -1,
+          CREDIT: validation.requiredColumns.CREDIT
+            ? headers.findIndex(
+                (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
+              )
+            : -1,
+          AMOUNT: validation.requiredColumns.AMOUNT
+            ? headers.findIndex(
+                (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
+              )
+            : -1,
+          DIRECTION: validation.requiredColumns.DIRECTION
+            ? headers.findIndex(
+                (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
+              )
+            : -1,
         };
       }
 
@@ -1071,7 +1144,9 @@ export const transactionExtractorService = {
           if (tx) transactions.push(tx);
         } catch (err) {
           errors.push(
-            `Line ${i + 1}: ${err instanceof Error ? err.message : "Unknown error"}`
+            `Line ${i + 1}: ${
+              err instanceof Error ? err.message : "Unknown error"
+            }`
           );
         }
       }
@@ -1080,7 +1155,11 @@ export const transactionExtractorService = {
     } catch (error) {
       return {
         transactions: [],
-        errors: [error instanceof Error ? error.message : "Unknown PDF extraction error"],
+        errors: [
+          error instanceof Error
+            ? error.message
+            : "Unknown PDF extraction error",
+        ],
         summary: {
           totalTransactions: 0,
           totalCredits: 0,
@@ -1119,7 +1198,13 @@ export const transactionExtractorService = {
     if (v === "DR" || v === "DEBIT" || v === "D" || v.includes("WITHDRAW")) {
       return "DR";
     }
-    if (v === "CR" || v === "CREDIT" || v === "C" || v.includes("DEPOSIT") || v.includes("RECEIV")) {
+    if (
+      v === "CR" ||
+      v === "CREDIT" ||
+      v === "C" ||
+      v.includes("DEPOSIT") ||
+      v.includes("RECEIV")
+    ) {
       return "CR";
     }
     // Sometimes column contains values like "Dr"/"Cr" within a combined header; attempt to parse tokens
@@ -1132,7 +1217,11 @@ export const transactionExtractorService = {
     description: string,
     bankPreset: string = "generic"
   ): string | undefined {
-    console.log(`Extracting counterparty from description:`, description, bankPreset);
+    console.log(
+      `Extracting counterparty from description:`,
+      description,
+      bankPreset
+    );
     if (
       !description ||
       typeof description !== "string" ||
@@ -1172,24 +1261,40 @@ export const transactionExtractorService = {
         "^IMPS/P2A/[0-9]+(?:/[^/]*)*/([^/]+)$",
         "^TRF/[^/]+/([^/]+)",
       ],
+      bank_of_baroda: [],
+      canara: [],
+      cbi: [],
+      csb: [],
+      hdfc: [],
+      icici: [],
+      idbi: [],
+      indusind: [],
+      kalupur: [],
+      kotak: [],
+      pnb: [],
+      rbl: [],
+      sbi: [],
+      south_indian: [],
+      ujjvain: [],
+      yes: [],
       idfc: [
-          "^(?:NEFT|RTGS)/[^/]+/([^/]+)/[^/]+",
+        "^(?:NEFT|RTGS)/[^/]+/([^/]+)/[^/]+",
         "^IMPS-[^/]+/Fund Trf/[^/]+/([^/]+)/",
         "^TRANSFER (?:TO|FROM) DEPOSIT: CHEQUE NO\\. \\d+/FT TO (.+)",
         "^IFT/[^/]+/([^/\\r\\n]*)",
         "^CHQ Paid/[^/]+/([^/]+)/",
-        "^CASH DEPOSIT AT [^/]+ BY (.+)"
+        "^CASH DEPOSIT AT [^/]+ BY (.+)",
       ],
       federal: [
         "^(?:RTG|NFT|FTIMPS|IFN\\/CHRG|CHRG|dd\\sissue|DD:|BBYT:|TFR:?)\\/:?:\\s*(?:IFI\\/\\d+\\/)?([^\\/,:\\n]+)",
         "^(ALLOYS?|LLP|BANK|ICICI|SBI|HDFC|PAYMENT?|Pymt|SELF)$",
-        "^(?:TFR:|ID\\s*:\\s*\\[[^\\]]*\\]\\s*:|BillId\\s*:\\s*\\[[^\\]]*\\]\\s*:)\\s*\"?([^\",:\\n\\/]+?)\"?$",
+        '^(?:TFR:|ID\\s*:\\s*\\[[^\\]]*\\]\\s*:|BillId\\s*:\\s*\\[[^\\]]*\\]\\s*:)\\s*"?([^",:\\n\\/]+?)"?$',
         "^FT?\\s*IMPS\\/IFI\\/\\d+\\/([^\\/]+)\\/SUPP",
       ],
       indian: [
-        "\\/[A-Z]{3,}\\/([^\\\/-]+)(?:\\/-)?$",
+        "\\/[A-Z]{3,}\\/([^\\/-]+)(?:\\/-)?$",
         "RTGS\\s+\\S+\\s+(.+)$",
-        "^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/P[Aa]y\\/([^\\\/\\r\\n\"]+?)(?:\\/|$)",
+        '^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/P[Aa]y\\/([^\\/\\r\\n"]+?)(?:\\/|$)',
         "^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/IMPS\\/P2A\\/\\d+\\/ \\/P[Aa]y\\/([^\\/]+?)\\s*\\/BRANCH",
         "\\s([A-Z][A-Z0-9 &]+)$",
         "FROM (\\d{8,15})$",
@@ -1212,9 +1317,14 @@ export const transactionExtractorService = {
       // Build RegExp from the stored string pattern. Use 'i' to preserve case-insensitive behavior.
       let re: RegExp;
       try {
-        re = new RegExp(pattern, 'i');
+        re = new RegExp(pattern, "i");
       } catch (err) {
-        console.warn('Invalid regex pattern for bank preset', bankPreset, pattern, err);
+        console.warn(
+          "Invalid regex pattern for bank preset",
+          bankPreset,
+          pattern,
+          err
+        );
         continue;
       }
 
@@ -1228,8 +1338,6 @@ export const transactionExtractorService = {
 
     return undefined;
   },
-
-
 
   buildExtractionResult(
     transactions: ExtractedTransaction[],
@@ -1279,22 +1387,22 @@ export const transactionExtractorService = {
       // Save the current bank preset and custom regex
       const originalBankPreset = this.bankPreset;
       const originalCustomRegex = this.customRegexPattern;
-      
+
       // Set the new values for testing
       this.setBankPreset(bankPreset);
       this.setCustomRegexPattern(regexPattern);
-      
+
       // Extract transactions using the preview method
       const result = await this.previewTransactions(file, bankPreset);
-      
+
       // Restore the original values
       this.setBankPreset(originalBankPreset);
       this.customRegexPattern = originalCustomRegex;
-      
+
       // Return the counts
       return {
         extracted: result.transactions.length,
-        failed: result.errors.length
+        failed: result.errors.length,
       };
     } catch (error) {
       console.error("Error testing regex pattern:", error);
@@ -1308,18 +1416,17 @@ export const transactionExtractorService = {
   ): { extracted: number; failed: number } {
     try {
       // Create regex pattern
-      const pattern = new RegExp(regexPattern, 'i');
-      
+      const pattern = new RegExp(regexPattern, "i");
+
       let extracted = 0;
       let failed = 0;
-      
+
       // Test pattern on each description
       for (const description of descriptions) {
         try {
           const match = description.match(pattern);
           if (match && match[1]) {
             const extractedName = match[1].trim();
-          
           } else {
             failed++;
           }
@@ -1327,7 +1434,7 @@ export const transactionExtractorService = {
           failed++;
         }
       }
-      
+
       return { extracted, failed };
     } catch (error) {
       console.error("Invalid regex pattern:", error);
