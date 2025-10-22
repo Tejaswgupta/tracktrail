@@ -368,6 +368,22 @@ export const entitiesService = {
 
 // Accounts
 export const accountsService = {
+  async getById(accountId: string): Promise<Account | null> {
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("*")
+      .eq("account_id", accountId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return null; // Not found
+      }
+      throw error;
+    }
+    return data;
+  },
+
   async getByEntityId(entityId: string): Promise<AccountWithStatements[]> {
     const { data, error } = await supabase
       .from("accounts")

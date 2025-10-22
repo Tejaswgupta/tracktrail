@@ -2,7 +2,8 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { accountsService } from "@/services/database";
-import { useState } from "react";
+import { BANK_PRESETS, type BankPreset } from "@/constants/banks";
+import { useState, useRef, useEffect } from "react";
 
 interface CreateAccountModalProps {
   entityId: string;
@@ -19,7 +20,7 @@ export default function CreateAccountModal({
   const [formData, setFormData] = useState({
     accountNumber: "",
     accountName: "",
-    bankName: "",
+    bankName: "generic" as BankPreset,
     accountType: "Current" as
       | "Savings"
       | "Current"
@@ -38,6 +39,29 @@ export default function CreateAccountModal({
     status: "Active" as "Active" | "Closed" | "Frozen" | "Dormant",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isBankDropdownOpen, setIsBankDropdownOpen] = useState(false);
+  const bankDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        bankDropdownRef.current &&
+        !bankDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsBankDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  const handleBankSelect = (bankPreset: BankPreset) => {
+    setFormData((prev) => ({ ...prev, bankName: bankPreset }));
+    setIsBankDropdownOpen(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,9 +76,9 @@ export default function CreateAccountModal({
       await accountsService.create({
         entity_id: entityId,
         account_number: formData.accountNumber,
-        account_name: formData.accountName || `${formData.bankName} Account`,
+        account_name: formData.accountName || `${BANK_PRESETS[formData.bankName]} Account`,
         account_type: formData.accountType,
-        bank_name: formData.bankName,
+        bank_name: BANK_PRESETS[formData.bankName],
         branch_name: formData.branchName,
         ifsc_code: formData.ifscCode,
         opening_date: formData.openingDate || undefined,
@@ -193,23 +217,85 @@ export default function CreateAccountModal({
             </select>
           </div>
 
-          <div>
+          <div className="relative" ref={bankDropdownRef}>
             <label
               htmlFor="bankName"
               className="block text-sm font-medium text-gray-700 mb-2"
             >
               Bank Name *
             </label>
-            <input
-              type="text"
-              id="bankName"
-              name="bankName"
-              required
-              value={formData.bankName}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              placeholder="e.g., State Bank of India"
-            />
+            <button
+              type="button"
+              onClick={() => setIsBankDropdownOpen(!isBankDropdownOpen)}
+              disabled={isSubmitting}
+              className="relative w-full bg-white border border-gray-300 rounded-md shadow-sm pl-3 pr-10 py-2 text-left cursor-default focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+            >
+              <div className="flex items-center">
+                <span className="block truncate">
+                  {formData.bankName ? BANK_PRESETS[formData.bankName] : "Select a bank"}
+                </span>
+              </div>
+              <span className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                <svg
+                  className={`h-5 w-5 text-gray-400 transition-transform ${
+                    isBankDropdownOpen ? "rotate-180" : ""
+                  }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </span>
+            </button>
+
+            {isBankDropdownOpen && (
+              <div className="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none">
+                {Object.entries(BANK_PRESETS).map(([value, label]) => (
+                  <div
+                    key={value}
+                    onClick={() => handleBankSelect(value as BankPreset)}
+                    className={`cursor-pointer select-none relative py-3 pl-3 pr-9 hover:bg-blue-50 ${
+                      formData.bankName === value
+                        ? "text-blue-900 bg-blue-50"
+                        : "text-gray-900"
+                    }`}
+                  >
+                    <div className="flex flex-col">
+                      <span
+                        className={`block truncate ${
+                          formData.bankName === value
+                            ? "font-semibold"
+                            : "font-normal"
+                        }`}
+                      >
+                        {label}
+                      </span>
+                    </div>
+                    {formData.bankName === value && (
+                      <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-blue-600">
+                        <svg
+                          className="h-5 w-5"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

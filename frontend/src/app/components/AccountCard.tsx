@@ -1,12 +1,12 @@
 "use client";
 
+import { getBankPresetFromBankName, type BankPreset } from "@/constants/banks";
 import { accountsService, transactionsService } from "@/services/database";
 import { useEffect, useState } from "react";
 import ConfirmationDialog from "./ConfirmationDialog";
 import StatementList from "./StatementList";
-import TransactionsTable from "./TransactionsTable";
 import TransactionFixer from "./TransactionFixer";
-import type { Transaction } from "@/types/database";
+import TransactionsTable from "./TransactionsTable";
 
 interface Account {
   id: string;
@@ -33,9 +33,9 @@ export default function AccountCard({
   caseId,
 }: AccountCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<"statements" | "transactions" | "fix_failed">(
-    "statements"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "statements" | "transactions" | "fix_failed"
+  >("statements");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [transactionStats, setTransactionStats] = useState({
@@ -43,9 +43,12 @@ export default function AccountCard({
     successful: 0,
     failed: 0,
     successRate: 0,
-    failureRate: 0
+    failureRate: 0,
   });
   const [loadingStats, setLoadingStats] = useState(false);
+
+  // Get bank preset from bank name
+  const bankPreset = getBankPresetFromBankName(account.bankName) as BankPreset;
 
   const getAccountTypeColor = (type: string) => {
     switch (type) {
@@ -83,27 +86,30 @@ export default function AccountCard({
   useEffect(() => {
     const calculateTransactionStats = async () => {
       if (!isExpanded) return;
-      
+
       setLoadingStats(true);
       try {
-        const transactions = await transactionsService.getByAccountId(account.id);
-        
+        const transactions = await transactionsService.getByAccountId(
+          account.id
+        );
+
         // Calculate success/failure counts
         const total = transactions.length;
         const successful = transactions.filter(
-          tx => tx.counterparty_merged && tx.counterparty_merged.trim() !== ""
+          (tx) => tx.counterparty_merged && tx.counterparty_merged.trim() !== ""
         ).length;
         const failed = total - successful;
-        
-        const successRate = total > 0 ? Math.round((successful / total) * 100) : 0;
+
+        const successRate =
+          total > 0 ? Math.round((successful / total) * 100) : 0;
         const failureRate = total > 0 ? Math.round((failed / total) * 100) : 0;
-        
+
         setTransactionStats({
           total,
           successful,
           failed,
           successRate,
-          failureRate
+          failureRate,
         });
       } catch (error) {
         console.error("Error calculating transaction stats:", error);
@@ -286,7 +292,8 @@ export default function AccountCard({
                   <div className="ml-2">
                     <p className="text-xs font-medium text-gray-500">Success</p>
                     <p className="text-sm font-semibold text-green-600">
-                      {transactionStats.successful} ({transactionStats.successRate}%)
+                      {transactionStats.successful} (
+                      {transactionStats.successRate}%)
                     </p>
                   </div>
                 </div>
@@ -314,7 +321,8 @@ export default function AccountCard({
                   <div className="ml-2">
                     <p className="text-xs font-medium text-gray-500">Failed</p>
                     <p className="text-sm font-semibold text-red-600">
-                      {transactionStats.failed} ({transactionStats.failureRate}%)
+                      {transactionStats.failed} ({transactionStats.failureRate}
+                      %)
                     </p>
                   </div>
                 </div>
@@ -342,8 +350,8 @@ export default function AccountCard({
                   <div className="ml-2">
                     <p className="text-xs font-medium text-gray-500">Rate</p>
                     <p className="text-sm font-semibold text-purple-600">
-                      {transactionStats.total > 0 
-                        ? `${transactionStats.successRate}%` 
+                      {transactionStats.total > 0
+                        ? `${transactionStats.successRate}%`
                         : "N/A"}
                     </p>
                   </div>
@@ -391,7 +399,10 @@ export default function AccountCard({
             ) : activeTab === "transactions" ? (
               <TransactionsTable accountId={account.id} caseId={caseId} />
             ) : (
-              <TransactionFixer accountId={account.id} caseId={caseId} />
+              <TransactionFixer
+                accountId={account.id}
+                bankPreset={bankPreset}
+              />
             )}
           </div>
         </div>

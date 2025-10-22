@@ -1,11 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
+import OpenAI from "openai";
 
-// OpenAI API configuration
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+// OpenAI client configuration
+
+console.log("OpenAI API Key configured:", !!process.env.OPENAI_API_KEY);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: "https://model.thevotum.com/v1",
+});
 
 interface OptimizationRequest {
   prompt: string;
+  bankPreset?: string;
   model?: string;
   maxTokens?: number;
 }
@@ -20,115 +26,107 @@ interface OptimizationResponse {
 export async function POST(request: NextRequest) {
   try {
     // Validate API key
-    if (!OPENAI_API_KEY) {
-      console.error('OpenAI API key not configured');
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("OpenAI API key not configured");
       return NextResponse.json(
-        { error: 'AI optimization service not available' },
+        { error: "AI optimization service not available" },
         { status: 503 }
       );
     }
 
     const body: OptimizationRequest = await request.json();
-    const { prompt, model = 'gpt-4-turbo-preview', maxTokens = 500 } = body;
+    const { prompt } = body;
 
     if (!prompt) {
       return NextResponse.json(
-        { error: 'Prompt is required' },
+        { error: "Prompt is required" },
         { status: 400 }
       );
     }
 
-    console.log('Sending regex optimization request to AI:', { prompt: prompt.substring(0, 200) + '...', model });
+    const model = "gpt-mini";
+    const maxTokens = 2048;
 
-    // Call OpenAI API
-    const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a regex expert specializing in banking transaction patterns. Always respond with valid JSON only. Do not include explanations outside the JSON structure.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: maxTokens,
-        temperature: 0.3, // Lower temperature for more consistent regex patterns
-        response_format: { type: 'json_object' }, // Force JSON response
-      }),
+    console.log("Sending regex optimization request to AI:", {
+      promptLength: prompt.length,
+      prompt: prompt,
+      model,
+      maxTokens,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenAI API error:', response.status, errorText);
-      return NextResponse.json(
-        { error: `AI service error: ${response.statusText}` },
-        { status: response.status }
-      );
-    }
+    // Call OpenAI API using SDK
+    const completion = await openai.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a regex expert specializing in banking transaction patterns",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      // max_tokens: maxTokens,
+      temperature: 0.2, // Lower temperature for more consistent regex patterns
+    });
 
-    const result = await response.json();
-    console.log('AI response received:', result);
+    console.log("AI response received:", {
+      id: completion.id,
+      created: completion.created,
+      model: completion.model,
+      usage: completion.usage,
+    });
 
     // Extract the content from the AI response
-    const content = result.choices?.[0]?.message?.content;
+    const content = completion.choices?.[0]?.message?.content;
+    console.log("AI response content:", content);
     if (!content) {
-      console.error('No content in AI response');
+      console.error("No content in AI response");
       return NextResponse.json(
-        { error: 'No response from AI service' },
+        { error: "No response from AI service" },
         { status: 500 }
       );
     }
 
     // Parse the JSON response
-    let optimizationResult: OptimizationResponse;
+    let optimizationResult: string[];
     try {
       optimizationResult = JSON.parse(content);
     } catch (parseError) {
-      console.error('Failed to parse AI response as JSON:', content, parseError);
+      console.error(
+        "Failed to parse AI response as JSON:",
+        content,
+        parseError
+      );
       return NextResponse.json(
-        { error: 'Invalid response format from AI service' },
+        { error: "Invalid response format from AI service" },
         { status: 500 }
       );
     }
 
-    // Validate the response structure
-    const requiredFields = ['improvedPattern', 'explanation', 'expectedImprovement', 'confidence'];
-    const missingFields = requiredFields.filter(field => !(field in optimizationResult));
-
-    if (missingFields.length > 0) {
-      console.error('Missing required fields in AI response:', missingFields, optimizationResult);
-      return NextResponse.json(
-        { error: 'Incomplete response from AI service' },
-        { status: 500 }
-      );
+    // Validate and clean the improved patterns
+    const cleanedPatterns: string[] = [];
+    for (const pattern of optimizationResult) {
+      try {
+        // Remove inline flags like (?i) that conflict with the flag parameter
+        const cleanedPattern = pattern.replace(/\(\?[imsux]+\)/g, '');
+        new RegExp(cleanedPattern, "i");
+        console.log("Valid regex pattern from AI:", cleanedPattern);
+        cleanedPatterns.push(cleanedPattern);
+      } catch (regexError) {
+        console.error("Invalid regex pattern from AI:", pattern, regexError);
+        // Skip invalid patterns
+      }
     }
 
-    // Validate the improved pattern
-    try {
-      new RegExp(optimizationResult.improvedPattern, 'i');
-    } catch (regexError) {
-      console.error('Invalid regex pattern from AI:', optimizationResult.improvedPattern, regexError);
-      return NextResponse.json(
-        { error: 'Invalid regex pattern generated by AI' },
-        { status: 500 }
-      );
-    }
-
-    console.log('Regex optimization successful:', optimizationResult);
-    return NextResponse.json(optimizationResult);
-
+    return NextResponse.json(cleanedPatterns);
   } catch (error) {
-    console.error('Unexpected error in AI optimization:', error);
+    console.error("Unexpected error in AI optimization:", error);
+
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: "Internal server error in AI optimization service" },
       { status: 500 }
     );
   }
@@ -137,9 +135,10 @@ export async function POST(request: NextRequest) {
 // Health check endpoint
 export async function GET() {
   return NextResponse.json({
-    status: 'healthy',
-    service: 'AI Regex Optimization',
-    available: !!OPENAI_API_KEY,
+    status: "healthy",
+    service: "AI Regex Optimization (OpenAI SDK)",
+    available: !!process.env.OPENAI_API_KEY,
     timestamp: new Date().toISOString(),
+    sdkVersion: "5.x",
   });
 }

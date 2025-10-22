@@ -1,5 +1,14 @@
 "use client";
 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import type { BankPreset } from "@/constants/banks";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   caseTransactionsService,
@@ -9,26 +18,20 @@ import {
 import { BankStatement, CaseTransaction, Transaction } from "@/types/database";
 import { useEffect, useMemo, useState } from "react";
 import NotesPanel from "./NotesPanel";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from "@/components/ui/table";
-
 
 interface TransactionsTableProps {
   accountId: string;
   caseId?: string;
   onTransactionSelect?: (transaction: Transaction) => void;
+  onSelectionChange?: (selectedTransactions: Transaction[]) => void;
+  bankPreset?: BankPreset;
 }
 
 export default function TransactionsTable({
   accountId,
   caseId,
   onTransactionSelect,
+  onSelectionChange,
 }: TransactionsTableProps) {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -48,10 +51,57 @@ export default function TransactionsTable({
     Record<string, CaseTransaction | null>
   >({});
   const [notesOpen, setNotesOpen] = useState(false);
-  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editingTransactionId, setEditingTransactionId] = useState<
+    string | null
+  >(null);
   const [editingCounterparty, setEditingCounterparty] = useState<string>("");
+  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(
+    new Set()
+  );
 
-  const canCollaborate = useMemo(() => Boolean(caseId && user?.id), [caseId, user?.id]);
+  const canCollaborate = useMemo(
+    () => Boolean(caseId && user?.id),
+    [caseId, user?.id]
+  );
+
+  // Selection management functions
+  const handleTransactionSelect = (transactionId: string, checked: boolean) => {
+    setSelectedTransactions((prev) => {
+      const newSet = new Set(prev);
+      if (checked) {
+        newSet.add(transactionId);
+      } else {
+        newSet.delete(transactionId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allTxIds = new Set(transactions.map((t) => t.transaction_id));
+      setSelectedTransactions(allTxIds);
+    } else {
+      setSelectedTransactions(new Set());
+    }
+  };
+
+  const isAllSelected =
+    transactions.length > 0 &&
+    selectedTransactions.size === transactions.length;
+  const isPartiallySelected =
+    selectedTransactions.size > 0 &&
+    selectedTransactions.size < transactions.length;
+
+  // Notify parent of selection changes
+  useEffect(() => {
+    if (onSelectionChange) {
+      const selectedTxObjects = transactions.filter((t) =>
+        selectedTransactions.has(t.transaction_id)
+      );
+      onSelectionChange(selectedTxObjects);
+    }
+  }, [selectedTransactions, transactions, onSelectionChange]);
 
   useEffect(() => {
     loadData();
@@ -95,7 +145,10 @@ export default function TransactionsTable({
     if (!caseId) return; // safety
     try {
       if (value === "") {
-        await caseTransactionsService.deleteFlagByTransaction(caseId, transactionId);
+        await caseTransactionsService.deleteFlagByTransaction(
+          caseId,
+          transactionId
+        );
         setFlagsByTxId((prev) => ({ ...prev, [transactionId]: null }));
       } else {
         if (!user?.id) {
@@ -272,23 +325,25 @@ export default function TransactionsTable({
 
     try {
       // Find the transaction in our local state
-      const transaction = transactions.find(t => t.transaction_id === transactionId);
+      const transaction = transactions.find(
+        (t) => t.transaction_id === transactionId
+      );
       if (!transaction) {
         throw new Error("Transaction not found");
       }
 
       // Update the transaction in the database
-      const updatedTransaction = await transactionsService.updateTransactionCounterparty(
+      await transactionsService.updateTransactionCounterparty(
         transactionId,
         editingCounterparty,
         user.id
       );
 
       // Update the local state
-      setTransactions(prev => 
-        prev.map(t => 
-          t.transaction_id === transactionId 
-            ? { ...t, counterparty_merged: editingCounterparty } 
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.transaction_id === transactionId
+            ? { ...t, counterparty_merged: editingCounterparty }
             : t
         )
       );
@@ -298,7 +353,9 @@ export default function TransactionsTable({
       setEditingCounterparty("");
     } catch (error) {
       console.error("Failed to update counterparty:", error);
-      alert(error instanceof Error ? error.message : "Failed to update counterparty");
+      alert(
+        error instanceof Error ? error.message : "Failed to update counterparty"
+      );
     }
   };
 
@@ -398,12 +455,14 @@ export default function TransactionsTable({
           <div className="flex items-center">
             <div className="flex-shrink-0">
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center ${netFlow >= 0 ? "bg-green-100" : "bg-red-100"
-                  }`}
+                className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                  netFlow >= 0 ? "bg-green-100" : "bg-red-100"
+                }`}
               >
                 <svg
-                  className={`w-4 h-4 ${netFlow >= 0 ? "text-green-600" : "text-red-600"
-                    }`}
+                  className={`w-4 h-4 ${
+                    netFlow >= 0 ? "text-green-600" : "text-red-600"
+                  }`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -424,8 +483,9 @@ export default function TransactionsTable({
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">Net Flow</p>
               <p
-                className={`text-lg font-semibold ${netFlow >= 0 ? "text-green-600" : "text-red-600"
-                  }`}
+                className={`text-lg font-semibold ${
+                  netFlow >= 0 ? "text-green-600" : "text-red-600"
+                }`}
               >
                 {netFlow >= 0 ? "+" : ""}
                 {formatAmount(netFlow)}
@@ -507,15 +567,17 @@ export default function TransactionsTable({
                 <button
                   key={statement.statement_id}
                   onClick={() => handleStatementToggle(statement.statement_id)}
-                  className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${isSelected
-                    ? "bg-blue-100 text-blue-800 border border-blue-200"
-                    : "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200"
-                    }`}
+                  className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isSelected
+                      ? "bg-blue-100 text-blue-800 border border-blue-200"
+                      : "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200"
+                  }`}
                 >
                   <div className="flex items-center space-x-2">
                     <div
-                      className={`w-2 h-2 rounded-full ${isSelected ? "bg-blue-600" : "bg-gray-400"
-                        }`}
+                      className={`w-2 h-2 rounded-full ${
+                        isSelected ? "bg-blue-600" : "bg-gray-400"
+                      }`}
                     />
                     <span className="truncate max-w-[200px]">
                       {statement.file_name}
@@ -548,6 +610,57 @@ export default function TransactionsTable({
         </div>
       )}
 
+      {/* Selected Transactions Actions */}
+      {selectedTransactions.size > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <svg
+                  className="w-5 h-5 text-blue-600"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm font-medium text-blue-900">
+                  {selectedTransactions.size} transaction
+                  {selectedTransactions.size !== 1 ? "s" : ""} selected
+                </p>
+                <p className="text-xs text-blue-700">
+                  Total amount:{" "}
+                  {formatAmount(
+                    transactions
+                      .filter((t) => selectedTransactions.has(t.transaction_id))
+                      .reduce((sum, t) => sum + Math.abs(t.amount), 0)
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedTransactions(new Set())}
+                className="inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 text-gray-700"
+              >
+                Clear Selection
+              </button>
+              <button className="inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium border border-blue-300 bg-blue-100 hover:bg-blue-200 text-blue-800">
+                Export Selected
+              </button>
+              <button className="inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium border border-red-300 bg-red-100 hover:bg-red-200 text-red-800">
+                Flag as Suspicious
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Transactions Table */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
@@ -561,8 +674,8 @@ export default function TransactionsTable({
                   {selectedStatements.length === statements.length
                     ? `All ${statements.length} statements`
                     : selectedStatements.length === 0
-                      ? "No statements selected"
-                      : `${selectedStatements.length} of ${statements.length} statements`}
+                    ? "No statements selected"
+                    : `${selectedStatements.length} of ${statements.length} statements`}
                 </div>
               )}
               {caseId && (
@@ -602,6 +715,20 @@ export default function TransactionsTable({
             <Table className="min-w-full">
               <TableHeader className="bg-gray-50">
                 <TableRow>
+                  <TableHead className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected}
+                      ref={(el) => {
+                        if (el) {
+                          el.indeterminate = isPartiallySelected;
+                        }
+                      }}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      disabled={transactions.length === 0}
+                    />
+                  </TableHead>
                   <TableHead className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Date
                   </TableHead>
@@ -636,6 +763,24 @@ export default function TransactionsTable({
                     className={`${onTransactionSelect ? "cursor-pointer" : ""}`}
                     onClick={() => onTransactionSelect?.(transaction)}
                   >
+                    <TableCell
+                      className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedTransactions.has(
+                          transaction.transaction_id
+                        )}
+                        onChange={(e) =>
+                          handleTransactionSelect(
+                            transaction.transaction_id,
+                            e.target.checked
+                          )
+                        }
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                    </TableCell>
                     <TableCell className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {formatDate(transaction.tx_date)}
                     </TableCell>
@@ -649,12 +794,16 @@ export default function TransactionsTable({
                             <input
                               type="text"
                               value={editingCounterparty}
-                              onChange={(e) => setEditingCounterparty(e.target.value)}
+                              onChange={(e) =>
+                                setEditingCounterparty(e.target.value)
+                              }
                               className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
                               placeholder="Enter counterparty name"
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
-                                  handleSaveCounterparty(transaction.transaction_id);
+                                  handleSaveCounterparty(
+                                    transaction.transaction_id
+                                  );
                                 } else if (e.key === "Escape") {
                                   setEditingTransactionId(null);
                                   setEditingCounterparty("");
@@ -663,7 +812,11 @@ export default function TransactionsTable({
                               autoFocus
                             />
                             <button
-                              onClick={() => handleSaveCounterparty(transaction.transaction_id)}
+                              onClick={() =>
+                                handleSaveCounterparty(
+                                  transaction.transaction_id
+                                )
+                              }
                               className="text-xs bg-blue-500 text-white rounded px-2 py-1 hover:bg-blue-600"
                             >
                               Save
@@ -680,13 +833,24 @@ export default function TransactionsTable({
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
-                            <span className={transaction.counterparty_merged ? "" : "text-gray-400 italic"}>
-                              {transaction.counterparty_merged || "No counterparty"}
+                            <span
+                              className={
+                                transaction.counterparty_merged
+                                  ? ""
+                                  : "text-gray-400 italic"
+                              }
+                            >
+                              {transaction.counterparty_merged ||
+                                "No counterparty"}
                             </span>
                             <button
                               onClick={() => {
-                                setEditingTransactionId(transaction.transaction_id);
-                                setEditingCounterparty(transaction.counterparty_merged || "");
+                                setEditingTransactionId(
+                                  transaction.transaction_id
+                                );
+                                setEditingCounterparty(
+                                  transaction.counterparty_merged || ""
+                                );
                               }}
                               className="text-xs bg-gray-200 text-gray-700 rounded px-2 py-1 hover:bg-gray-300"
                             >
@@ -707,24 +871,32 @@ export default function TransactionsTable({
                     )} */}
                     <TableCell className="px-6 py-4 whitespace-nowrap">
                       <span
-                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${transaction.direction === "CR"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                          }`}
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          transaction.direction === "CR"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }`}
                       >
                         {transaction.direction === "CR" ? "Credit" : "Debit"}
                       </span>
                     </TableCell>
                     {caseId && (
                       <TableCell className="px-6 py-4 whitespace-nowrap text-sm">
-                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <div
+                          className="flex items-center gap-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {flagsByTxId[transaction.transaction_id] ? (
                             <span
                               className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${flagStyle(
-                                flagsByTxId[transaction.transaction_id] || undefined
+                                flagsByTxId[transaction.transaction_id] ||
+                                  undefined
                               )}`}
                             >
-                              {flagsByTxId[transaction.transaction_id]?.flag_type}
+                              {
+                                flagsByTxId[transaction.transaction_id]
+                                  ?.flag_type
+                              }
                             </span>
                           ) : (
                             <span className="text-gray-400 text-xs">-</span>
@@ -732,14 +904,23 @@ export default function TransactionsTable({
                           <select
                             className="text-xs border border-gray-300 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none"
                             disabled={!canCollaborate}
-                            value={flagsByTxId[transaction.transaction_id]?.flag_type || ""}
+                            value={
+                              flagsByTxId[transaction.transaction_id]
+                                ?.flag_type || ""
+                            }
                             onChange={(e) =>
                               handleFlagChange(
                                 transaction.transaction_id,
-                                (e.target.value as "" | CaseTransaction["flag_type"]) || ""
+                                (e.target.value as
+                                  | ""
+                                  | CaseTransaction["flag_type"]) || ""
                               )
                             }
-                            title={canCollaborate ? "Set or clear flag" : "Sign in to set flags"}
+                            title={
+                              canCollaborate
+                                ? "Set or clear flag"
+                                : "Sign in to set flags"
+                            }
                           >
                             <option value="">No flag</option>
                             <option value="Suspicious">Suspicious</option>
@@ -751,10 +932,11 @@ export default function TransactionsTable({
                       </TableCell>
                     )}
                     <TableCell
-                      className={`px-6 py-4 whitespace-nowrap text-sm font-medium text-right ${transaction.direction === "CR"
-                        ? "text-green-600"
-                        : "text-red-600"
-                        }`}
+                      className={`px-6 py-4 whitespace-nowrap text-sm font-medium text-right ${
+                        transaction.direction === "CR"
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
                     >
                       {transaction.direction === "CR" ? "+" : "-"}
                       {formatAmount(Math.abs(transaction.amount))}
@@ -827,7 +1009,7 @@ export default function TransactionsTable({
                       {Array.from(
                         { length: Math.min(5, totalPages) },
                         (_, i) => {
-                          let pageNum;
+                          let pageNum: number;
                           if (totalPages <= 5) {
                             pageNum = i + 1;
                           } else if (currentPage <= 3) {
@@ -842,10 +1024,11 @@ export default function TransactionsTable({
                             <button
                               key={pageNum}
                               onClick={() => goToPage(pageNum)}
-                              className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${currentPage === pageNum
-                                ? "z-10 bg-blue-50 border-blue-500 text-blue-600"
-                                : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50"
-                                }`}
+                              className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
+                                currentPage === pageNum
+                                  ? "z-10 bg-blue-50 border-blue-500 text-blue-600"
+                                  : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50"
+                              }`}
                             >
                               {pageNum}
                             </button>
@@ -880,7 +1063,11 @@ export default function TransactionsTable({
         )}
       </div>
       {caseId && (
-        <NotesPanel caseId={caseId} open={notesOpen} onClose={() => setNotesOpen(false)} />
+        <NotesPanel
+          caseId={caseId}
+          open={notesOpen}
+          onClose={() => setNotesOpen(false)}
+        />
       )}
     </div>
   );

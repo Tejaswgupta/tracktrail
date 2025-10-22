@@ -1,6 +1,6 @@
 "use client";
 
-
+import { getAvailableBankPresets, type BankPreset } from "@/constants/banks";
 import { transactionExtractorService } from "@/services/transactionExtractor";
 import { useEffect, useRef, useState } from "react";
 
@@ -11,23 +11,12 @@ interface BankOption {
 }
 
 interface BankSelectorProps {
-  selectedBank: string;
-  onBankChange: (bankPreset: string) => void;
+  selectedBank: BankPreset;
+  onBankChange: (bankPreset: BankPreset) => void;
   disabled?: boolean;
   onRegexTest?: (result: { extracted: number; failed: number }) => void;
   extractedData?: any[] | null;
 }
-
-function getAvailableBankPresets(): Record<string, string> {
-    return {
-      generic: "Generic",
-      axis: "Axis Bank",
-      federal: "Federal Bank",
-      indian: "Indian Bank",
-      jammu_and_kashmir_bank: "Jammu & Kashmir Bank",
-      idfc: "IDFC First Bank",
-    };
-  }
 
 export default function BankSelector({
   selectedBank,
@@ -42,7 +31,6 @@ export default function BankSelector({
   const [isTesting, setIsTesting] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const banks = getAvailableBankPresets();
-  const selectedBankInfo = Object.keys(banks).find((key) => banks[key] === selectedBank);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

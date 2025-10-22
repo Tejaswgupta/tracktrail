@@ -26,6 +26,7 @@ import type { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
 import { validateCSVColumns } from "@/utils/csvValidator";
 import { amlBackendClient } from "./amlBackendClient";
 import { parseAndConvertToISO } from "./dateParser";
+import { getBankRegexPatterns } from "@/constants/banks";
 
 export const transactionExtractorService = {
   bankPreset: "generic" as string,
@@ -1243,74 +1244,8 @@ export const transactionExtractorService = {
       return undefined;
     }
 
-    // Bank-specific regex patterns (stored as strings now)
-    // Patterns are converted to RegExp at match time with the 'i' flag
-    const bankPatterns: Record<string, string[]> = {
-      generic: [
-        "UPI\\/([^\\/]+)\\/[^\\/]+\\/?", // UPI/COUNTERPARTY/number/optional
-        "(?:NEFT|RTGS)\\/[^\\/]+\\/([^\\\\n]+)\\/?",
-        "POS\\/([^\\\\n]+)\\/?",
-        "IMPS(?:-[A-Z]+)?\\/[^\\/]+\\/[^\\/]+\\/([^\\\\n]+)\\/?",
-        "(?:.*\\/)?([^\\\\n]+)$", // General fallback: last segment after slash
-      ],
-      axis: [
-        "^NEFT/[A-Z0-9/]+/([^/]+)",
-        "^INB/NEFT/[A-Z0-9/]+/([^/]+)",
-        "^INB/RTGS/[A-Z0-9/]+/([^/]+)",
-        "^RTGS/[A-Z0-9/]+/([^/]+)",
-        "^IMPS/P2A/[0-9]+(?:/[^/]*)*/([^/]+)$",
-        "^TRF/[^/]+/([^/]+)",
-      ],
-      bank_of_baroda: [],
-      canara: [],
-      cbi: [],
-      csb: [],
-      hdfc: [],
-      icici: [],
-      idbi: [],
-      indusind: [],
-      kalupur: [],
-      kotak: [],
-      pnb: [],
-      rbl: [],
-      sbi: [],
-      south_indian: [],
-      ujjvain: [],
-      yes: [],
-      idfc: [
-        "^(?:NEFT|RTGS)/[^/]+/([^/]+)/[^/]+",
-        "^IMPS-[^/]+/Fund Trf/[^/]+/([^/]+)/",
-        "^TRANSFER (?:TO|FROM) DEPOSIT: CHEQUE NO\\. \\d+/FT TO (.+)",
-        "^IFT/[^/]+/([^/\\r\\n]*)",
-        "^CHQ Paid/[^/]+/([^/]+)/",
-        "^CASH DEPOSIT AT [^/]+ BY (.+)",
-      ],
-      federal: [
-        "^(?:RTG|NFT|FTIMPS|IFN\\/CHRG|CHRG|dd\\sissue|DD:|BBYT:|TFR:?)\\/:?:\\s*(?:IFI\\/\\d+\\/)?([^\\/,:\\n]+)",
-        "^(ALLOYS?|LLP|BANK|ICICI|SBI|HDFC|PAYMENT?|Pymt|SELF)$",
-        '^(?:TFR:|ID\\s*:\\s*\\[[^\\]]*\\]\\s*:|BillId\\s*:\\s*\\[[^\\]]*\\]\\s*:)\\s*"?([^",:\\n\\/]+?)"?$',
-        "^FT?\\s*IMPS\\/IFI\\/\\d+\\/([^\\/]+)\\/SUPP",
-      ],
-      indian: [
-        "\\/[A-Z]{3,}\\/([^\\/-]+)(?:\\/-)?$",
-        "RTGS\\s+\\S+\\s+(.+)$",
-        '^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/P[Aa]y\\/([^\\/\\r\\n"]+?)(?:\\/|$)',
-        "^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/IMPS\\/P2A\\/\\d+\\/ \\/P[Aa]y\\/([^\\/]+?)\\s*\\/BRANCH",
-        "\\s([A-Z][A-Z0-9 &]+)$",
-        "FROM (\\d{8,15})$",
-        "^TRANSFER TO (\\d{8,15})",
-        "Paid to SELF \\/BRANCH\\s*:\\s*([^\\/]+)",
-      ],
-      jammu_and_kashmir_bank: [
-        "^UPI\\/[A-Z]+\\/\\d+\\/[CD]R\\/([^\\/]+)\\/P2M", // UPI
-        "^NEFT-[A-Z0-9]+-([A-Za-z][A-Za-z\\s]*[A-Za-z])", // NEFT
-        "^RTGS-[A-Z0-9]+-([A-Za-z][A-Za-z\\s]*[A-Za-z])", // RTGS
-        "^mTFR\\/\\d+\\/([A-Za-z][A-Za-z\\s]*[A-Za-z])", // IMPS/mTFR
-      ],
-    };
-
-    // Get patterns for the selected bank preset
-    const patterns = bankPatterns[bankPreset] || bankPatterns.generic;
+    // Get patterns for the selected bank preset from constants
+    const patterns = getBankRegexPatterns(bankPreset);
     console.log(`Using patterns for bank preset "${bankPreset}":`, patterns);
 
     for (const pattern of patterns) {
@@ -1440,5 +1375,9 @@ export const transactionExtractorService = {
       console.error("Invalid regex pattern:", error);
       return { extracted: 0, failed: 0 };
     }
+  },
+
+  getCurrentBankPatterns(bankPreset: string = "generic"): string[] {
+    return getBankRegexPatterns(bankPreset);
   },
 };

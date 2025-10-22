@@ -2,7 +2,9 @@
 
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
 import { transactionExtractorService, type ExtractionResult } from "@/services/transactionExtractor";
+import { accountsService } from "@/services/database";
 import { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
+import { BANK_PRESETS, inferBankPresetFromBankName, type BankPreset } from "@/constants/banks";
 import { useState, useEffect } from "react";
 import BankSelector from "./BankSelector";
 import CSVColumnMapper from "./CSVColumnMapper";
@@ -22,12 +24,13 @@ export default function UploadStatementModal({
   const [file, setFile] = useState<File | null>(null);
   const [statementPeriodFrom, setStatementPeriodFrom] = useState("");
   const [statementPeriodTo, setStatementPeriodTo] = useState("");
-  const [selectedBank, setSelectedBank] = useState("generic");
+  const [selectedBank, setSelectedBank] = useState<BankPreset>("generic");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
     null
   );
   const [error, setError] = useState<string | null>(null);
+  const [isLoadingAccount, setIsLoadingAccount] = useState(false);
 
   // CSV validation states
   const [showColumnMapper, setShowColumnMapper] = useState(false);
@@ -37,8 +40,30 @@ export default function UploadStatementModal({
     null
   );
 
+  // Fetch account details and infer bank preset on component mount
+  useEffect(() => {
+    const fetchAccountAndInferBank = async () => {
+      if (!accountId) return;
 
-  const handleBankChange = (bankPreset: string) => {
+      setIsLoadingAccount(true);
+      try {
+        const account = await accountsService.getById(accountId);
+        if (account?.bank_name) {
+          const inferredBankPreset = inferBankPresetFromBankName(account.bank_name);
+          console.log(`Inferred bank preset "${inferredBankPreset}" from bank name "${account.bank_name}"`);
+          setSelectedBank(inferredBankPreset);
+        }
+      } catch (error) {
+        console.error("Error fetching account details:", error);
+      } finally {
+        setIsLoadingAccount(false);
+      }
+    };
+
+    fetchAccountAndInferBank();
+  }, [accountId]);
+
+  const handleBankChange = (bankPreset: BankPreset) => {
     setSelectedBank(bankPreset);
     // Reset preview when bank changes
   };
@@ -381,9 +406,67 @@ export default function UploadStatementModal({
             <BankSelector
               selectedBank={selectedBank}
               onBankChange={handleBankChange}
-              disabled={isUploading}
+              disabled={isUploading || isLoadingAccount}
               // extractedData={previewData?.transactions || null}
             />
+
+            {/* Bank inference info */}
+            {isLoadingAccount && (
+              <div className="rounded-md bg-blue-50 p-4">
+                <div className="flex">
+                  <svg
+                    className="animate-spin h-5 w-5 text-blue-400 mr-2"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  <div className="ml-2">
+                    <p className="text-sm text-blue-800">
+                      Automatically detecting bank type from account information...
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!isLoadingAccount && selectedBank !== "generic" && (
+              <div className="rounded-md bg-green-50 p-4">
+                <div className="flex">
+                  <svg
+                    className="h-5 w-5 text-green-400"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <div className="ml-3">
+                    <p className="text-sm text-green-800">
+                      Bank type automatically detected: {selectedBank && BANK_PRESETS[selectedBank]}
+                    </p>
+                    <p className="text-xs text-green-700 mt-1">
+                      You can change this if needed
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Statement Period */}
             <div className="grid grid-cols-2 gap-4">
