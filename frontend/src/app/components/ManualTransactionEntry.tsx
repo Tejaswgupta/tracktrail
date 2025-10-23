@@ -1,7 +1,10 @@
 "use client";
 
+import {
+  transactionExtractorService,
+  type ExtractedTransaction,
+} from "@/services/transactionExtractor";
 import { useState } from "react";
-import { transactionExtractorService, type ExtractedTransaction } from "@/services/transactionExtractor";
 
 interface ManualTransactionEntryProps {
   accountId: string;
@@ -74,10 +77,11 @@ export default function ManualTransactionEntry({
         }
 
         // Extract counterparty using the same logic as the service
-        const counterparty = transactionExtractorService.extractCounterparty(
-          tx.description,
-          bankPreset
-        );
+        const counterparty =
+          await transactionExtractorService.extractCounterparty(
+            tx.description,
+            bankPreset
+          );
 
         processedTransactions.push({
           tx_date: tx.tx_date,
@@ -91,7 +95,9 @@ export default function ManualTransactionEntry({
 
       onTransactionsAdded(processedTransactions);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add transactions");
+      setError(
+        err instanceof Error ? err.message : "Failed to add transactions"
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -99,7 +105,9 @@ export default function ManualTransactionEntry({
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <h2 className="text-xl font-bold text-gray-900 mb-4">Manual Transaction Entry</h2>
+      <h2 className="text-xl font-bold text-gray-900 mb-4">
+        Manual Transaction Entry
+      </h2>
       <p className="text-sm text-gray-600 mb-6">
         Enter the details for failed transactions manually
       </p>
