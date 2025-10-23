@@ -217,6 +217,9 @@ export default function TransactionFixer({
       for (const transactionId of selectedTransactions) {
         await extractCounterparty(transactionId);
       }
+
+      // Auto-save after extraction completes
+      await saveSelectedTransactions();
     } catch (error) {
       console.error(
         "Error extracting counterparty for selected transactions:",
@@ -784,8 +787,13 @@ The patterns should be case-insensitive and handle common variations in ${bankPr
 
       // Show summary
       alert(
-        `AI optimization applied successfully:\n✅ ${successCount} transactions fixed\n❌ ${failureCount} transactions failed\n📊 ${savedPatterns.length} selected patterns saved to database`
+        `AI optimization applied successfully:\n✅ ${successCount} transactions fixed\n❌ ${failureCount} transactions failed\n📊 ${savedPatterns.length} selected patterns saved to database\n💾 Auto-saving successful extractions...`
       );
+
+      // Auto-save successful extractions
+      if (successCount > 0) {
+        await saveSelectedTransactions();
+      }
     } catch (error) {
       console.error("Error applying AI-optimized patterns:", error);
       alert("Failed to apply AI-optimized patterns");

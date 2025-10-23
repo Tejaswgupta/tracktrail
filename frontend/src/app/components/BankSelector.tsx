@@ -27,7 +27,10 @@ export default function BankSelector({
 }: BankSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [customRegex, setCustomRegex] = useState("");
-  const [testResult, setTestResult] = useState<{ extracted: number; failed: number } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    extracted: number;
+    failed: number;
+  } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const banks = getAvailableBankPresets();
@@ -48,27 +51,27 @@ export default function BankSelector({
     };
   }, []);
 
-  const handleBankSelect = (bankPreset: string) => {
+  const handleBankSelect = (bankPreset: BankPreset) => {
     onBankChange(bankPreset);
     setIsOpen(false);
   };
 
   const handleRegexTest = () => {
     if (!customRegex || !extractedData || extractedData.length === 0) return;
-    
+
     setIsTesting(true);
     setTestResult(null);
-    
+
     try {
       // Extract descriptions from the data
-      const descriptions = extractedData.map(item => item.description || "");
-      
+      const descriptions = extractedData.map((item) => item.description || "");
+
       // Test the regex pattern
       const result = transactionExtractorService.testRegexOnDescriptions(
         descriptions,
         customRegex
       );
-      
+
       setTestResult(result);
       if (onRegexTest) {
         onRegexTest(result);
@@ -94,7 +97,9 @@ export default function BankSelector({
       >
         <div className="flex items-center">
           <span className="block truncate">
-            {selectedBank && banks[selectedBank] ? banks[selectedBank] : "Select a bank type"}
+            {selectedBank && banks[selectedBank]
+              ? banks[selectedBank]
+              : "Select a bank type"}
           </span>
         </div>
         <span className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
@@ -118,10 +123,10 @@ export default function BankSelector({
 
       {isOpen && (
         <div className="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none">
-            {Object.entries(banks).map(([value, label]) => (
-              <div
-                key={value}
-                onClick={() => handleBankSelect(value)}
+          {Object.entries(banks).map(([value, label]) => (
+            <div
+              key={value}
+              onClick={() => handleBankSelect(value as BankPreset)}
               className={`cursor-pointer select-none relative py-3 pl-3 pr-9 hover:bg-blue-50 ${
                 selectedBank === value
                   ? "text-blue-900 bg-blue-50"
@@ -131,14 +136,11 @@ export default function BankSelector({
               <div className="flex flex-col">
                 <span
                   className={`block truncate ${
-                    selectedBank === value
-                      ? "font-semibold"
-                      : "font-normal"
+                    selectedBank === value ? "font-semibold" : "font-normal"
                   }`}
                 >
                   {label}
                 </span>
-              
               </div>
               {selectedBank === value && (
                 <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-blue-600">
@@ -159,8 +161,6 @@ export default function BankSelector({
           ))}
         </div>
       )}
-
-
 
       {/* Custom Regex Input */}
       <div className="mt-4">
@@ -185,7 +185,7 @@ export default function BankSelector({
             {isTesting ? "Testing..." : "Test"}
           </button>
         </div>
-        
+
         {testResult && (
           <div className="mt-2 text-sm">
             <span className="text-green-600 font-medium">
