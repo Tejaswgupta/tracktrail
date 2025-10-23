@@ -88,6 +88,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     TransactionTypeStats[]
   >([]);
   const [transactionTypesLoading, setTransactionTypesLoading] = useState(false);
+  const [transactionPage, setTransactionPage] = useState(0);
+  const [totalTransactions, setTotalTransactions] = useState(0);
+  const TRANSACTIONS_PER_PAGE = 1000;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -103,23 +106,33 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     };
 
     fetchData();
-  }, []);
+  }, [transactionPage, selectedEntityId, caseId]);
 
-  // Fetch transactions (for summary metrics only)
+  // Fetch transactions with pagination
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         let data: Transaction[] = [];
+        let totalCount = 0;
+        
         if (selectedEntityId) {
-          data = await transactionsService.getByEntityId(selectedEntityId);
+          // Fetch paginated transactions for selected entity
+          data = await transactionsService.getByEntityId(selectedEntityId, {
+            offset: transactionPage * TRANSACTIONS_PER_PAGE,
+            limit: TRANSACTIONS_PER_PAGE,
+          });
+          totalCount = await transactionsService.getByEntityIdCount(selectedEntityId);
         } else {
-          // For large datasets, we'll only fetch a sample or use optimized queries
-          data = await transactionsService.getCaseTransactionsForAnalysis(
-            caseId,
-            ["transaction_id", "amount", "direction"]
-          );
+          // Fetch paginated transactions for case
+          data = await transactionsService.getByCaseId(caseId, {
+            offset: transactionPage * TRANSACTIONS_PER_PAGE,
+            limit: TRANSACTIONS_PER_PAGE,
+          });
+          totalCount = await transactionsService.getByCaseIdCount(caseId);
         }
+        
+        setTotalTransactions(totalCount);
         setTransactions(data);
       } catch (error) {
         console.error("Error fetching data:", error);

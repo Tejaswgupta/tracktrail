@@ -22,11 +22,11 @@ export interface ExtractionResult {
   };
 }
 
+import { getBankRegexPatterns } from "@/constants/banks";
 import type { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
 import { validateCSVColumns } from "@/utils/csvValidator";
 import { amlBackendClient } from "./amlBackendClient";
 import { parseAndConvertToISO } from "./dateParser";
-import { getBankRegexPatterns } from "@/constants/banks";
 
 export const transactionExtractorService = {
   bankPreset: "generic" as string,
@@ -202,7 +202,7 @@ export const transactionExtractorService = {
 
     for (let i = 0; i < dataLines.length; i++) {
       try {
-        const transaction = this.parseCSVLineWithMapping(
+        const transaction = await this.parseCSVLineWithMapping(
           dataLines[i],
           i + 2,
           columnIndices,
@@ -226,12 +226,12 @@ export const transactionExtractorService = {
     return this.buildExtractionResult(transactions, errors);
   },
 
-  parseCSVLineWithMapping(
+  async parseCSVLineWithMapping(
     line: string,
     lineNumber: number,
     columnIndices: Record<string, number>,
     originalIndex: number
-  ): ExtractedTransaction | null {
+  ): Promise<ExtractedTransaction | null> {
     if (!line.trim()) {
       return null; // Skip completely empty lines
     }
@@ -317,7 +317,10 @@ export const transactionExtractorService = {
       throw new Error("No amount columns found or mapped");
     }
 
-    const counterparty = this.extractCounterparty(description, this.bankPreset);
+    const counterparty = await this.extractCounterparty(
+      description,
+      this.bankPreset
+    );
 
     console.log(
       `Parsed line ${lineNumber}: date=${txDate}, desc="${description}", amount=${amount}, direction=${direction}, counterparty="${counterparty}"`
@@ -334,11 +337,11 @@ export const transactionExtractorService = {
     };
   },
 
-  parseCSVLine(
+  async parseCSVLine(
     line: string,
     lineNumber: number,
     originalIndex: number = lineNumber - 1
-  ): ExtractedTransaction | null {
+  ): Promise<ExtractedTransaction | null> {
     // Handle CSV parsing with proper quote handling
     const columns = this.parseCSVColumns(line);
 
@@ -415,7 +418,7 @@ export const transactionExtractorService = {
       description,
       amount,
       direction,
-      counterparty_merged: this.extractCounterparty(
+      counterparty_merged: await this.extractCounterparty(
         description,
         this.bankPreset
       ),
@@ -738,7 +741,7 @@ export const transactionExtractorService = {
 
         for (let i = 1; i < Math.min(50, lines.length); i++) {
           try {
-            const tx = this.parseCSVLineWithMapping(
+            const tx = await this.parseCSVLineWithMapping(
               lines[i],
               i + 1,
               columnIndices,
@@ -879,7 +882,7 @@ export const transactionExtractorService = {
         const dataLines = lines.slice(1);
         for (let i = 0; i < Math.min(50, dataLines.length); i++) {
           try {
-            const transaction = this.parseCSVLineWithMapping(
+            const transaction = await this.parseCSVLineWithMapping(
               dataLines[i],
               i + 2,
               columnIndices,
@@ -1135,7 +1138,7 @@ export const transactionExtractorService = {
 
       for (let i = 1; i < lines.length; i++) {
         try {
-          const tx = this.parseCSVLineWithMapping(
+          const tx = await this.parseCSVLineWithMapping(
             lines[i],
             i + 1,
             columnIndices,
@@ -1214,10 +1217,10 @@ export const transactionExtractorService = {
     return null;
   },
 
-  extractCounterparty(
+  async extractCounterparty(
     description: string,
     bankPreset: string = "generic"
-  ): string | undefined {
+  ): Promise<string | undefined> {
     console.log(
       `Extracting counterparty from description:`,
       description,
@@ -1244,8 +1247,8 @@ export const transactionExtractorService = {
       return undefined;
     }
 
-    // Get patterns for the selected bank preset from constants
-    const patterns = getBankRegexPatterns(bankPreset);
+    // Get patterns for the selected bank preset from database
+    const patterns = await getBankRegexPatterns(bankPreset);
     console.log(`Using patterns for bank preset "${bankPreset}":`, patterns);
 
     for (const pattern of patterns) {
@@ -1377,7 +1380,9 @@ export const transactionExtractorService = {
     }
   },
 
-  getCurrentBankPatterns(bankPreset: string = "generic"): string[] {
-    return getBankRegexPatterns(bankPreset);
+  async getCurrentBankPatterns(
+    bankPreset: string = "generic"
+  ): Promise<string[]> {
+    return await getBankRegexPatterns(bankPreset);
   },
 };

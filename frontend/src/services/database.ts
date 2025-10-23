@@ -527,34 +527,71 @@ export const transactionsService = {
     return result;
   },
 
-  async getByEntityId(entityId: string): Promise<Transaction[]> {
-    // Check cache first
+  async getByEntityId(
+    entityId: string,
+    options?: {
+      offset?: number;
+      limit?: number;
+    }
+  ): Promise<Transaction[]> {
+    // Check cache first (only for non-paginated requests)
     const cacheKey = `transactions-entity-${entityId}`;
-    const cached = transactionCache.get(cacheKey);
-    if (cached) {
-      return cached;
+    if (!options?.offset && !options?.limit) {
+      const cached = transactionCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("transactions")
       .select("*")
       .eq("entity_id", entityId)
       .order("tx_date", { ascending: false });
 
+    if (options?.offset !== undefined) {
+      query = query.range(
+        options.offset,
+        options.offset + (options.limit || 100) - 1
+      );
+    }
+
+    const { data, error } = await query;
+
     if (error) throw error;
     
     const result = data || [];
-    // Cache the result
-    transactionCache.set(cacheKey, result);
+    // Cache the result only for non-paginated requests
+    if (!options?.offset && !options?.limit) {
+      transactionCache.set(cacheKey, result);
+    }
     return result;
   },
 
-  async getByCaseId(caseId: string): Promise<Transaction[]> {
-    // Check cache first
+  async getByEntityIdCount(entityId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from("transactions")
+      .select("*", { count: "exact", head: true })
+      .eq("entity_id", entityId);
+
+    if (error) throw error;
+    return count || 0;
+  },
+
+  async getByCaseId(
+    caseId: string,
+    options?: {
+      offset?: number;
+      limit?: number;
+    }
+  ): Promise<Transaction[]> {
+    // Check cache first (only for non-paginated requests)
     const cacheKey = `transactions-case-${caseId}`;
-    const cached = transactionCache.get(cacheKey);
-    if (cached) {
-      return cached;
+    if (!options?.offset && !options?.limit) {
+      const cached = transactionCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
     }
 
     // First get all entity IDs for this case
@@ -571,19 +608,55 @@ export const transactionsService = {
 
     const entityIds = caseEntities.map((ce) => ce.entity_id);
 
-    // Then get transactions for those entities
-    const { data, error } = await supabase
+    // Build query with pagination
+    let query = supabase
       .from("transactions")
       .select("*")
       .in("entity_id", entityIds)
       .order("tx_date", { ascending: false });
 
+    if (options?.offset !== undefined) {
+      query = query.range(
+        options.offset,
+        options.offset + (options.limit || 100) - 1
+      );
+    }
+
+    const { data, error } = await query;
+
     if (error) throw error;
     
     const result = data || [];
-    // Cache the result
-    transactionCache.set(cacheKey, result);
+    // Cache the result only for non-paginated requests
+    if (!options?.offset && !options?.limit) {
+      transactionCache.set(cacheKey, result);
+    }
     return result;
+  },
+
+  async getByCaseIdCount(caseId: string): Promise<number> {
+    // First get all entity IDs for this case
+    const { data: caseEntities, error: caseError } = await supabase
+      .from("case_entities")
+      .select("entity_id")
+      .eq("case_id", caseId);
+
+    if (caseError) throw caseError;
+
+    if (!caseEntities || caseEntities.length === 0) {
+      return 0;
+    }
+
+    const entityIds = caseEntities.map((ce) => ce.entity_id);
+
+    // Get count of transactions
+    const { count, error } = await supabase
+      .from("transactions")
+      .select("*", { count: "exact", head: true })
+      .in("entity_id", entityIds);
+
+    if (error) throw error;
+    return count || 0;
   },
 
   
@@ -1566,3 +1639,279 @@ setInterval(() => {
     console.warn("Error during periodic cache cleanup:", error);
   }
 }, 10 * 60 * 1000); // 10 minutes
+
+// Bank Regex Patterns Service
+export interface BankRegexPattern {
+  id: string;
+  bank_preset: string;
+  pattern: string;
+  priority: number;
+  success_rate: number;
+  usage_count: number;
+  is_active: boolean;
+  is_ai_generated: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+  version: number;
+  notes?: string;
+}
+
+export interface PatternUsageStats {
+  patternId: string;
+  success: boolean;
+  description: string;
+  bankPreset: string;
+}
+
+// Create cache for regex patterns (10 minutes TTL)
+const regexPatternsCache = new SimpleCache<BankRegexPattern[]>(10 * 60 * 1000);
+
+export const regexPatternsService = {
+  // Get all active patterns for a specific bank preset
+  async getPatternsByBank(bankPreset: string): Promise<BankRegexPattern[]> {
+    const cacheKey = `regex_patterns_${bankPreset}`;
+
+    // Try cache first
+    const cached = regexPatternsCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("bank_regex_patterns")
+        .select("*")
+        .eq("bank_preset", bankPreset)
+        .eq("is_active", true)
+        .order("priority", { ascending: true })
+        .order("success_rate", { ascending: false });
+
+      if (error) throw error;
+
+      const patterns = data || [];
+
+      // Cache the result
+      regexPatternsCache.set(cacheKey, patterns);
+
+      return patterns;
+    } catch (error) {
+      console.error(`Error fetching patterns for bank ${bankPreset}:`, error);
+      return [];
+    }
+  },
+
+  // Get all patterns for a bank with performance statistics
+  async getPatternsWithStats(bankPreset: string): Promise<BankRegexPattern[]> {
+    try {
+      const { data, error } = await supabase
+        .from("bank_regex_patterns")
+        .select("*")
+        .eq("bank_preset", bankPreset)
+        .order("priority", { ascending: true })
+        .order("success_rate", { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error(`Error fetching patterns with stats for bank ${bankPreset}:`, error);
+      return [];
+    }
+  },
+
+  // Add a new regex pattern
+  async addPattern(
+    bankPreset: string,
+    pattern: string,
+    metadata: {
+      isAiGenerated?: boolean;
+      createdBy?: string;
+      notes?: string;
+      priority?: number;
+    } = {}
+  ): Promise<BankRegexPattern | null> {
+    try {
+      const { data, error } = await supabase
+        .from("bank_regex_patterns")
+        .insert({
+          bank_preset: bankPreset,
+          pattern,
+          is_ai_generated: metadata.isAiGenerated || false,
+          created_by: metadata.createdBy,
+          notes: metadata.notes,
+          priority: metadata.priority || 999, // Low priority for new patterns
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Clear cache for this bank to force refresh
+      regexPatternsCache.delete(`regex_patterns_${bankPreset}`);
+
+      console.log(`Added new regex pattern for ${bankPreset}:`, pattern);
+      return data;
+    } catch (error) {
+      console.error(`Error adding pattern for bank ${bankPreset}:`, error);
+      return null;
+    }
+  },
+
+  // Update pattern usage statistics
+  async updatePatternStats(stats: PatternUsageStats): Promise<void> {
+    try {
+      const { error } = await supabase.rpc('update_regex_pattern_stats', {
+        p_pattern_id: stats.patternId,
+        p_success: stats.success,
+        p_increment: 1
+      });
+
+      if (error) {
+        console.error("Error updating pattern stats:", error);
+        return;
+      }
+
+      // Clear cache for this bank to force refresh of updated stats
+      regexPatternsCache.delete(`regex_patterns_${stats.bankPreset}`);
+    } catch (error) {
+      console.error("Error updating pattern stats:", error);
+    }
+  },
+
+  // Add multiple patterns (useful for AI optimization results)
+  async addMultiplePatterns(
+    patterns: Array<{
+      bankPreset: string;
+      pattern: string;
+      isAiGenerated?: boolean;
+      createdBy?: string;
+      notes?: string;
+      priority?: number;
+    }>
+  ): Promise<BankRegexPattern[]> {
+    try {
+      const patternsToInsert = patterns.map(p => ({
+        bank_preset: p.bankPreset,
+        pattern: p.pattern,
+        is_ai_generated: p.isAiGenerated || false,
+        created_by: p.createdBy,
+        notes: p.notes,
+        priority: p.priority || 999,
+      }));
+
+      const { data, error } = await supabase
+        .from("bank_regex_patterns")
+        .insert(patternsToInsert)
+        .select();
+
+      if (error) throw error;
+
+      // Clear cache for all affected banks
+      const uniqueBanks = [...new Set(patterns.map(p => p.bankPreset))];
+      uniqueBanks.forEach(bank => {
+        regexPatternsCache.delete(`regex_patterns_${bank}`);
+      });
+
+      console.log(`Added ${patterns.length} regex patterns`);
+      return data || [];
+    } catch (error) {
+      console.error("Error adding multiple patterns:", error);
+      return [];
+    }
+  },
+
+  // Deactivate a pattern (soft delete)
+  async deactivatePattern(patternId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from("bank_regex_patterns")
+        .update({ is_active: false })
+        .eq("id", patternId);
+
+      if (error) throw error;
+
+      console.log(`Deactivated pattern: ${patternId}`);
+      return true;
+    } catch (error) {
+      console.error(`Error deactivating pattern ${patternId}:`, error);
+      return false;
+    }
+  },
+
+  // Update pattern priority
+  async updatePatternPriority(patternId: string, priority: number): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from("bank_regex_patterns")
+        .update({ priority })
+        .eq("id", patternId);
+
+      if (error) throw error;
+
+      console.log(`Updated pattern priority: ${patternId} -> ${priority}`);
+      return true;
+    } catch (error) {
+      console.error(`Error updating pattern priority ${patternId}:`, error);
+      return false;
+    }
+  },
+
+  // Get pattern performance analytics
+  async getPatternAnalytics(bankPreset?: string): Promise<{
+    totalPatterns: number;
+    activePatterns: number;
+    aiGeneratedPatterns: number;
+    avgSuccessRate: number;
+    topPerformingPatterns: BankRegexPattern[];
+  }> {
+    try {
+      let query = supabase.from("bank_regex_patterns").select("*");
+
+      if (bankPreset) {
+        query = query.eq("bank_preset", bankPreset);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      const patterns = data || [];
+      const activePatterns = patterns.filter(p => p.is_active);
+      const aiPatterns = patterns.filter(p => p.is_ai_generated);
+
+      const avgSuccessRate = activePatterns.length > 0
+        ? activePatterns.reduce((sum, p) => sum + p.success_rate, 0) / activePatterns.length
+        : 0;
+
+      const topPerforming = activePatterns
+        .sort((a, b) => b.success_rate - a.success_rate)
+        .slice(0, 5);
+
+      return {
+        totalPatterns: patterns.length,
+        activePatterns: activePatterns.length,
+        aiGeneratedPatterns: aiPatterns.length,
+        avgSuccessRate: parseFloat(avgSuccessRate.toFixed(2)),
+        topPerformingPatterns: topPerforming,
+      };
+    } catch (error) {
+      console.error("Error getting pattern analytics:", error);
+      return {
+        totalPatterns: 0,
+        activePatterns: 0,
+        aiGeneratedPatterns: 0,
+        avgSuccessRate: 0,
+        topPerformingPatterns: [],
+      };
+    }
+  },
+
+  // Clear cache for a specific bank or all banks
+  clearCache(bankPreset?: string): void {
+    if (bankPreset) {
+      regexPatternsCache.delete(`regex_patterns_${bankPreset}`);
+    } else {
+      regexPatternsCache.clear();
+    }
+  },
+};

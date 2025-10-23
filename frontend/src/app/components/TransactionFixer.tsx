@@ -1,7 +1,7 @@
 "use client";
 
 import type { BankPreset } from "@/constants/banks";
-import { transactionsService } from "@/services/database";
+import { regexPatternsService, transactionsService } from "@/services/database";
 import { transactionExtractorService } from "@/services/transactionExtractor";
 import type { Transaction } from "@/types/database";
 import { useEffect, useState } from "react";
@@ -41,12 +41,24 @@ export default function TransactionFixer({
   const [regexTestResult, setRegexTestResult] = useState<{
     extracted: number;
     failed: number;
+    samples: Array<{
+      description: string;
+      extracted: string | null;
+    }>;
   } | null>(null);
   const [aiOptimizing, setAiOptimizing] = useState(false);
   const [aiOptimizationResult, setAiOptimizationResult] = useState<{
     improvedPatterns: string[];
+    samples?: Array<{
+      pattern: string;
+      extractions: Array<{
+        description: string;
+        extracted: string | null;
+      }>;
+    }>;
   } | null>(null);
   const [showAiResult, setShowAiResult] = useState(false);
+  const [selectedAiPatterns, setSelectedAiPatterns] = useState<string[]>([]);
 
   // Load failed transactions
   useEffect(() => {
@@ -280,14 +292,13 @@ export default function TransactionFixer({
 
           try {
             await transactionsService.updateTransaction(transactionId, {
-              description: (
-                transaction.editedDescription || transaction.description
-              )?.trim(),
+              description:
+                transaction.editedDescription || transaction.description,
               amount: transaction.editedAmount || transaction.amount,
               tx_date: transaction.editedDate || transaction.tx_date,
               counterparty_merged:
-                transaction.editedCounterparty?.trim() ||
-                transaction.counterparty_merged?.trim(),
+                transaction.editedCounterparty ||
+                transaction.counterparty_merged,
             });
           } catch (saveError) {
             errors.push(
@@ -342,28 +353,47 @@ export default function TransactionFixer({
     setTestingRegex(true);
     try {
       // Get descriptions from selected transactions for testing
-      const descriptions = selectedTransactions
+      const selectedData = selectedTransactions
         .map((id) => {
           const tx = failedTransactions.find((t) => t.transaction_id === id);
-          return tx?.editedDescription || tx?.description || "";
+          return {
+            description: tx?.editedDescription || tx?.description || "",
+            transactionId: id,
+          };
         })
-        .filter((desc) => desc.length > 0);
+        .filter((item) => item.description.length > 0);
 
-      if (descriptions.length === 0) {
-        setRegexTestResult({ extracted: 0, failed: 0 });
+      if (selectedData.length === 0) {
+        setRegexTestResult({ extracted: 0, failed: 0, samples: [] });
         return;
       }
 
-      // Test regex pattern
-      const result = transactionExtractorService.testRegexOnDescriptions(
-        descriptions,
-        testRegexPattern
-      );
+      // Test regex pattern and get samples
+      const samples = selectedData.slice(0, 5).map((item) => {
+        try {
+          const regex = new RegExp(testRegexPattern, "i");
+          const match = item.description.match(regex);
+          const extracted = match?.[1] || null;
+          return {
+            description: item.description,
+            extracted,
+          };
+        } catch (error) {
+          return {
+            description: item.description,
+            extracted: null,
+          };
+        }
+      });
 
-      setRegexTestResult(result);
+      // Count successful extractions
+      const extracted = samples.filter((s) => s.extracted !== null).length;
+      const failed = samples.length - extracted;
+
+      setRegexTestResult({ extracted, failed, samples });
     } catch (error) {
       console.error("Error testing regex pattern:", error);
-      setRegexTestResult({ extracted: 0, failed: 0 });
+      setRegexTestResult({ extracted: 0, failed: 0, samples: [] });
     } finally {
       setTestingRegex(false);
     }
@@ -377,6 +407,10 @@ export default function TransactionFixer({
       // Set custom regex pattern temporarily
       transactionExtractorService.setCustomRegexPattern(regexPattern);
 
+      let successCount = 0;
+      let failureCount = 0;
+      let savedPattern: { id: string } | null = null;
+
       for (const transactionId of selectedTransactions) {
         const transaction = failedTransactions.find(
           (tx) => tx.transaction_id === transactionId
@@ -385,7 +419,7 @@ export default function TransactionFixer({
           const description =
             transaction.editedDescription || transaction.description || "";
           const extractedCounterparty =
-            transactionExtractorService.extractCounterparty(
+            await transactionExtractorService.extractCounterparty(
               description,
               bankPreset
             );
@@ -397,14 +431,58 @@ export default function TransactionFixer({
               extractedCounterparty
             );
             updateTransactionField(transactionId, "extractionError", undefined);
+            successCount++;
+
+            // Save the custom pattern to database on first success
+            if (!savedPattern) {
+              savedPattern = await regexPatternsService.addPattern(
+                bankPreset,
+                regexPattern,
+                {
+                  isAiGenerated: false,
+                  createdBy: "Manual-Entry",
+                  notes: "Custom pattern manually added by user",
+                  priority: 100, // Medium priority for manual patterns
+                }
+              );
+            }
+
+            // Track usage if pattern was saved
+            if (savedPattern) {
+              await regexPatternsService.updatePatternStats({
+                patternId: savedPattern.id,
+                success: true,
+                description,
+                bankPreset,
+              });
+            }
           } else {
             updateTransactionField(
               transactionId,
               "extractionError",
               "No match with custom regex"
             );
+            failureCount++;
+
+            // Track failed usage if pattern was saved
+            if (savedPattern) {
+              await regexPatternsService.updatePatternStats({
+                patternId: savedPattern.id,
+                success: false,
+                description,
+                bankPreset,
+              });
+            }
           }
         }
+      }
+
+      // Clear cache to ensure fresh patterns are loaded next time
+      if (savedPattern) {
+        regexPatternsService.clearCache(bankPreset);
+        console.log(
+          `Custom pattern saved to database with ${successCount} successes, ${failureCount} failures`
+        );
       }
     } catch (error) {
       console.error("Error applying custom regex:", error);
@@ -520,25 +598,54 @@ The patterns should be case-insensitive and handle common variations in ${bankPr
 
       // Validate the AI response structure - should be an array of patterns
       if (!Array.isArray(result) || result.length === 0) {
-        throw new Error("Invalid response format from AI service - expected array of regex patterns");
+        throw new Error(
+          "Invalid response format from AI service - expected array of regex patterns"
+        );
       }
 
       // Test each AI-generated pattern before applying
       for (const pattern of result) {
         if (typeof pattern !== "string" || pattern.trim() === "") {
-          throw new Error("Invalid pattern in AI response - expected non-empty strings");
+          throw new Error(
+            "Invalid pattern in AI response - expected non-empty strings"
+          );
         }
         try {
           new RegExp(pattern, "i");
         } catch (regexError) {
-          throw new Error(
-            `AI generated an invalid regex pattern: ${pattern}`
-          );
+          throw new Error(`AI generated an invalid regex pattern: ${pattern}`);
         }
       }
 
+      // Generate sample extractions for each AI pattern
+      const sampleDescriptions = selectedTxData
+        .slice(0, 3)
+        .map((tx) => tx.description);
+      const patternSamples = result.map((pattern) => {
+        try {
+          const regex = new RegExp(pattern, "i");
+          const extractions = sampleDescriptions.map((desc) => {
+            const match = desc.match(regex);
+            return {
+              description: desc,
+              extracted: match?.[1] || null,
+            };
+          });
+          return { pattern, extractions };
+        } catch (error) {
+          return {
+            pattern,
+            extractions: sampleDescriptions.map((desc) => ({
+              description: desc,
+              extracted: null,
+            })),
+          };
+        }
+      });
+
       setAiOptimizationResult({
-        improvedPatterns: result
+        improvedPatterns: result,
+        samples: patternSamples,
       });
       setShowAiResult(true);
 
@@ -554,13 +661,46 @@ The patterns should be case-insensitive and handle common variations in ${bankPr
   };
 
   const applyAiOptimizedPattern = async () => {
-    if (!aiOptimizationResult?.improvedPatterns || aiOptimizationResult.improvedPatterns.length === 0) return;
+    if (
+      !aiOptimizationResult?.improvedPatterns ||
+      selectedAiPatterns.length === 0
+    ) {
+      alert("Please select at least one AI pattern to apply");
+      return;
+    }
 
     try {
-      // Apply all AI-optimized patterns to selected transactions
+      // Apply only the selected AI-optimized patterns
       let successCount = 0;
       let failureCount = 0;
 
+      // First, save the selected AI-optimized patterns to the database
+      const selectedPatternData = selectedAiPatterns.map((pattern) => {
+        const index = aiOptimizationResult.improvedPatterns.indexOf(pattern);
+        return {
+          bankPreset,
+          pattern,
+          isAiGenerated: true,
+          createdBy: "AI-Optimization",
+          notes: `Auto-generated pattern for ${bankPreset} based on failed extractions`,
+          priority: index + 1, // Higher priority for earlier patterns
+        };
+      });
+
+      const savedPatterns = await regexPatternsService.addMultiplePatterns(
+        selectedPatternData
+      );
+
+      if (savedPatterns.length === 0) {
+        alert("Failed to save AI-optimized patterns to database");
+        return;
+      }
+
+      console.log(
+        `Saved ${savedPatterns.length} AI-optimized patterns to database`
+      );
+
+      // Apply patterns to transactions and track performance
       for (const transactionId of selectedTransactions) {
         const transaction = failedTransactions.find(
           (tx) => tx.transaction_id === transactionId
@@ -569,24 +709,43 @@ The patterns should be case-insensitive and handle common variations in ${bankPr
           const description =
             transaction.editedDescription || transaction.description || "";
 
-          // Try each pattern until one works
+          // Try each selected pattern until one works
           let extractedCounterparty: string | undefined = undefined;
-          for (const pattern of aiOptimizationResult.improvedPatterns) {
+          let successfulPattern: (typeof savedPatterns)[0] | undefined =
+            undefined;
+
+          for (const pattern of selectedAiPatterns) {
             transactionExtractorService.setCustomRegexPattern(pattern);
-            extractedCounterparty = transactionExtractorService.extractCounterparty(
-              description,
-              bankPreset
-            );
-            if (extractedCounterparty) break;
+            extractedCounterparty =
+              await transactionExtractorService.extractCounterparty(
+                description,
+                bankPreset
+              );
+            if (extractedCounterparty) {
+              // Find the corresponding saved pattern
+              successfulPattern = savedPatterns.find(
+                (p) => p.pattern === pattern
+              );
+              break;
+            }
           }
 
-          if (extractedCounterparty) {
+          if (extractedCounterparty && successfulPattern) {
             updateTransactionField(
               transactionId,
               "editedCounterparty",
               extractedCounterparty
             );
             updateTransactionField(transactionId, "extractionError", undefined);
+
+            // Track successful usage of the pattern
+            await regexPatternsService.updatePatternStats({
+              patternId: successfulPattern.id,
+              success: true,
+              description,
+              bankPreset,
+            });
+
             successCount++;
           } else {
             updateTransactionField(
@@ -594,24 +753,61 @@ The patterns should be case-insensitive and handle common variations in ${bankPr
               "extractionError",
               "AI patterns failed to extract"
             );
+
+            // Track failed usage if we have patterns
+            if (savedPatterns.length > 0) {
+              await regexPatternsService.updatePatternStats({
+                patternId: savedPatterns[0].id, // Track first pattern as failed
+                success: false,
+                description,
+                bankPreset,
+              });
+            }
+
             failureCount++;
           }
         }
       }
 
-      // Update the regex pattern field with the first pattern for manual editing
-      setRegexPattern(aiOptimizationResult.improvedPatterns[0]);
+      // Update the regex pattern field with the first selected pattern for manual editing
+      if (selectedAiPatterns.length > 0) {
+        setRegexPattern(selectedAiPatterns[0]);
+      }
 
-      // Clear the AI result
+      // Clear the AI result and selection
       setShowAiResult(false);
       setAiOptimizationResult(null);
+      setSelectedAiPatterns([]);
+
+      // Clear cache to ensure fresh patterns are loaded next time
+      regexPatternsService.clearCache(bankPreset);
 
       // Show summary
-      alert(`AI optimization applied successfully:\n✅ ${successCount} transactions fixed\n❌ ${failureCount} transactions failed`);
+      alert(
+        `AI optimization applied successfully:\n✅ ${successCount} transactions fixed\n❌ ${failureCount} transactions failed\n📊 ${savedPatterns.length} selected patterns saved to database`
+      );
     } catch (error) {
       console.error("Error applying AI-optimized patterns:", error);
       alert("Failed to apply AI-optimized patterns");
     }
+  };
+
+  const toggleAiPatternSelection = (pattern: string) => {
+    setSelectedAiPatterns((prev) =>
+      prev.includes(pattern)
+        ? prev.filter((p) => p !== pattern)
+        : [...prev, pattern]
+    );
+  };
+
+  const selectAllAiPatterns = () => {
+    if (aiOptimizationResult) {
+      setSelectedAiPatterns(aiOptimizationResult.improvedPatterns);
+    }
+  };
+
+  const clearAiPatternSelection = () => {
+    setSelectedAiPatterns([]);
   };
 
   const formatDate = (dateString: string) => {
@@ -857,14 +1053,53 @@ The patterns should be case-insensitive and handle common variations in ${bankPr
               </div>
 
               {regexTestResult && (
-                <div className="text-xs text-gray-600">
-                  <span className="text-green-600">
-                    Extracted: {regexTestResult.extracted}
-                  </span>
-                  {" • "}
-                  <span className="text-red-600">
-                    Failed: {regexTestResult.failed}
-                  </span>
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-600">
+                    <span className="text-green-600">
+                      Extracted: {regexTestResult.extracted}
+                    </span>
+                    {" • "}
+                    <span className="text-red-600">
+                      Failed: {regexTestResult.failed}
+                    </span>
+                  </div>
+
+                  {regexTestResult.samples.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-gray-700">
+                        Sample Extractions:
+                      </div>
+                      {regexTestResult.samples.map((sample, index) => (
+                        <div
+                          key={index}
+                          className="text-xs bg-gray-50 p-1 rounded border"
+                        >
+                          <div
+                            className="text-gray-600 truncate"
+                            title={sample.description}
+                          >
+                            "
+                            {sample.description.length > 50
+                              ? sample.description.substring(0, 50) + "..."
+                              : sample.description}
+                            "
+                          </div>
+                          <div className="flex items-center space-x-1">
+                            <span className="text-gray-500">→</span>
+                            {sample.extracted ? (
+                              <span className="text-green-600 font-medium">
+                                "{sample.extracted}"
+                              </span>
+                            ) : (
+                              <span className="text-red-600 italic">
+                                No match
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -889,7 +1124,7 @@ The patterns should be case-insensitive and handle common variations in ${bankPr
                     d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                   />
                 </svg>
-                AI-Optimized Regex Pattern
+                AI-Optimized Regex Patterns
               </h4>
               <button
                 onClick={() => setShowAiResult(false)}
@@ -911,49 +1146,157 @@ The patterns should be case-insensitive and handle common variations in ${bankPr
               </button>
             </div>
 
+            {/* Pattern Selection Controls */}
+            <div className="flex items-center justify-between mb-3 p-2 bg-white rounded border border-indigo-200">
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={selectAllAiPatterns}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={clearAiPatternSelection}
+                  className="text-xs text-gray-600 hover:text-gray-800"
+                >
+                  Clear Selection
+                </button>
+              </div>
+              <div className="text-xs text-gray-600">
+                {selectedAiPatterns.length} of{" "}
+                {aiOptimizationResult.improvedPatterns.length} selected
+              </div>
+            </div>
+
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Optimized Patterns ({aiOptimizationResult.improvedPatterns.length})
+                  Optimized Patterns (
+                  {aiOptimizationResult.improvedPatterns.length})
                 </label>
-                <div className="space-y-2">
-                  {aiOptimizationResult.improvedPatterns.map((pattern, index) => (
-                    <div key={index} className="p-2 bg-white border border-indigo-300 rounded text-xs font-mono text-indigo-700 break-all">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-gray-500 font-semibold">#{index + 1}:</span>
-                        <span>{pattern}</span>
-                      </div>
-                    </div>
-                  ))}
+                <div className="space-y-3">
+                  {aiOptimizationResult.improvedPatterns.map(
+                    (pattern, index) => {
+                      const patternSample = aiOptimizationResult.samples?.find(
+                        (s) => s.pattern === pattern
+                      );
+                      const isSelected = selectedAiPatterns.includes(pattern);
+                      return (
+                        <div
+                          key={index}
+                          className={`bg-white border rounded-lg overflow-hidden transition-all ${
+                            isSelected
+                              ? "border-indigo-500 shadow-md"
+                              : "border-indigo-300"
+                          }`}
+                        >
+                          <div
+                            className={`p-2 border-b cursor-pointer transition-colors ${
+                              isSelected
+                                ? "bg-indigo-100 border-indigo-300"
+                                : "bg-indigo-50 border-indigo-200"
+                            }`}
+                            onClick={() => toggleAiPatternSelection(pattern)}
+                          >
+                            <div className="flex items-center space-x-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() =>
+                                  toggleAiPatternSelection(pattern)
+                                }
+                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              <span className="text-gray-600 font-semibold text-xs">
+                                #{index + 1}:
+                              </span>
+                              <span className="text-xs font-mono text-indigo-700 break-all flex-1">
+                                {pattern}
+                              </span>
+                            </div>
+                          </div>
+                          {patternSample && (
+                            <div className="p-2 bg-gray-50 space-y-1">
+                              <div className="text-xs font-medium text-gray-700">
+                                Sample Extractions:
+                              </div>
+                              {patternSample.extractions.map(
+                                (extraction, extIndex) => (
+                                  <div key={extIndex} className="text-xs">
+                                    <div
+                                      className="text-gray-600 truncate mb-1"
+                                      title={extraction.description}
+                                    >
+                                      "
+                                      {extraction.description.length > 60
+                                        ? extraction.description.substring(
+                                            0,
+                                            60
+                                          ) + "..."
+                                        : extraction.description}
+                                      "
+                                    </div>
+                                    <div className="flex items-center space-x-1 ml-2">
+                                      <span className="text-gray-500">→</span>
+                                      {extraction.extracted ? (
+                                        <span className="text-green-600 font-medium">
+                                          "{extraction.extracted}"
+                                        </span>
+                                      ) : (
+                                        <span className="text-red-600 italic">
+                                          No match
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                  )}
                 </div>
               </div>
 
               <div className="text-xs text-gray-600 bg-white p-2 rounded border border-gray-200">
-                🤖 AI analyzed the failed transactions and generated {aiOptimizationResult.improvedPatterns.length} optimized regex pattern(s) to better extract counterparties.
+                🤖 AI analyzed the failed transactions and generated{" "}
+                {aiOptimizationResult.improvedPatterns.length} optimized regex
+                pattern(s) to better extract counterparties.
               </div>
 
               <div className="flex space-x-2 pt-2">
                 <button
                   onClick={applyAiOptimizedPattern}
-                  disabled={saving}
+                  disabled={saving || selectedAiPatterns.length === 0}
                   className="flex-1 px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
                 >
-                  Apply All Patterns to Selected
+                  {selectedAiPatterns.length === 0
+                    ? "Select Patterns to Apply"
+                    : selectedAiPatterns.length === 1
+                    ? "Apply 1 Selected Pattern"
+                    : `Apply ${selectedAiPatterns.length} Selected Patterns`}
                 </button>
                 <button
                   onClick={() => {
-                    setRegexPattern(aiOptimizationResult.improvedPatterns[0]);
-                    setShowAiResult(false);
-                    setShowBulkEdit(true);
+                    if (selectedAiPatterns.length > 0) {
+                      setRegexPattern(selectedAiPatterns[0]);
+                      setShowAiResult(false);
+                      setShowBulkEdit(true);
+                    }
                   }}
-                  className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+                  disabled={selectedAiPatterns.length === 0}
+                  className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
                 >
-                  Edit First Pattern
+                  Edit Selected
                 </button>
                 <button
                   onClick={() => {
                     setShowAiResult(false);
                     setAiOptimizationResult(null);
+                    setSelectedAiPatterns([]);
                   }}
                   className="px-3 py-1 text-xs border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
                 >

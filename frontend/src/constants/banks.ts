@@ -1,3 +1,5 @@
+import { regexPatternsService } from "@/services/database";
+
 // Bank presets and their display names
 export const BANK_PRESETS = {
   generic: "Generic",
@@ -49,14 +51,25 @@ export const BANK_NAME_TO_PRESET: Record<string, string> = {
   "YES Bank": "yes",
 };
 
-// Bank-specific regex patterns for counterparty extraction
-export const BANK_REGEX_PATTERNS: Record<string, string[]> = {
+// Helper function to get regex patterns for a bank preset from database
+export async function getBankRegexPatterns(bankPreset: string): Promise<string[]> {
+  try {
+    const patterns = await regexPatternsService.getPatternsByBank(bankPreset);
+    return patterns.map(p => p.pattern);
+  } catch (error) {
+    console.error(`Error fetching patterns for bank ${bankPreset}:`, error);
+    return [];
+  }
+}
+
+// Fallback patterns for emergency use (should rarely be needed)
+const FALLBACK_PATTERNS: Record<string, string[]> = {
   generic: [
     "UPI\\/([^\\/]+)\\/[^\\/]+\\/?", // UPI/COUNTERPARTY/number/optional
-    "(?:NEFT|RTGS)\\/[^\\/]+\\/([^\\\\n]+)\\/?",
-    "POS\\/([^\\\\n]+)\\/?",
-    "IMPS(?:-[A-Z]+)?\\/[^\\/]+\\/[^\\/]+\\/([^\\\\n]+)\\/?",
-    "(?:.*\\/)?([^\\\\n]+)$", // General fallback: last segment after slash
+    "(?:NEFT|RTGS)\\/[^\\/]+\\/([^\\n]+)\\/?",
+    "POS\\/([^\\n]+)\\/?",
+    "IMPS(?:-[A-Z]+)?\\/[^\\/]+\\/[^\\/]+\\/([^\\n]+)\\/?",
+    "(?:.*\\/)?([^\\n]+)$", // General fallback: last segment after slash
   ],
   axis: [
     "^NEFT/[A-Z0-9/]+/([^/]+)",
@@ -65,52 +78,6 @@ export const BANK_REGEX_PATTERNS: Record<string, string[]> = {
     "^RTGS/[A-Z0-9/]+/([^/]+)",
     "^IMPS/P2A/[0-9]+(?:/[^/]*)*/([^/]+)$",
     "^TRF/[^/]+/([^/]+)",
-  ],
-  bank_of_baroda: [],
-  canara: [],
-  cbi: [],
-  csb: [],
-  hdfc: [],
-  icici: [],
-  idbi: [],
-  indusind: [],
-  kalupur: [],
-  kotak: [],
-  pnb: [],
-  rbl: [],
-  sbi: [],
-  south_indian: [],
-  ujjvain: [],
-  yes: [],
-  idfc: [
-    "^(?:NEFT|RTGS)/[^/]+/([^/]+)/[^/]+",
-    "^IMPS-[^/]+/Fund Trf/[^/]+/([^/]+)/",
-    "^TRANSFER (?:TO|FROM) DEPOSIT: CHEQUE NO\\. \\d+/FT TO (.+)",
-    "^IFT/[^/]+/([^/\\r\\n]*)",
-    "^CHQ Paid/[^/]+/([^/]+)/",
-    "^CASH DEPOSIT AT [^/]+ BY (.+)",
-  ],
-  federal: [
-    "^(?:RTG|NFT|FTIMPS|IFN\\/CHRG|CHRG|dd\\sissue|DD:|BBYT:|TFR:?)\\/??:\\s*(?:IFI\\/\\d+\\/)?([^\\/:,\\n]+)",
-    "^(ALLOYS?|LLP|BANK|ICICI|SBI|HDFC|PAYMENT?|Pymt|SELF)$",
-    '^(?:TFR:|ID\\s*:\\s*\\[[^\\]]*\\]\\s*:|BillId\\s*:\\s*\\[[^\\]]*\\]\\s*:)\\s*"?([^",:\\n\\/]+?)\"?$',
-    "^FT?\\s*IMPS\\/IFI\\/\\d+\\/([^\\/]+)\\/SUPP",
-  ],
-  indian: [
-    "\\/[A-Z]{3,}\\/([^\\/-]+)(?:\\/-)?$",
-    "RTGS\\s+\\S+\\s+(.+)$",
-    '^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/P[Aa]y\\/([^\\/\\r\\n\"]+?)(?:\\/|$)',
-    "^TRANSFER (?:TO|FROM) \\d+ [^\\/]*?\\/IMPS\\/P2A\\/\\d+\\/ \\/P[Aa]y\\/([^\\/]+?)\\s*\\/BRANCH",
-    "\\s([A-Z][A-Z0-9 &]+)$",
-    "FROM (\\d{8,15})$",
-    "^TRANSFER TO (\\d{8,15})",
-    "Paid to SELF \\/BRANCH\\s*:\\s*([^\\/]+)",
-  ],
-  jammu_and_kashmir_bank: [
-    "^UPI\\/[A-Z]+\\/\\d+\\/[CD]R\\/([^\\/]+)\\/P2M", // UPI
-    "^NEFT-[A-Z0-9]+-([A-Za-z][A-Za-z\\s]*[A-Za-z])", // NEFT
-    "^RTGS-[A-Z0-9]+-([A-Za-z][A-Za-z\\s]*[A-Za-z])", // RTGS
-    "^mTFR\\/\\d+\\/([A-Za-z][A-Za-z\\s]*[A-Za-z])", // IMPS/mTFR
   ],
 };
 
@@ -135,10 +102,6 @@ export function getBankPresetFromBankName(bankName: string): string {
   return partialMatch ? BANK_NAME_TO_PRESET[partialMatch] : "generic";
 }
 
-// Helper function to get regex patterns for a bank preset
-export function getBankRegexPatterns(bankPreset: string): string[] {
-  return BANK_REGEX_PATTERNS[bankPreset] || BANK_REGEX_PATTERNS.generic;
-}
 
 // Helper function to automatically infer bank preset from bank name
 export function inferBankPresetFromBankName(bankName: string): BankPreset {
