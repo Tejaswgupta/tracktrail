@@ -53,6 +53,7 @@ export default function UploadStatementModalWizard({
   );
   const [deletedRows, setDeletedRows] = useState<number[]>([]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [pdfProcessingMode, setPdfProcessingMode] = useState<"line-spacing" | "table-spacing">("line-spacing");
 
   useEffect(() => {
     const fetchAccountAndInferBank = async () => {
@@ -152,39 +153,56 @@ export default function UploadStatementModalWizard({
         setIsProcessingFile(false);
       }
     } else if (selectedFile.type === "application/pdf") {
-      setIsProcessingFile(true);
-      try {
-        const validation =
-          await transactionExtractorService.previewPDFColumns(selectedFile);
-        setCsvValidation(validation);
+      // For PDFs, defer processing until next button is clicked
+      // Just validate that it's a PDF file
+      setIsProcessingFile(false);
+    }
+  };
 
-        if (validation.isValid && validation.suggestedMapping) {
-          const mapping = validation.suggestedMapping;
-          if (
-            mapping.DATE &&
-            mapping.DESCRIPTION &&
-            ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
-          ) {
-            setColumnMapping({
-              DATE: mapping.DATE,
-              DESCRIPTION: mapping.DESCRIPTION,
-              DEBIT: mapping.DEBIT,
-              CREDIT: mapping.CREDIT,
-              AMOUNT: mapping.AMOUNT,
-              DIRECTION: mapping.DIRECTION,
-            });
-          }
-        }
-      } catch (error) {
-        console.error("PDF preview error:", error);
-        setError(
-          error instanceof Error
-            ? error.message
-            : "Failed to preview PDF columns"
-        );
-      } finally {
-        setIsProcessingFile(false);
+  const handleProcessPDF = async (file: File) => {
+    setIsProcessingFile(true);
+    setError(null);
+
+    try {
+      let validation;
+
+      if (pdfProcessingMode === "line-spacing") {
+        // Use existing PDF extraction method
+        validation = await transactionExtractorService.previewPDFColumns(file);
+      } else {
+        // For table-spacing mode, we'll use the advanced method (placeholder for now)
+        // This will be implemented later in the backend
+        validation = await transactionExtractorService.previewPDFColumns(file);
       }
+
+      setCsvValidation(validation);
+
+      if (validation.isValid && validation.suggestedMapping) {
+        const mapping = validation.suggestedMapping;
+        if (
+          mapping.DATE &&
+          mapping.DESCRIPTION &&
+          ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
+        ) {
+          setColumnMapping({
+            DATE: mapping.DATE,
+            DESCRIPTION: mapping.DESCRIPTION,
+            DEBIT: mapping.DEBIT,
+            CREDIT: mapping.CREDIT,
+            AMOUNT: mapping.AMOUNT,
+            DIRECTION: mapping.DIRECTION,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("PDF processing error:", error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to process PDF"
+      );
+    } finally {
+      setIsProcessingFile(false);
     }
   };
 
@@ -253,6 +271,10 @@ export default function UploadStatementModalWizard({
       case 1:
         return !!file && !isProcessingFile;
       case 2:
+        // For PDFs, we need column mapping after processing
+        if (file && file.type === "application/pdf") {
+          return !!columnMapping;
+        }
         return !!columnMapping;
       case 3:
         return !!selectedBank;
@@ -263,8 +285,12 @@ export default function UploadStatementModalWizard({
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep < 4) {
+      // If we have a PDF file and moving from step 1, process it first
+      if (currentStep === 1 && file && file.type === "application/pdf") {
+        await handleProcessPDF(file);
+      }
       setCurrentStep(currentStep + 1);
     }
   };
@@ -320,6 +346,8 @@ export default function UploadStatementModalWizard({
               onFileSelect={handleFileSelect}
               disabled={isUploading}
               isProcessing={isProcessingFile}
+              pdfProcessingMode={pdfProcessingMode}
+              onPdfProcessingModeChange={setPdfProcessingMode}
             />
           )}
 
