@@ -9,6 +9,34 @@ import { transactionExtractorService } from "./transactionExtractor";
 
 const supabase = createClient();
 
+/**
+ * Clean cell values by removing HTML tags, styling, and normalizing whitespace
+ */
+function cleanCellValue(cellValue: any): string {
+  if (cellValue === null || cellValue === undefined) {
+    return '';
+  }
+
+  // Convert to string
+  const stringValue = String(cellValue);
+
+  // Remove HTML tags
+  const withoutHTML = stringValue.replace(/<[^>]*>/g, '');
+
+  // Remove common styling artifacts and extra whitespace
+  const cleaned = withoutHTML
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return cleaned;
+}
+
 export interface UploadProgress {
   loaded: number;
   total: number;
@@ -62,8 +90,17 @@ export const fileUploadService = {
       
       const worksheet = workbook.Sheets[firstSheetName];
       
-      // Convert sheet to CSV format
-      const csvText = XLSX.utils.sheet_to_csv(worksheet);
+      // Convert sheet to JSON first to clean the data, then to CSV
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+
+      // Clean HTML tags and styling from cell values
+      const cleanedData = jsonData.map((row: any) =>
+        Array.isArray(row) ? row.map(cell => cleanCellValue(cell)) : row
+      );
+
+      // Convert cleaned data back to CSV
+      const csvText = XLSX.utils.aoa_to_sheet(cleanedData) ?
+        XLSX.utils.sheet_to_csv(XLSX.utils.aoa_to_sheet(cleanedData)) : '';
       
       if (!csvText || !csvText.trim()) {
         throw new Error("Excel sheet is empty");
