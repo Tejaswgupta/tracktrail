@@ -57,6 +57,11 @@ async def extract_pdf_to_csv(
         )
 
         extracted_data = extract_tables_from_pdf(tmp_path, method=extraction_method)
+
+        if extracted_data is None:
+            logger.warning("PDF extraction returned None - no tables found")
+            extracted_data = []
+
         logger.info(f"Extracted {len(extracted_data)} tables from PDF")
 
         filtered_rows = []

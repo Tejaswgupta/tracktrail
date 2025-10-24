@@ -1,11 +1,15 @@
 "use client";
 
-import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
-import { transactionExtractorService, type ExtractionResult } from "@/services/transactionExtractor";
+import {
+  BANK_PRESETS,
+  inferBankPresetFromBankName,
+  type BankPreset,
+} from "@/constants/banks";
 import { accountsService } from "@/services/database";
+import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
+import { transactionExtractorService } from "@/services/transactionExtractor";
 import { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
-import { BANK_PRESETS, inferBankPresetFromBankName, type BankPreset } from "@/constants/banks";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import BankSelector from "./BankSelector";
 import CSVColumnMapper from "./CSVColumnMapper";
 import PreviewDataDisplay from "./PreviewDataDisplay";
@@ -49,8 +53,12 @@ export default function UploadStatementModal({
       try {
         const account = await accountsService.getById(accountId);
         if (account?.bank_name) {
-          const inferredBankPreset = inferBankPresetFromBankName(account.bank_name);
-          console.log(`Inferred bank preset "${inferredBankPreset}" from bank name "${account.bank_name}"`);
+          const inferredBankPreset = inferBankPresetFromBankName(
+            account.bank_name
+          );
+          console.log(
+            `Inferred bank preset "${inferredBankPreset}" from bank name "${account.bank_name}"`
+          );
           setSelectedBank(inferredBankPreset);
         }
       } catch (error) {
@@ -125,14 +133,15 @@ export default function UploadStatementModal({
         // For PDFs, run a preview to get headers and suggested mapping
         try {
           console.log("Previewing PDF columns:", selectedFile.name);
-          const validation = await transactionExtractorService.previewPDFColumns(
-            selectedFile
-          );
+          const validation =
+            await transactionExtractorService.previewPDFColumns(selectedFile);
           console.log("PDF preview validation result:", validation);
           setCsvValidation(validation);
 
           if (!validation.isValid) {
-            console.log("PDF column detection incomplete, showing column mapper");
+            console.log(
+              "PDF column detection incomplete, showing column mapper"
+            );
             setShowColumnMapper(true);
           } else if (validation.suggestedMapping) {
             const mapping = validation.suggestedMapping;
@@ -435,7 +444,8 @@ export default function UploadStatementModal({
                   </svg>
                   <div className="ml-2">
                     <p className="text-sm text-blue-800">
-                      Automatically detecting bank type from account information...
+                      Automatically detecting bank type from account
+                      information...
                     </p>
                   </div>
                 </div>
@@ -458,7 +468,8 @@ export default function UploadStatementModal({
                   </svg>
                   <div className="ml-3">
                     <p className="text-sm text-green-800">
-                      Bank type automatically detected: {selectedBank && BANK_PRESETS[selectedBank]}
+                      Bank type automatically detected:{" "}
+                      {selectedBank && BANK_PRESETS[selectedBank]}
                     </p>
                     <p className="text-xs text-green-700 mt-1">
                       You can change this if needed
@@ -608,10 +619,12 @@ export default function UploadStatementModal({
                   </svg>
                   <div className="ml-3">
                     <p className="text-sm text-green-800">
-                      File format validated successfully! All required columns found.
+                      File format validated successfully! All required columns
+                      found.
                     </p>
                     <p className="text-xs text-green-700 mt-1">
-                      A column mapping was auto-applied. You can adjust it if needed.
+                      A column mapping was auto-applied. You can adjust it if
+                      needed.
                     </p>
                   </div>
                 </div>
@@ -627,38 +640,36 @@ export default function UploadStatementModal({
           )}
 
         {/* Column Mapping Success Message */}
-            {columnMapping && (
-              <div className="rounded-md bg-blue-50 p-4">
-                <div className="flex">
-                  <svg
-                    className="h-5 w-5 text-blue-400"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <div className="ml-3">
-                    <p className="text-sm text-blue-800">
-                      Column mapping configured successfully! Ready to upload.
-                    </p>
-                  </div>
-                </div>
+        {columnMapping && (
+          <div className="rounded-md bg-blue-50 p-4">
+            <div className="flex">
+              <svg
+                className="h-5 w-5 text-blue-400"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              <div className="ml-3">
+                <p className="text-sm text-blue-800">
+                  Column mapping configured successfully! Ready to upload.
+                </p>
               </div>
-            )}
+            </div>
+          </div>
+        )}
 
-            {/* Preview Data */}
-              <PreviewDataDisplay 
-              file={file}
-              bankPreset={selectedBank}
-              columnMapping={columnMapping}
-              csvValidation={csvValidation}
-              />
-
-           
+        {/* Preview Data */}
+        <PreviewDataDisplay
+          file={file}
+          bankPreset={selectedBank}
+          columnMapping={columnMapping}
+          csvValidation={csvValidation}
+        />
       </div>
     </div>
   );

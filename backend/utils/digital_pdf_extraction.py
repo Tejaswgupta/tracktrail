@@ -1,9 +1,9 @@
-import re
-import fitz
 import logging
-from typing import List, Dict, Tuple
-import tabula
+import re
+from typing import Dict, List, Tuple
 
+import fitz
+import tabula
 
 logger = logging.getLogger(__name__)
 
@@ -42,22 +42,47 @@ def extract_tables_from_pdf(
     extractor = PDFExtractor(method=extraction_method)
 
     if method == "auto":
+        # Test each method on first few pages to find the best one
+        best_method = None
+        max_tables_found = 0
+
         for extraction_method in extractor.extraction_methods:
             try:
-                logger.info(f"Trying extraction method: {extraction_method}")
-                result = _extract_with_method(pdf_path, extraction_method)
+                logger.info(f"Testing extraction method: {extraction_method} on first 5 pages")
+                result = _extract_with_method_limited(pdf_path, extraction_method, max_pages=5)
+
                 if result and len(result) > 0:
-                    logger.info(
-                        f"Successfully extracted {len(result)} tables with {extraction_method}"
-                    )
-                    return result
+                    logger.info(f"Method {extraction_method} found {len(result)} tables in first 5 pages")
+                    if len(result) > max_tables_found:
+                        max_tables_found = len(result)
+                        best_method = extraction_method
                 else:
-                    logger.warning(f"No tables found with {extraction_method}")
+                    logger.info(f"Method {extraction_method} found no tables in first 5 pages")
             except Exception as e:
-                logger.warning(f"Method {extraction_method} failed: {str(e)}")
+                logger.warning(f"Method {extraction_method} failed during testing: {str(e)}")
                 continue
 
-        logger.info("All table methods failed, trying text-based extraction")
+        if best_method:
+            logger.info(f"Using best method: {best_method} (found {max_tables_found} tables in test)")
+            return _extract_with_method(pdf_path, best_method)
+        else:
+            logger.info("No method found tables in first 5 pages, trying full processing with all methods")
+            # Fallback: try each method on full document
+            for extraction_method in extractor.extraction_methods:
+                try:
+                    logger.info(f"Trying full extraction with method: {extraction_method}")
+                    result = _extract_with_method(pdf_path, extraction_method)
+                    if result and len(result) > 0:
+                        logger.info(
+                            f"Successfully extracted {len(result)} tables with {extraction_method}"
+                        )
+                        return result
+                except Exception as e:
+                    logger.warning(f"Method {extraction_method} failed: {str(e)}")
+                    continue
+
+            logger.info("All table methods failed")
+            return []
     else:
         return _extract_with_method(pdf_path, method)
 
@@ -68,6 +93,16 @@ def _extract_with_method(pdf_path: str, method: str) -> List[Dict]:
         return _extract_with_tabula(pdf_path)
     elif method == "pymupdf":
         return _extract_with_pymupdf(pdf_path)
+    else:
+        raise ValueError(f"Extraction method '{method}' not available")
+
+
+def _extract_with_method_limited(pdf_path: str, method: str, max_pages: int = 5) -> List[Dict]:
+    """Extract tables using specified method but limit to first few pages for testing"""
+    if method == "tabula":
+        return _extract_with_tabula_limited(pdf_path, max_pages)
+    elif method == "pymupdf":
+        return _extract_with_pymupdf_limited(pdf_path, max_pages)
     else:
         raise ValueError(f"Extraction method '{method}' not available")
 
@@ -86,12 +121,12 @@ def _extract_with_tabula(pdf_path: str) -> List[Dict]:
         extracted_data = []
         for i, table in enumerate(tables):
             table_data = []
-            for row in table["data"]:
+            for row in table.get("data", []):
                 table_data.append([cell["text"] for cell in row])
 
             extracted_data.append(
                 {
-                    "page": table["page"],
+                    "page": table.get("page", i + 1),
                     "table_number": i + 1,
                     "data": table_data,
                     "confidence": 0.0,
@@ -101,6 +136,40 @@ def _extract_with_tabula(pdf_path: str) -> List[Dict]:
         return extracted_data
     except Exception as e:
         logger.error(f"Tabula extraction failed: {str(e)}")
+        return []
+
+
+def _extract_with_tabula_limited(pdf_path: str, max_pages: int = 5) -> List[Dict]:
+    """Extract tables using Tabula-py library limited to first few pages"""
+    try:
+        # Limit pages to first max_pages (e.g., "1-5")
+        pages_range = f"1-{max_pages}"
+        tables = tabula.read_pdf(
+            pdf_path, pages=pages_range, output_format="json", lattice=True
+        )
+        if not tables or len(tables) == 0:
+            tables = tabula.read_pdf(
+                pdf_path, pages=pages_range, output_format="json", stream=True
+            )
+
+        extracted_data = []
+        for i, table in enumerate(tables):
+            table_data = []
+            for row in table.get("data", []):
+                table_data.append([cell["text"] for cell in row])
+
+            extracted_data.append(
+                {
+                    "page": table.get("page", i + 1),
+                    "table_number": i + 1,
+                    "data": table_data,
+                    "confidence": 0.0,
+                }
+            )
+
+        return extracted_data
+    except Exception as e:
+        logger.error(f"Tabula limited extraction failed: {str(e)}")
         return []
 
 
@@ -143,12 +212,64 @@ def _extract_with_pymupdf(pdf_path: str) -> List[Dict]:
                         f"Structured tables found but poorly formatted, using text parsing for page {page_num + 1}"
                     )
             else:
+                print('No tables found using PyMuPDF table detection.')
                 pass
 
         document.close()
         return all_extracted_tables
     except Exception as e:
         logger.error(f"PyMuPDF extraction failed: {str(e)}")
+        return []
+
+
+def _extract_with_pymupdf_limited(pdf_path: str, max_pages: int = 5) -> List[Dict]:
+    """Extract tables using PyMuPDF library limited to first few pages"""
+
+    all_extracted_tables = []
+    try:
+        document = fitz.Document(pdf_path)
+        logger.info(f"Opened document for testing: {pdf_path}")
+
+        # Limit to first max_pages
+        total_pages = min(len(document), max_pages)
+
+        for page_num in range(total_pages):
+            page = document.load_page(page_num)
+            logger.info(f"Testing Page {page_num + 1}...")
+
+            tables = page.find_tables()
+
+            if tables.tables:
+                logger.info(
+                    f"Found {len(tables.tables)} table(s) on Page {page_num + 1}."
+                )
+
+                tables_processed = False
+                for i, table in enumerate(tables.tables):
+                    table_data = table.extract()
+
+                    if table_data and len(table_data[0]) >= 7:
+                        all_extracted_tables.append(
+                            {
+                                "page": page_num + 1,
+                                "table_number": i + 1,
+                                "data": table_data,
+                                "confidence": 0.7,
+                            }
+                        )
+                        tables_processed = True
+
+                if not tables_processed:
+                    logger.info(
+                        f"Structured tables found but poorly formatted on page {page_num + 1}"
+                    )
+            else:
+                logger.debug(f"No tables found on page {page_num + 1}")
+
+        document.close()
+        return all_extracted_tables
+    except Exception as e:
+        logger.error(f"PyMuPDF limited extraction failed: {str(e)}")
         return []
 
 
@@ -159,6 +280,17 @@ def is_statement_table(table_data, reference_col_count=None) -> Tuple[bool, bool
     """
     if not table_data or len(table_data) < 1:
         return False, False
+
+    # If reference_col_count is provided, use it for additional validation
+    if reference_col_count is not None:
+        # Check if the table has roughly the same number of columns as reference
+        first_data_row = 1 if len(table_data) > 1 else 0
+        if len(table_data) > first_data_row and len(table_data[first_data_row]) > 0:
+            current_col_count = len(table_data[first_data_row])
+            # Allow some flexibility in column count (±2 columns)
+            if abs(current_col_count - reference_col_count) > 2:
+                logger.debug(f"Column count mismatch: expected ~{reference_col_count}, got {current_col_count}")
+                # Don't reject immediately, but consider this in final decision
 
     header_keywords = [
         "date",

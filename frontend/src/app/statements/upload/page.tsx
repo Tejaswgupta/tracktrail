@@ -3,6 +3,7 @@
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
 import { transactionExtractorService, type ExtractionResult, type ExtractedTransaction } from "@/services/transactionExtractor";
 import { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
+import { type BankPreset } from "@/constants/banks";
 import { useState } from "react";
 import BankSelector from "@/app/components/BankSelector";
 import CSVColumnMapper from "@/app/components/CSVColumnMapper";
@@ -17,7 +18,7 @@ export default function UploadStatementPage() {
   const [file, setFile] = useState<File | null>(null);
   const [statementPeriodFrom, setStatementPeriodFrom] = useState("");
   const [statementPeriodTo, setStatementPeriodTo] = useState("");
-  const [selectedBank, setSelectedBank] = useState("generic");
+  const [selectedBank, setSelectedBank] = useState<BankPreset>("generic");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
     null
@@ -38,7 +39,7 @@ export default function UploadStatementPage() {
   // Manual entry state
   const [showManualEntry, setShowManualEntry] = useState(false);
 
-  const handleBankChange = (bankPreset: string) => {
+  const handleBankChange = (bankPreset: BankPreset) => {
     setSelectedBank(bankPreset);
     // Reset preview when bank changes
   };

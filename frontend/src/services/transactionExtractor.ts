@@ -63,7 +63,7 @@ export const transactionExtractorService = {
         return this.extractFromCSV(file, accountId, entityId, columnMapping);
       case "xlsx":
       case "xls":
-        return this.extractFromExcel(file, accountId, entityId);
+        return this.extractFromExcel(file, accountId, entityId, columnMapping);
       case "pdf":
         return this.extractFromPDF(file, accountId, entityId, columnMapping);
       default:
@@ -902,6 +902,166 @@ export const transactionExtractorService = {
         console.log(`transactions`, transactions, errors);
 
         return this.buildExtractionResult(transactions, errors);
+      } else if (
+        file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+        file.type === "application/vnd.ms-excel"
+      ) {
+        // For Excel files, convert to CSV and process
+        console.log(`processing excel file for preview`, file);
+        const XLSX = await import('xlsx');
+        
+        // Read the Excel file
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        
+        // Get the first sheet
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) {
+          throw new Error("Excel file has no sheets");
+        }
+        
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        // Convert sheet to CSV format
+        const csvText = XLSX.utils.sheet_to_csv(worksheet);
+        
+        if (!csvText || !csvText.trim()) {
+          throw new Error("Excel sheet is empty");
+        }
+
+        const lines = this.splitCSVRows(csvText);
+        
+        if (lines.length === 0) {
+          throw new Error("No data found in Excel file");
+        }
+        
+        const transactions: ExtractedTransaction[] = [];
+        const errors: string[] = [];
+        
+        // Parse header row to get column indices
+        const headers = this.parseCSVColumns(lines[0]);
+        
+        let columnIndices: Record<string, number> = {};
+        
+        if (columnMapping) {
+          // Use provided column mapping with exact string matching
+          columnIndices = {
+            DATE: headers.findIndex(
+              (h) => h.trim() === columnMapping.DATE.trim()
+            ),
+            DESCRIPTION: headers.findIndex(
+              (h) => h.trim() === columnMapping.DESCRIPTION.trim()
+            ),
+            DEBIT: columnMapping.DEBIT
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.DEBIT.trim()
+                )
+              : -1,
+            CREDIT: columnMapping.CREDIT
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.CREDIT.trim()
+                )
+              : -1,
+            AMOUNT: columnMapping.AMOUNT
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.AMOUNT?.trim()
+                )
+              : -1,
+            DIRECTION: columnMapping.DIRECTION
+              ? headers.findIndex(
+                  (h) => h.trim() === columnMapping.DIRECTION?.trim()
+                )
+              : -1,
+          };
+          
+          // Validate that required columns were found
+          if (columnIndices.DATE === -1) {
+            throw new Error(
+              `Date column "${
+                columnMapping.DATE
+              }" not found in Excel headers: ${headers.join(", ")}`
+            );
+          }
+          if (columnIndices.DESCRIPTION === -1) {
+            throw new Error(
+              `Description column "${
+                columnMapping.DESCRIPTION
+              }" not found in Excel headers: ${headers.join(", ")}`
+            );
+          }
+          if (
+            columnIndices.AMOUNT === -1 &&
+            (columnIndices.DEBIT === -1 || columnIndices.CREDIT === -1)
+          ) {
+            const missingCols: string[] = [];
+            if (columnMapping.DEBIT && columnIndices.DEBIT === -1)
+              missingCols.push(`"${columnMapping.DEBIT}"`);
+            if (columnMapping.CREDIT && columnIndices.CREDIT === -1)
+              missingCols.push(`"${columnMapping.CREDIT}"`);
+            if (columnMapping.AMOUNT && columnIndices.AMOUNT === -1)
+              missingCols.push(`"${columnMapping.AMOUNT}"`);
+            throw new Error(
+              `Amount columns not found: ${missingCols.join(
+                ", "
+              )} in Excel headers: ${headers.join(", ")}`
+            );
+          }
+        } else {
+          // Auto-detect using CSV validator
+          const validation = validateCSVColumns(headers);
+          if (validation.isValid && validation.suggestedMapping) {
+            const mapping = validation.suggestedMapping;
+            columnIndices = {
+              DATE: headers.findIndex((h) => h.trim() === mapping.DATE.trim()),
+              DESCRIPTION: headers.findIndex(
+                (h) => h.trim() === mapping.DESCRIPTION.trim()
+              ),
+              DEBIT: mapping.DEBIT
+                ? headers.findIndex((h) => h.trim() === mapping.DEBIT.trim())
+                : -1,
+              CREDIT: mapping.CREDIT
+                ? headers.findIndex((h) => h.trim() === mapping.CREDIT.trim())
+                : -1,
+              AMOUNT: mapping.AMOUNT
+                ? headers.findIndex((h) => h.trim() === mapping.AMOUNT?.trim())
+                : -1,
+              DIRECTION: mapping.DIRECTION
+                ? headers.findIndex(
+                    (h) => h.trim() === mapping.DIRECTION?.trim()
+                  )
+                : -1,
+            };
+          } else {
+            throw new Error(
+              `Unable to auto-detect columns in Excel file. Headers: ${headers.join(
+                ", "
+              )}`
+            );
+          }
+        }
+        
+        // Parse rows into transactions (up to 50 for preview)
+        const dataLines = lines.slice(1);
+        for (let i = 0; i < Math.min(50, dataLines.length); i++) {
+          try {
+            const transaction = await this.parseCSVLineWithMapping(
+              dataLines[i],
+              i + 2,
+              columnIndices,
+              i + 1
+            );
+            if (transaction) {
+              transactions.push(transaction);
+            }
+          } catch (error) {
+            const errorMsg = `Line ${i + 2}: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`;
+            errors.push(errorMsg);
+          }
+        }
+        
+        return this.buildExtractionResult(transactions, errors);
       } else {
         throw new Error(`Unsupported file type for preview: ${file.type}`);
       }
@@ -924,19 +1084,186 @@ export const transactionExtractorService = {
   async extractFromExcel(
     file: File,
     accountId: string,
-    entityId: string
+    entityId: string,
+    columnMapping?: ColumnMapping
   ): Promise<ExtractionResult> {
-    // For now, return a placeholder - would need a library like xlsx to parse Excel files
-    return {
-      transactions: [],
-      errors: ["Excel file processing not yet implemented"],
-      summary: {
-        totalTransactions: 0,
-        totalCredits: 0,
-        totalDebits: 0,
-        dateRange: { from: "", to: "" },
-      },
-    };
+    try {
+      // Dynamically import xlsx to avoid increasing bundle size for users who don't need it
+      const XLSX = await import('xlsx');
+      
+      // Read the Excel file
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      
+      // Get the first sheet
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        throw new Error("Excel file has no sheets");
+      }
+      
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      // Convert sheet to CSV format
+      const csvText = XLSX.utils.sheet_to_csv(worksheet);
+      
+      if (!csvText || !csvText.trim()) {
+        throw new Error("Excel sheet is empty");
+      }
+      
+      console.log("Converted Excel to CSV, processing...");
+      
+      // Parse the CSV data using existing CSV logic
+      const lines = this.splitCSVRows(csvText);
+      
+      if (lines.length === 0) {
+        throw new Error("No data found in Excel file");
+      }
+      
+      const transactions: ExtractedTransaction[] = [];
+      const errors: string[] = [];
+      
+      // Parse header row to get column indices
+      const headers = this.parseCSVColumns(lines[0]);
+      console.log("Excel headers:", headers);
+      
+      let columnIndices: Record<string, number> = {};
+      
+      if (columnMapping) {
+        // Use provided column mapping with exact string matching
+        columnIndices = {
+          DATE: headers.findIndex((h) => h.trim() === columnMapping.DATE.trim()),
+          DESCRIPTION: headers.findIndex(
+            (h) => h.trim() === columnMapping.DESCRIPTION.trim()
+          ),
+          DEBIT: columnMapping.DEBIT
+            ? headers.findIndex((h) => h.trim() === columnMapping.DEBIT.trim())
+            : -1,
+          CREDIT: columnMapping.CREDIT
+            ? headers.findIndex((h) => h.trim() === columnMapping.CREDIT.trim())
+            : -1,
+          AMOUNT: columnMapping.AMOUNT
+            ? headers.findIndex((h) => h.trim() === columnMapping.AMOUNT?.trim())
+            : -1,
+          DIRECTION: columnMapping.DIRECTION
+            ? headers.findIndex(
+                (h) => h.trim() === columnMapping.DIRECTION?.trim()
+              )
+            : -1,
+        };
+        
+        console.log("Using Excel column mapping:", columnIndices);
+        
+        // Validate that required columns were found
+        if (columnIndices.DATE === -1) {
+          throw new Error(
+            `Date column "${
+              columnMapping.DATE
+            }" not found in Excel headers: ${headers.join(", ")}`
+          );
+        }
+        if (columnIndices.DESCRIPTION === -1) {
+          throw new Error(
+            `Description column "${
+              columnMapping.DESCRIPTION
+            }" not found in Excel headers: ${headers.join(", ")}`
+          );
+        }
+        if (
+          columnIndices.AMOUNT === -1 &&
+          (columnIndices.DEBIT === -1 || columnIndices.CREDIT === -1)
+        ) {
+          const missingCols: string[] = [];
+          if (columnMapping.DEBIT && columnIndices.DEBIT === -1)
+            missingCols.push(`"${columnMapping.DEBIT}"`);
+          if (columnMapping.CREDIT && columnIndices.CREDIT === -1)
+            missingCols.push(`"${columnMapping.CREDIT}"`);
+          if (columnMapping.AMOUNT && columnIndices.AMOUNT === -1)
+            missingCols.push(`"${columnMapping.AMOUNT}"`);
+          throw new Error(
+            `Amount columns not found: ${missingCols.join(
+              ", "
+            )} in Excel headers: ${headers.join(", ")}`
+          );
+        }
+      } else {
+        // Auto-detect columns
+        const validation = validateCSVColumns(headers);
+        if (validation.isValid && validation.suggestedMapping) {
+          const mapping = validation.suggestedMapping;
+          columnIndices = {
+            DATE: headers.findIndex((h) => h.trim() === mapping.DATE.trim()),
+            DESCRIPTION: headers.findIndex(
+              (h) => h.trim() === mapping.DESCRIPTION.trim()
+            ),
+            DEBIT: mapping.DEBIT
+              ? headers.findIndex((h) => h.trim() === mapping.DEBIT.trim())
+              : -1,
+            CREDIT: mapping.CREDIT
+              ? headers.findIndex((h) => h.trim() === mapping.CREDIT.trim())
+              : -1,
+            AMOUNT: mapping.AMOUNT
+              ? headers.findIndex((h) => h.trim() === mapping.AMOUNT?.trim())
+              : -1,
+            DIRECTION: mapping.DIRECTION
+              ? headers.findIndex(
+                  (h) => h.trim() === mapping.DIRECTION?.trim()
+                )
+              : -1,
+          };
+          console.log("Auto-detected Excel column mapping:", columnIndices);
+        } else {
+          throw new Error(
+            `Unable to auto-detect columns. Please provide column mapping. Available headers: ${headers.join(
+              ", "
+            )}`
+          );
+        }
+      }
+      
+      // Skip header row and parse data
+      const dataLines = lines.slice(1);
+      
+      for (let i = 0; i < dataLines.length; i++) {
+        try {
+          const transaction = await this.parseCSVLineWithMapping(
+            dataLines[i],
+            i + 2,
+            columnIndices,
+            i + 1
+          );
+          if (transaction) {
+            transactions.push(transaction);
+          }
+        } catch (error) {
+          const errorMsg = `Line ${i + 2}: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`;
+          console.warn("Excel parsing error:", errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+      
+      console.log(
+        `Extracted ${transactions.length} transactions from Excel with ${errors.length} errors`
+      );
+      return this.buildExtractionResult(transactions, errors);
+    } catch (error) {
+      console.error("Excel extraction error:", error);
+      return {
+        transactions: [],
+        errors: [
+          error instanceof Error
+            ? error.message
+            : "Unknown Excel extraction error",
+        ],
+        summary: {
+          totalTransactions: 0,
+          totalCredits: 0,
+          totalDebits: 0,
+          dateRange: { from: "", to: "" },
+        },
+      };
+    }
   },
 
   async extractFromPDF(

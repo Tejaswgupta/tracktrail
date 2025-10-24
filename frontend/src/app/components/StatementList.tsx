@@ -4,7 +4,7 @@ import { statementsService } from "@/services/database";
 import type { BankStatement } from "@/types/database";
 import { useEffect, useState } from "react";
 import ConfirmationDialog from "./ConfirmationDialog";
-import UploadStatementModal from "./UploadStatementModal";
+import UploadStatementModalWizard from "./UploadStatementModalWizard";
 
 interface StatementListProps {
   accountId: string;
@@ -352,7 +352,7 @@ export default function StatementList({ accountId }: StatementListProps) {
 
       {/* Upload Modal */}
       {isUploadModalOpen && (
-        <UploadStatementModal
+        <UploadStatementModalWizard
           accountId={accountId}
           onClose={() => setIsUploadModalOpen(false)}
           onUploadComplete={() => {

@@ -5,6 +5,7 @@ This script is designed to identify potentially fraudulent Input Tax Credit (ITC
 ## Functionality
 
 The script processes three primary data sources:
+
 - **GSTR-1**: Outward supplies (invoices issued by a taxpayer).
 - **GSTR-2**: Inward supplies (ITC claimed by a taxpayer on invoices received).
 - **GSTR-3B**: Summary tax filings (output tax liability, ITC availed, credit utilized, cash paid).
@@ -12,16 +13,19 @@ The script processes three primary data sources:
 ### Core Detection Workflow
 
 1. **Data Loading and Standardization**:
+
    - Loads GSTR-1, GSTR-2, and GSTR-3B data from CSV files.
    - Standardizes GSTINs, invoice numbers, and dates.
    - Calculates total tax/ITC amounts, handling missing or malformed data gracefully.
 
 2. **Invoice Reconciliation**:
+
    - Matches invoices between GSTR-1 (supplier's record) and GSTR-2 (recipient's claim) based on exact `supplier_gstin`, `recipient_gstin`, and `invoice_no`.
    - Flags invoices in GSTR-1 as \"verified\" (if matched in GSTR-2) or \"unverified\".
    - Flags ITC claims in GSTR-2 as \"matched\" (if the corresponding invoice exists in GSTR-1) or \"unmatched\".
 
 3. **Entity-Period Aggregation**:
+
    - Aggregates data for each taxpayer (`gstin`) for each month (`period`).
    - Calculates key metrics:
      - Outward tax declared (total, verified, unverified).
@@ -36,15 +40,18 @@ The script processes three primary data sources:
      - `risk_score`: A composite score (0-100) based on underpayment, unmatched ITC, and GSTR-1 vs GSTR-3B discrepancies.
 
 4. **Origin Detection**:
+
    - Identifies taxpayers in a given period who have a `origin_suspicious_itc` above a threshold (default 1000).
 
 5. **Taint Propagation**:
+
    - For each detected origin, propagates the `origin_suspicious_itc` amount forward through the supply chain (supplier -> recipient invoices) for a specified number of hops (default 4).
    - Flow is distributed pro-rata based on the positive tax amount of outgoing invoices.
    - At each downstream node (recipient), the flow is limited by the node's `pass_through_factor`.
    - Tracks the flow of \"tainted\" amounts on edges (invoices) and into nodes (taxpayers).
 
 6. **Result Summarization**:
+
    - For a period, aggregates the total taint on each invoice (edge) and the total taint flowing into each taxpayer (node).
    - Generates ranked lists of origins, tainted edges, and tainted inflows.
 
@@ -68,11 +75,13 @@ The script processes three primary data sources:
 ## Use Cases
 
 1. **Tax Authority Audits**:
+
    - Identify businesses that might be issuing bogus invoices to inflate ITC.
    - Trace the flow of potentially fraudulent credit to find accomplices or downstream beneficiaries.
    - Prioritize high-risk taxpayers for detailed scrutiny based on `risk_score` and `origin_suspicious_itc`.
 
 2. **Business Compliance**:
+
    - Businesses can analyze their own supply chains to ensure they are not inadvertently involved with entities issuing or claiming bogus ITC.
    - Verify the legitimacy of their own ITC claims by checking for unmatched invoices.
 
@@ -114,8 +123,17 @@ python bogus_itc_mvp_fixed.py \
 ### Outputs
 
 For each analyzed period `P`, the script generates:
+
 - `{prefix}_origins_P.csv`: List of origin taxpayers with their risk metrics.
 - `{prefix}_tainted_edges_P.csv`: List of invoices (edges) identified as carrying potentially bogus ITC, sorted by taint amount.
 - `{prefix}_tainted_inflows_P.csv`: List of taxpayers (nodes) receiving potentially bogus ITC, sorted by inflow amount.
 - `{prefix}_chains_P.txt`: Top propagation paths of taint from each origin.
 - `{prefix}_graph_P.{ext}`: (Optional) Exported network graph file.
+
+1. User selects upload type: CSV / PDF / Excel
+2. We show column mapping in all three cases
+3. We allow deleting rows(as they might import with headers)
+4. We allow selecting of a bank preset and show extraction sample and overall metrics
+5. On submit, we upload the file with the column mapping and bank preset (as we do right now)
+
+# dots.ocr

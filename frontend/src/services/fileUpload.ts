@@ -35,6 +35,54 @@ export const fileUploadService = {
     return await validateCSVFile(file);
   },
 
+  // Validate Excel file structure
+  async validateExcel(file: File): Promise<CSVValidationResult> {
+    const allowedTypes = [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+    ];
+    
+    if (!allowedTypes.includes(file.type)) {
+      throw new Error("File must be an Excel file (.xlsx or .xls)");
+    }
+
+    try {
+      // Dynamically import xlsx
+      const XLSX = await import('xlsx');
+      
+      // Read the Excel file
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      
+      // Get the first sheet
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        throw new Error("Excel file has no sheets");
+      }
+      
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      // Convert sheet to CSV format
+      const csvText = XLSX.utils.sheet_to_csv(worksheet);
+      
+      if (!csvText || !csvText.trim()) {
+        throw new Error("Excel sheet is empty");
+      }
+      
+      // Create a temporary CSV File object for validation
+      const csvBlob = new Blob([csvText], { type: 'text/csv' });
+      const csvFile = new File([csvBlob], 'temp.csv', { type: 'text/csv' });
+      
+      // Validate using existing CSV validation logic
+      return await validateCSVFile(csvFile);
+    } catch (error) {
+      console.error("Excel validation error:", error);
+      throw new Error(
+        error instanceof Error ? error.message : "Failed to validate Excel file"
+      );
+    }
+  },
+
   async uploadStatement({
     accountId,
     file,
