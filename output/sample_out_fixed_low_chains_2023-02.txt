@@ -1,3 +1,0 @@
-Origin GSTIN1 @ 2023-02
-  amt=151.52 path=GSTIN1 -> GSTIN3
-

@@ -1,0 +1,32 @@
+{
+  "name": "email-campaign-sender",
+  "version": "1.0.0",
+  "description": "Node.js script to send emails to CSV contacts using AWS SES SMTP",
+  "main": "send-emails.js",
+  "scripts": {
+    "start": "node send-emails.js",
+    "send": "node send-emails.js --auto",
+    "test": "node -e \"console.log('Test: Node.js is working')\""
+  },
+  "keywords": [
+    "email",
+    "aws-ses",
+    "smtp",
+    "csv",
+    "bulk-email",
+    "nodejs"
+  ],
+  "author": "TrackTrail",
+  "license": "MIT",
+  "dependencies": {
+    "nodemailer": "^6.9.8",
+    "csv-parser": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
+  }
+}
