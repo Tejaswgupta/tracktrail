@@ -52,34 +52,17 @@ export const BANK_NAME_TO_PRESET: Record<string, string> = {
 };
 
 // Helper function to get regex patterns for a bank preset from database
-export async function getBankRegexPatterns(bankPreset: string): Promise<string[]> {
+export async function getBankRegexPatterns(
+  bankPreset: string
+): Promise<string[]> {
   try {
     const patterns = await regexPatternsService.getPatternsByBank(bankPreset);
-    return patterns.map(p => p.pattern);
+    return patterns.map((p) => p.pattern);
   } catch (error) {
     console.error(`Error fetching patterns for bank ${bankPreset}:`, error);
     return [];
   }
 }
-
-// Fallback patterns for emergency use (should rarely be needed)
-const FALLBACK_PATTERNS: Record<string, string[]> = {
-  generic: [
-    "UPI\\/([^\\/]+)\\/[^\\/]+\\/?", // UPI/COUNTERPARTY/number/optional
-    "(?:NEFT|RTGS)\\/[^\\/]+\\/([^\\n]+)\\/?",
-    "POS\\/([^\\n]+)\\/?",
-    "IMPS(?:-[A-Z]+)?\\/[^\\/]+\\/[^\\/]+\\/([^\\n]+)\\/?",
-    "(?:.*\\/)?([^\\n]+)$", // General fallback: last segment after slash
-  ],
-  axis: [
-    "^NEFT/[A-Z0-9/]+/([^/]+)",
-    "^INB/NEFT/[A-Z0-9/]+/([^/]+)",
-    "^INB/RTGS/[A-Z0-9/]+/([^/]+)",
-    "^RTGS/[A-Z0-9/]+/([^/]+)",
-    "^IMPS/P2A/[0-9]+(?:/[^/]*)*/([^/]+)$",
-    "^TRF/[^/]+/([^/]+)",
-  ],
-};
 
 // Helper function to get available bank presets
 export function getAvailableBankPresets(): Record<string, string> {
@@ -90,18 +73,18 @@ export function getAvailableBankPresets(): Record<string, string> {
 export function getBankPresetFromBankName(bankName: string): string {
   // Find matching preset by exact match first, then partial match
   const exactMatch = Object.keys(BANK_NAME_TO_PRESET).find(
-    bank => bank.toLowerCase() === bankName.toLowerCase()
+    (bank) => bank.toLowerCase() === bankName.toLowerCase()
   );
   if (exactMatch) return BANK_NAME_TO_PRESET[exactMatch];
 
-  const partialMatch = Object.keys(BANK_NAME_TO_PRESET).find(bank =>
-    bankName.toLowerCase().includes(bank.toLowerCase()) ||
-    bank.toLowerCase().includes(bankName.toLowerCase())
+  const partialMatch = Object.keys(BANK_NAME_TO_PRESET).find(
+    (bank) =>
+      bankName.toLowerCase().includes(bank.toLowerCase()) ||
+      bank.toLowerCase().includes(bankName.toLowerCase())
   );
 
   return partialMatch ? BANK_NAME_TO_PRESET[partialMatch] : "generic";
 }
-
 
 // Helper function to automatically infer bank preset from bank name
 export function inferBankPresetFromBankName(bankName: string): BankPreset {
@@ -113,7 +96,10 @@ export function inferBankPresetFromBankName(bankName: string): BankPreset {
 
   // Try exact match first
   for (const [preset, displayName] of Object.entries(BANK_NAME_TO_PRESET)) {
-    if (preset.toLowerCase() === cleanBankName || displayName.toLowerCase() === cleanBankName) {
+    if (
+      preset.toLowerCase() === cleanBankName ||
+      displayName.toLowerCase() === cleanBankName
+    ) {
       return BANK_NAME_TO_PRESET[preset] as BankPreset;
     }
   }
