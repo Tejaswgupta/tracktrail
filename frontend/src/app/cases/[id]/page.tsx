@@ -5,6 +5,7 @@ import AIModeTab from "@/app/components/AIModeTab";
 import EfficientCounterpartyMerge from "@/app/components/EfficientCounterpartyMerge";
 import EntityStandardizationTab from "@/app/components/EntityStandardizationTab";
 import OverviewTab from "@/app/components/OverviewTab";
+import FlowchartTab from "@/app/components/FlowchartTab";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppHeader from "../../components/AppHeader";
@@ -40,6 +41,7 @@ export default function CaseDetailPage() {
     | "ai-mode"
     | "counterparty-merge"
     | "entity-standardization"
+    | "flowchart"
   >("overview");
   const [isCreateEntityModalOpen, setIsCreateEntityModalOpen] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -235,6 +237,7 @@ export default function CaseDetailPage() {
               { key: "entities", label: "Entities" },
               // { key: "timeline", label: "Timeline" },
               { key: "analytics", label: "AML Analytics" },
+              { key: "flowchart", label: "Flowchart" },
               { key: "ai-mode", label: "AI Mode" },
               { key: "counterparty-merge", label: "Counterparty Merge" },
               {
@@ -314,6 +317,18 @@ export default function CaseDetailPage() {
               </h2>
 
               <AMLTab caseId={caseData.id} />
+            </div>
+          </div>
+        )}
+
+        {activeTab === "flowchart" && (
+          <div className="space-y-8">
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-6">
+                Money Flow Visualization
+              </h2>
+
+              <FlowchartTab caseId={caseData.id} />
             </div>
           </div>
         )}

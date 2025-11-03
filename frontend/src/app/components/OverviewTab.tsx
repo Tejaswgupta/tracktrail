@@ -88,6 +88,10 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     TransactionTypeStats[]
   >([]);
   const [transactionTypesLoading, setTransactionTypesLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const TRANSACTIONS_PER_PAGE = 1000;
 
   useEffect(() => {
@@ -113,7 +117,13 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     const fetchData = async () => {
       try {
         setLoading(true);
+        setLoadingProgress(null);
         const pageSize = TRANSACTIONS_PER_PAGE;
+
+        // First, get the total count to show progress
+        const totalCount = selectedEntityId
+          ? await transactionsService.getByEntityIdCount(selectedEntityId)
+          : await transactionsService.getByCaseIdCount(caseId);
 
         const fetchPage: (offset: number) => Promise<Transaction[]> =
           selectedEntityId
@@ -135,6 +145,14 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           const page = await fetchPage(offset);
           allTransactions.push(...page);
 
+          // Update progress
+          if (!isCancelled && totalCount > 0) {
+            setLoadingProgress({
+              current: allTransactions.length,
+              total: totalCount,
+            });
+          }
+
           if (page.length < pageSize) {
             break;
           }
@@ -144,9 +162,13 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
         if (!isCancelled) {
           setTransactions(allTransactions);
+          setLoadingProgress(null);
         }
       } catch (error) {
         console.error("Error fetching data:", error);
+        if (!isCancelled) {
+          setLoadingProgress(null);
+        }
       } finally {
         if (!isCancelled) {
           setLoading(false);
@@ -834,8 +856,26 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex flex-col items-center justify-center py-12 space-y-4">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        {loadingProgress && (
+          <div className="text-center space-y-2">
+            <div className="w-64 bg-gray-200 rounded-full h-2.5">
+              <div
+                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                style={{
+                  width: `${
+                    (loadingProgress.current / loadingProgress.total) * 100
+                  }%`,
+                }}
+              ></div>
+            </div>
+            <p className="text-sm text-gray-600">
+              Loading transactions: {loadingProgress.current.toLocaleString()} /{" "}
+              {loadingProgress.total.toLocaleString()}
+            </p>
+          </div>
+        )}
       </div>
     );
   }
