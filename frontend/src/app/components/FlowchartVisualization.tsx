@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
+import { useEffect, useRef, useState } from "react";
 
 interface FlowchartNode extends d3.SimulationNodeDatum {
   id: string;
@@ -71,9 +71,9 @@ export default function FlowchartVisualization({
     const resolveEndpointId = (endpoint: FlowchartEdge["source"]): string =>
       typeof endpoint === "string" ? endpoint : endpoint?.id ?? "";
 
-  // Clone inbound data so D3 mutations stay isolated to this render cycle.
-  const nodesData = data.nodes.map((node) => ({ ...node }));
-  const edgesData = data.edges
+    // Clone inbound data so D3 mutations stay isolated to this render cycle.
+    const nodesData = data.nodes.map((node) => ({ ...node }));
+    const edgesData = data.edges
       .map((edge) => ({
         ...edge,
         source: resolveEndpointId(edge.source),
@@ -92,12 +92,12 @@ export default function FlowchartVisualization({
       .attr("style", "max-width: 100%; height: auto;");
 
     // Create zoom behavior
-    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.1, 4]).on(
-      "zoom",
-      (event) => {
+    const zoom = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.1, 4])
+      .on("zoom", (event) => {
         container.attr("transform", event.transform);
-      }
-    );
+      });
 
     svg.call(zoom as any);
 
@@ -269,7 +269,7 @@ export default function FlowchartVisualization({
     // Add type indicator
     node
       .append("text")
-      .text((d) => d.type === "entity" ? "E" : "C")
+      .text((d) => (d.type === "entity" ? "E" : "C"))
       .attr("x", 0)
       .attr("y", 5)
       .attr("text-anchor", "middle")
@@ -309,16 +309,20 @@ export default function FlowchartVisualization({
       .on("mouseover", function (_event, d) {
         d3.select(this).select("circle").attr("stroke-width", 3);
 
-        tooltip
-          .style("visibility", "visible")
-          .html(
-            `
+        tooltip.style("visibility", "visible").html(
+          `
             <div>
               <strong>${d.label}</strong><br/>
               <hr style="margin: 6px 0;" />
-              <strong>Type:</strong> ${d.type === "entity" ? "Entity" : "Counterparty"}<br/>
-              <strong>Total Inflow:</strong> ${formatCurrency(d.totalInflow)}<br/>
-              <strong>Total Outflow:</strong> ${formatCurrency(d.totalOutflow)}<br/>
+              <strong>Type:</strong> ${
+                d.type === "entity" ? "Entity" : "Counterparty"
+              }<br/>
+              <strong>Total Inflow:</strong> ${formatCurrency(
+                d.totalInflow
+              )}<br/>
+              <strong>Total Outflow:</strong> ${formatCurrency(
+                d.totalOutflow
+              )}<br/>
               <strong>Net Flow:</strong> ${formatCurrency(d.netFlow)}<br/>
               <strong>Transactions:</strong> ${d.transactionCount.toLocaleString()}<br/>
               ${
@@ -328,7 +332,7 @@ export default function FlowchartVisualization({
               }
             </div>
           `
-          );
+        );
       })
       .on("mousemove", function (event) {
         tooltip
@@ -348,27 +352,27 @@ export default function FlowchartVisualization({
           .attr("stroke-opacity", 1)
           .attr("stroke-width", getEdgeWidth(edge) + 2);
 
-        tooltip
-          .style("visibility", "visible")
-          .html(
-            `
+        tooltip.style("visibility", "visible").html(
+          `
             <div>
               <strong>Flow Details</strong><br/>
               <hr style="margin: 6px 0;" />
               <strong>From:</strong> ${
-                nodeById.get(resolveEndpointId(edge.source as FlowchartEdge["source"]))
-                  ?.label
+                nodeById.get(
+                  resolveEndpointId(edge.source as FlowchartEdge["source"])
+                )?.label
               }<br/>
               <strong>To:</strong> ${
-                nodeById.get(resolveEndpointId(edge.target as FlowchartEdge["target"]))
-                  ?.label
+                nodeById.get(
+                  resolveEndpointId(edge.target as FlowchartEdge["target"])
+                )?.label
               }<br/>
               <strong>Direction:</strong> ${edge.direction}<br/>
               <strong>Amount:</strong> ${formatCurrency(edge.amount)}<br/>
               <strong>Transactions:</strong> ${edge.transactionCount.toLocaleString()}
             </div>
           `
-          );
+        );
       })
       .on("mousemove", function (event) {
         tooltip

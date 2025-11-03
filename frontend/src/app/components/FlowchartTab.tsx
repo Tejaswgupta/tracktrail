@@ -1,15 +1,15 @@
 "use client";
 
 import {
+  counterpartyService,
   entitiesService,
   transactionsService,
-  counterpartyService,
 } from "@/services/database";
 import type { Entity } from "@/types/database";
-import { useEffect, useState, useMemo } from "react";
-import FlowchartVisualization from "./FlowchartVisualization";
+import { useEffect, useMemo, useState } from "react";
 import FlowchartControls from "./FlowchartControls";
 import FlowchartLegend from "./FlowchartLegend";
+import FlowchartVisualization from "./FlowchartVisualization";
 
 interface FlowchartNode {
   id: string;
@@ -53,12 +53,15 @@ interface FlowchartTabProps {
 
 export default function FlowchartTab({ caseId }: FlowchartTabProps) {
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [flowchartData, setFlowchartData] = useState<FlowchartData | null>(null);
+  const [flowchartData, setFlowchartData] = useState<FlowchartData | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Control states
-  const [selectedEntityFilter, setSelectedEntityFilter] = useState<string>("all");
+  const [selectedEntityFilter, setSelectedEntityFilter] =
+    useState<string>("all");
   const [minAmountThreshold, setMinAmountThreshold] = useState(0);
   const [showInflow, setShowInflow] = useState(true);
   const [showOutflow, setShowOutflow] = useState(true);
@@ -121,10 +124,14 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
         const edgesMap = new Map<string, FlowchartEdge>();
 
         // Get all transactions for the case
-        const transactions = await transactionsService.getCaseTransactionsForAnalysis(
-          caseId,
-          ["transaction_id", "amount", "direction", "entity_id", "counterparty_merged"]
-        );
+        const transactions =
+          await transactionsService.getCaseTransactionsForAnalysis(caseId, [
+            "transaction_id",
+            "amount",
+            "direction",
+            "entity_id",
+            "counterparty_merged",
+          ]);
 
         // First pass: collect all counterparties from transactions
         transactions.forEach((tx) => {
@@ -212,7 +219,10 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
           totalEntities: entitiesData.length,
           totalCounterparties: seenCounterparties.size,
           totalVolume: edges.reduce((sum, e) => sum + e.amount, 0),
-          totalTransactions: edges.reduce((sum, e) => sum + e.transactionCount, 0),
+          totalTransactions: edges.reduce(
+            (sum, e) => sum + e.transactionCount,
+            0
+          ),
         };
 
         setFlowchartData({
@@ -246,7 +256,9 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
         source: normalizeEdgeEndpoint(edge.source),
         target: normalizeEdgeEndpoint(edge.target),
       }))
-      .filter((edge) => edge.source && edge.target) as NormalizedFlowchartEdge[];
+      .filter(
+        (edge) => edge.source && edge.target
+      ) as NormalizedFlowchartEdge[];
 
     let filteredNodes = normalizedNodes;
     let filteredEdges = normalizedEdges;
@@ -259,19 +271,24 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
       );
 
       filteredEdges = filteredEdges.filter(
-        (edge) =>
-          edge.source === entityNodeId || edge.target === entityNodeId
+        (edge) => edge.source === entityNodeId || edge.target === entityNodeId
       );
     }
 
     // Filter edges by amount and direction (these are soft filters)
-    filteredEdges = filteredEdges.filter((edge) => edge.amount >= minAmountThreshold);
+    filteredEdges = filteredEdges.filter(
+      (edge) => edge.amount >= minAmountThreshold
+    );
 
     if (!showInflow) {
-      filteredEdges = filteredEdges.filter((edge) => edge.direction !== "inflow");
+      filteredEdges = filteredEdges.filter(
+        (edge) => edge.direction !== "inflow"
+      );
     }
     if (!showOutflow) {
-      filteredEdges = filteredEdges.filter((edge) => edge.direction !== "outflow");
+      filteredEdges = filteredEdges.filter(
+        (edge) => edge.direction !== "outflow"
+      );
     }
 
     // Only filter nodes after ALL edge filtering is complete
@@ -296,7 +313,10 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
       summary: {
         ...flowchartData.summary,
         totalVolume: filteredEdges.reduce((sum, e) => sum + e.amount, 0),
-        totalTransactions: filteredEdges.reduce((sum, e) => sum + e.transactionCount, 0),
+        totalTransactions: filteredEdges.reduce(
+          (sum, e) => sum + e.transactionCount,
+          0
+        ),
       },
     };
   }, [
@@ -412,7 +432,9 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Counterparties</p>
+              <p className="text-sm font-medium text-gray-600">
+                Counterparties
+              </p>
               <p className="text-2xl font-semibold text-gray-900">
                 {filteredData.summary.totalCounterparties}
               </p>
@@ -497,10 +519,7 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
 
       {/* Visualization */}
       <div className="bg-white rounded-lg shadow p-6">
-        <FlowchartVisualization
-          data={filteredData}
-          nodeSizing={nodeSizing}
-        />
+        <FlowchartVisualization data={filteredData} nodeSizing={nodeSizing} />
       </div>
     </div>
   );
