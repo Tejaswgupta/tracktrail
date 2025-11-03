@@ -1,30 +1,30 @@
 "use client";
 
 import {
+  counterpartyService,
   entitiesService,
   transactionsService,
-  counterpartyService,
 } from "@/services/database";
 import type { Entity, Transaction } from "@/types/database";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 // Import Recharts components
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  Pie,
+  Cell as PieCell,
+  PieChart,
+  Legend as RechartsLegend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
-  PieChart,
-  Pie,
-  Cell as PieCell,
-  Legend as RechartsLegend,
 } from "recharts";
 import DetailedOverviewTab from "./DetailedOverviewTab";
-import EditableTransactionType from "./EditableTransactionType";
 import EditableCounterpartyName from "./EditableCounterpartyName";
+import EditableTransactionType from "./EditableTransactionType";
 
 interface CounterpartyStats {
   name: string;
@@ -88,8 +88,6 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     TransactionTypeStats[]
   >([]);
   const [transactionTypesLoading, setTransactionTypesLoading] = useState(false);
-  const [transactionPage, setTransactionPage] = useState(0);
-  const [totalTransactions, setTotalTransactions] = useState(0);
   const TRANSACTIONS_PER_PAGE = 1000;
 
   useEffect(() => {
@@ -106,42 +104,61 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     };
 
     fetchData();
-  }, [transactionPage, selectedEntityId, caseId]);
+  }, [selectedEntityId, caseId]);
 
   // Fetch transactions with pagination
   useEffect(() => {
+    let isCancelled = false;
+
     const fetchData = async () => {
       try {
         setLoading(true);
-        let data: Transaction[] = [];
-        let totalCount = 0;
-        
-        if (selectedEntityId) {
-          // Fetch paginated transactions for selected entity
-          data = await transactionsService.getByEntityId(selectedEntityId, {
-            offset: transactionPage * TRANSACTIONS_PER_PAGE,
-            limit: TRANSACTIONS_PER_PAGE,
-          });
-          totalCount = await transactionsService.getByEntityIdCount(selectedEntityId);
-        } else {
-          // Fetch paginated transactions for case
-          data = await transactionsService.getByCaseId(caseId, {
-            offset: transactionPage * TRANSACTIONS_PER_PAGE,
-            limit: TRANSACTIONS_PER_PAGE,
-          });
-          totalCount = await transactionsService.getByCaseIdCount(caseId);
+        const pageSize = TRANSACTIONS_PER_PAGE;
+
+        const fetchPage: (offset: number) => Promise<Transaction[]> =
+          selectedEntityId
+            ? (offset) =>
+                transactionsService.getByEntityId(selectedEntityId, {
+                  offset,
+                  limit: pageSize,
+                })
+            : (offset) =>
+                transactionsService.getByCaseId(caseId, {
+                  offset,
+                  limit: pageSize,
+                });
+
+        const allTransactions: Transaction[] = [];
+        let offset = 0;
+
+        while (!isCancelled) {
+          const page = await fetchPage(offset);
+          allTransactions.push(...page);
+
+          if (page.length < pageSize) {
+            break;
+          }
+
+          offset += pageSize;
         }
-        
-        setTotalTransactions(totalCount);
-        setTransactions(data);
+
+        if (!isCancelled) {
+          setTransactions(allTransactions);
+        }
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {
-        setLoading(false);
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     };
 
     fetchData();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [caseId, selectedEntityId]);
 
   // Fetch counterparty stats from backend (or calculate client-side for entity)
