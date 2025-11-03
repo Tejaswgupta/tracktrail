@@ -8,7 +8,6 @@ All models inherit from the base AnalysisRequest model to ensure consistency.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from app.utils.validators import validate_entity_id
 from pydantic import BaseModel, Field, field_validator
 
 
