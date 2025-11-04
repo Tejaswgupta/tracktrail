@@ -3,13 +3,8 @@ API v1 router for organizing all analysis endpoints.
 This module provides a centralized router that organizes all analysis endpoints
 and provides proper API versioning and endpoint organization.
 """
+from app.api.v1.endpoints import analysis, health, pdf
 from fastapi import APIRouter
-from app.api.v1.endpoints import (
-    analysis,
-    health,
-    pdf,
-    bogus_itc,
-)
 
 api_router = APIRouter(
     prefix="/api/v1",
@@ -52,16 +47,7 @@ api_router.include_router(
     },
 )
 
-api_router.include_router(
-    bogus_itc.router,
-    tags=["Bogus ITC"],
-    responses={
-        200: {"description": "Bogus ITC analysis completed successfully"},
-        400: {"description": "Invalid file format or missing GSTIN"},
-        422: {"description": "Request validation failed"},
-        500: {"description": "Bogus ITC analysis failed"},
-    },
-)
+
 
 router_info = {
     "version": "1.0",
