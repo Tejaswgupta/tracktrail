@@ -1,7 +1,10 @@
 "use client";
 
 import type { Entity } from "@/types/database";
-import { TIMELINE_EVENT_LIMIT_OPTIONS } from "./FlowchartConstants";
+import {
+  FLOWCHAIN_TIME_WINDOW_OPTIONS,
+  TIMELINE_EVENT_LIMIT_OPTIONS,
+} from "./FlowchartConstants";
 
 export interface FlowDateRange {
   from: string | null;
@@ -24,6 +27,8 @@ interface FlowchartControlsProps {
   onNodeSizingChange: (value: "count" | "volume") => void;
   timelineEventLimit: number;
   onTimelineEventLimitChange: (value: number) => void;
+  chainTimeWindowMs: number;
+  onChainTimeWindowChange: (value: number) => void;
   dateRange: FlowDateRange;
   availableDateRange?: FlowDateRange;
   onDateRangeChange: (value: Partial<FlowDateRange>) => void;
@@ -46,6 +51,8 @@ export default function FlowchartControls({
   onNodeSizingChange,
   timelineEventLimit,
   onTimelineEventLimitChange,
+  chainTimeWindowMs,
+  onChainTimeWindowChange,
   dateRange,
   availableDateRange,
   onDateRangeChange,
@@ -200,10 +207,10 @@ export default function FlowchartControls({
           </div>
         </div>
 
-        {/* Time Window */}
+        {/* Transaction Date Range */}
         <div className="lg:col-span-2">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Time Window
+            Transaction Date Range
           </label>
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -368,6 +375,37 @@ export default function FlowchartControls({
           </select>
           <div className="text-xs text-gray-500 mt-1">
             Larger limits may impact chronological view performance.
+          </div>
+        </div>
+
+        {/* Max Gap Between Chain Steps */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Max Gap Between Chain Steps
+          </label>
+          <select
+            value={String(chainTimeWindowMs)}
+            onChange={(event) => {
+              const nextValue = Number(event.target.value);
+              if (!Number.isNaN(nextValue)) {
+                onChainTimeWindowChange(nextValue);
+              }
+            }}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            {!FLOWCHAIN_TIME_WINDOW_OPTIONS.some(
+              (option) => option.value === chainTimeWindowMs
+            ) ? (
+              <option value={String(chainTimeWindowMs)}>Custom window</option>
+            ) : null}
+            {FLOWCHAIN_TIME_WINDOW_OPTIONS.map((option) => (
+              <option key={option.label} value={String(option.value)}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div className="text-xs text-gray-500 mt-1">
+            Transactions further apart than this window will not be chained.
           </div>
         </div>
       </div>

@@ -3,7 +3,7 @@ API v1 router for organizing all analysis endpoints.
 This module provides a centralized router that organizes all analysis endpoints
 and provides proper API versioning and endpoint organization.
 """
-from app.api.v1.endpoints import analysis, health, pdf
+from app.api.v1.endpoints import analysis, flowchart, health, pdf
 from fastapi import APIRouter
 
 api_router = APIRouter(
@@ -47,6 +47,16 @@ api_router.include_router(
     },
 )
 
+api_router.include_router(
+    flowchart.router,
+    tags=["Flowchart Analysis"],
+    responses={
+        200: {"description": "Flowchart chain analysis completed successfully"},
+        404: {"description": "Case or entities not found"},
+        422: {"description": "Request validation failed"},
+        500: {"description": "Analysis processing failed"},
+    },
+)
 
 
 router_info = {
@@ -56,12 +66,14 @@ router_info = {
         "health": {"description": "Health monitoring endpoints", "count": 3},
         "analysis": {"description": "Financial analysis endpoints", "count": 7},
         "pdf": {"description": "PDF extraction endpoints", "count": 1},
+        "flowchart": {"description": "Flowchart chain analysis endpoints", "count": 1},
         "entity_merging": {"description": "Entity merging endpoints", "count": 1},
         "bogus_itc": {"description": "Bogus ITC detection endpoints", "count": 1},
     },
     "features": [
         "Single and multi-entity analysis",
         "Comprehensive pattern detection",
+        "Flowchart chain analysis with hub detection",
         "Standardized response formats",
         "Robust error handling",
         "Performance monitoring",

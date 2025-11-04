@@ -5,6 +5,7 @@ import type { Entity, Transaction } from "@/types/database";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import FlowchartChronologicalView from "./FlowchartChronologicalView";
+import { FLOWCHAIN_TIME_WINDOW_OPTIONS } from "./FlowchartConstants";
 import FlowchartControls, { FlowDateRange } from "./FlowchartControls";
 import FlowchartLegend from "./FlowchartLegend";
 import type {
@@ -41,6 +42,11 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
     "network" | "chronological"
   >("network");
   const [timelineEventLimit, setTimelineEventLimit] = useState<number>(500);
+  const [chainTimeWindowMs, setChainTimeWindowMs] = useState<number>(
+    FLOWCHAIN_TIME_WINDOW_OPTIONS.find(
+      (option) => option.value === 7 * 24 * 60 * 60 * 1000
+    )?.value ?? 7 * 24 * 60 * 60 * 1000
+  );
 
   const availableDateRange = useMemo<FlowDateRange>(() => {
     if (transactions.length === 0) {
@@ -602,6 +608,8 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
         onNodeSizingChange={setNodeSizing}
         timelineEventLimit={timelineEventLimit}
         onTimelineEventLimitChange={(value) => setTimelineEventLimit(value)}
+        chainTimeWindowMs={chainTimeWindowMs}
+        onChainTimeWindowChange={setChainTimeWindowMs}
         dateRange={dateRange}
         availableDateRange={availableDateRange}
         onDateRangeChange={handleDateRangeChange}
@@ -650,12 +658,18 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
             />
           ) : (
             <FlowchartChronologicalView
+              caseId={caseId}
               data={filteredData}
+              selectedEntities={selectedEntities}
+              dateRange={dateRange}
+              showInflow={showInflow}
+              showOutflow={showOutflow}
               timelineEventLimit={timelineEventLimit}
               onTimelineEventLimitChange={(value) =>
                 setTimelineEventLimit(value)
               }
               minAmountThreshold={minAmountThreshold}
+              chainTimeWindowMs={chainTimeWindowMs}
             />
           )}
         </div>

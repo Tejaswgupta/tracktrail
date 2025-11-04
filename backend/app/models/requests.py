@@ -635,3 +635,56 @@ class TransferPatternRequest(AnalysisRequest):
                 },
             },
         }
+
+
+class FlowchartChainRequest(BaseModel):
+    """Request model for flowchart chain analysis."""
+
+    case_id: str = Field(
+        ...,
+        description="Case ID to analyze flowchart chains for"
+    )
+    entity_ids: Optional[List[str]] = Field(
+        None,
+        description="Optional list of entity IDs to filter (if None, all entities in case)"
+    )
+    date_from: Optional[str] = Field(
+        None, 
+        description="Start date for analysis (YYYY-MM-DD format)"
+    )
+    date_to: Optional[str] = Field(
+        None, 
+        description="End date for analysis (YYYY-MM-DD format)"
+    )
+    min_amount_threshold: float = Field(
+        default=0,
+        ge=0,
+        description="Minimum transaction amount to include in chains"
+    )
+    chain_time_window_ms: int = Field(
+        default=7 * 24 * 60 * 60 * 1000,  # 7 days
+        gt=0,
+        description="Maximum time gap between linked transactions (milliseconds)"
+    )
+    include_inflow: bool = Field(
+        default=True,
+        description="Include credit transactions"
+    )
+    include_outflow: bool = Field(
+        default=True,
+        description="Include debit transactions"
+    )
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "case_id": "550e8400-e29b-41d4-a716-446655440000",
+                "entity_ids": ["entity-123", "entity-456"],
+                "date_from": "2024-01-01",
+                "date_to": "2024-12-31",
+                "min_amount_threshold": 100000,
+                "chain_time_window_ms": 604800000,
+                "include_inflow": True,
+                "include_outflow": True,
+            }
+        }

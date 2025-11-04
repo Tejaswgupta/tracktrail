@@ -1,19 +1,19 @@
 "use client";
 
-import { flowchartChainService } from "@/services/flowchartChainService";
-import type {
-  BranchNodeSummary as BackendBranchNodeSummary,
-  EventBranchMeta as BackendEventBranchMeta,
-  FlowChain as BackendFlowChain,
-  FlowEvent as BackendFlowEvent,
-  HubCandidate as BackendHubCandidate,
-} from "@/types/flowchartChain";
 import { useEffect, useMemo, useState } from "react";
 import {
   FLOWCHAIN_TIME_WINDOW_OPTIONS,
   TIMELINE_EVENT_LIMIT_OPTIONS,
 } from "./FlowchartConstants";
 import type { FlowchartData } from "./FlowchartTypes";
+import { flowchartChainService } from "@/services/flowchartChainService";
+import type {
+  FlowEvent as BackendFlowEvent,
+  FlowChain as BackendFlowChain,
+  HubCandidate as BackendHubCandidate,
+  BranchNodeSummary as BackendBranchNodeSummary,
+  EventBranchMeta as BackendEventBranchMeta,
+} from "@/types/flowchartChain";
 
 interface FlowEvent {
   id: string;
@@ -133,9 +133,7 @@ function convertBackendHub(hub: BackendHubCandidate): HubCandidate {
   };
 }
 
-function convertBackendBranchNode(
-  node: BackendBranchNodeSummary
-): BranchNodeSummary {
+function convertBackendBranchNode(node: BackendBranchNodeSummary): BranchNodeSummary {
   return {
     nodeId: node.nodeId,
     label: node.label,
@@ -146,9 +144,7 @@ function convertBackendBranchNode(
   };
 }
 
-function convertBackendBranchMeta(
-  meta: BackendEventBranchMeta
-): EventBranchMeta {
+function convertBackendBranchMeta(meta: BackendEventBranchMeta): EventBranchMeta {
   return {
     splitCount: meta.splitCount,
     splitTargetCount: meta.splitTargetCount,
@@ -169,9 +165,7 @@ export default function FlowchartChronologicalView({
   minAmountThreshold,
   chainTimeWindowMs,
 }: FlowchartChronologicalViewProps) {
-  const [artifacts, setArtifacts] = useState<ChronologicalArtifacts | null>(
-    null
-  );
+  const [artifacts, setArtifacts] = useState<ChronologicalArtifacts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -184,8 +178,7 @@ export default function FlowchartChronologicalView({
       try {
         const result = await flowchartChainService.analyzeFlowchartChains({
           case_id: caseId,
-          entity_ids:
-            selectedEntities.length > 0 ? selectedEntities : undefined,
+          entity_ids: selectedEntities.length > 0 ? selectedEntities : undefined,
           date_from: dateRange.from || undefined,
           date_to: dateRange.to || undefined,
           min_amount_threshold: minAmountThreshold,
@@ -202,12 +195,10 @@ export default function FlowchartChronologicalView({
           branchMeta: Object.fromEntries(
             Object.entries(result.branch_meta).map(([id, meta]) => [
               id,
-              convertBackendBranchMeta(meta as BackendEventBranchMeta),
+              convertBackendBranchMeta(meta),
             ])
           ),
-          branchNodeSummaries: result.branch_nodes.map(
-            convertBackendBranchNode
-          ),
+          branchNodeSummaries: result.branch_nodes.map(convertBackendBranchNode),
           hubCandidates: result.hub_candidates.map(convertBackendHub),
           highlightedHubNodeIds: result.highlighted_hub_node_ids,
         };
@@ -215,9 +206,7 @@ export default function FlowchartChronologicalView({
         setArtifacts(convertedArtifacts);
       } catch (err) {
         console.error("Failed to fetch chain analysis:", err);
-        setError(
-          err instanceof Error ? err.message : "Failed to analyze chains"
-        );
+        setError(err instanceof Error ? err.message : "Failed to analyze chains");
       } finally {
         setLoading(false);
       }
@@ -350,8 +339,7 @@ export default function FlowchartChronologicalView({
             Chains show how funds hop between counterparties over time. We
             surface the top sequences ordered by total value moved and number of
             steps, enforcing a maximum gap of {timeWindowLabel} between linked
-            transactions. Analysis is performed server-side for optimal
-            performance.
+            transactions. Analysis is performed server-side for optimal performance.
           </p>
         </div>
         {chains.length === 0 ? (
@@ -889,6 +877,221 @@ function deriveSequentialRuns(
   events: FlowEvent[],
   maxGapMs: number
 ): FlowChain[] {
+
+  const resolveEndpointId = (
+    endpoint: FlowchartData["edges"][number]["source"]
+  ): string => {
+    if (!endpoint) {
+      return "";
+    }
+
+    if (typeof endpoint === "string") {
+      return endpoint;
+    }
+
+    return endpoint.id;
+  };
+
+  const parseTimestamp = (value?: string): number | null => {
+    if (!value) {
+      return null;
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+
+    return date.getTime();
+  };
+
+  const events: FlowEvent[] = [];
+
+  data.edges.forEach((edge) => {
+    const sourceId = resolveEndpointId(edge.source);
+    const targetId = resolveEndpointId(edge.target);
+    const sourceNode = nodeLookup.get(sourceId);
+    const targetNode = nodeLookup.get(targetId);
+
+    if (!sourceId || !targetId || !sourceNode || !targetNode) {
+      return;
+    }
+
+    (edge.transactions ?? []).forEach((transaction) => {
+      if (!transaction.txDate) {
+        return;
+      }
+
+      events.push({
+        id: transaction.transactionId,
+        txDate: transaction.txDate,
+        timestamp: parseTimestamp(transaction.txDate),
+        sourceId,
+        targetId,
+        sourceLabel: sourceNode.label,
+        targetLabel: targetNode.label,
+        amount: transaction.amount,
+        direction: transaction.direction,
+      });
+    });
+  });
+
+  events.sort((a, b) => {
+    if (a.timestamp !== null && b.timestamp !== null) {
+      return a.timestamp - b.timestamp;
+    }
+
+    if (a.timestamp !== null) {
+      return -1;
+    }
+
+    if (b.timestamp !== null) {
+      return 1;
+    }
+
+    return a.txDate.localeCompare(b.txDate);
+  });
+
+  const chainComputationCapped = events.length > CHAIN_COMPUTATION_CAP;
+  const chainSource = chainComputationCapped
+    ? events.slice(-CHAIN_COMPUTATION_CAP)
+    : events;
+  const eventLookup = new Map(chainSource.map((event) => [event.id, event]));
+
+  const { successorsByEventId, predecessorsByEventId } = buildEventAdjacency(
+    chainSource,
+    maxGapMs
+  );
+
+  const fullChains = deriveFlowChains(chainSource, maxGapMs);
+  const thresholdedChains =
+    minAmountThreshold > 0
+      ? fullChains.filter((chain) => chain.totalAmount >= minAmountThreshold)
+      : fullChains;
+  const chains = thresholdedChains.slice(0, MAX_DISPLAY_CHAINS);
+
+  const branchMeta = buildBranchMeta(
+    successorsByEventId,
+    predecessorsByEventId
+  );
+  const branchNodeSummaries = summarizeBranchNodes(
+    successorsByEventId,
+    predecessorsByEventId,
+    eventLookup,
+    nodeLookup
+  );
+  const hubCandidates = identifyHubCandidates(thresholdedChains, nodeLookup);
+  const highlightedHubNodeIds = Array.from(
+    determineHighlightedHubIds(hubCandidates)
+  );
+
+  return {
+    events,
+    chains,
+    chainComputationCapped,
+    branchMeta,
+    branchNodeSummaries,
+    hubCandidates,
+    highlightedHubNodeIds,
+  };
+}
+
+function deriveFlowChains(events: FlowEvent[], maxGapMs: number): FlowChain[] {
+  if (events.length === 0) {
+    return [];
+  }
+
+  const pathsByEndNode = new Map<string, FlowChain[]>();
+  const bestBySignature = new Map<string, FlowChain>();
+
+  events.forEach((event) => {
+    const baseChain = createChain([event]);
+    const newChains: FlowChain[] = [baseChain];
+
+    const continuations = pathsByEndNode.get(event.sourceId) ?? [];
+    continuations.forEach((chain) => {
+      const lastEvent = chain.events[chain.events.length - 1];
+
+      if (!canChainEvents(lastEvent, event, maxGapMs)) {
+        return;
+      }
+
+      newChains.push(createChain([...chain.events, event]));
+    });
+
+    newChains.forEach((chain) => {
+      const endNodeId = chain.events[chain.events.length - 1].targetId;
+      const candidateList = pathsByEndNode.get(endNodeId) ?? [];
+      candidateList.push(chain);
+
+      const dedup = new Map<string, FlowChain>();
+      candidateList.forEach((candidate) => {
+        const existing = dedup.get(candidate.signature);
+        if (!existing) {
+          dedup.set(candidate.signature, candidate);
+          return;
+        }
+
+        if (prefers(candidate, existing)) {
+          dedup.set(candidate.signature, candidate);
+        }
+      });
+
+      const ranked = Array.from(dedup.values()).sort((a, b) => {
+        if (a.totalAmount !== b.totalAmount) {
+          return b.totalAmount - a.totalAmount;
+        }
+
+        if (a.events.length !== b.events.length) {
+          return b.events.length - a.events.length;
+        }
+
+        if (a.startDate !== b.startDate) {
+          return a.startDate.localeCompare(b.startDate);
+        }
+
+        return a.id.localeCompare(b.id);
+      });
+
+      pathsByEndNode.set(endNodeId, ranked.slice(0, MAX_PATHS_PER_NODE));
+    });
+
+    newChains.forEach((chain) => {
+      if (chain.events.length < 2) {
+        return;
+      }
+
+      const existing = bestBySignature.get(chain.signature);
+      if (!existing || prefers(chain, existing)) {
+        bestBySignature.set(chain.signature, chain);
+      }
+    });
+  });
+
+  const chains = Array.from(bestBySignature.values());
+  chains.sort((a, b) => {
+    if (a.totalAmount !== b.totalAmount) {
+      return b.totalAmount - a.totalAmount;
+    }
+
+    if (a.events.length !== b.events.length) {
+      return b.events.length - a.events.length;
+    }
+
+    if (a.startDate !== b.startDate) {
+      return a.startDate.localeCompare(b.startDate);
+    }
+
+    return a.id.localeCompare(b.id);
+  });
+
+  return chains;
+}
+
+function deriveSequentialRuns(
+  events: FlowEvent[],
+  maxGapMs: number
+): FlowChain[] {
   if (events.length === 0) {
     return [];
   }
@@ -928,28 +1131,425 @@ function deriveSequentialRuns(
 
 function canChainEvents(
   previous: FlowEvent,
-  next_event: FlowEvent,
+  next: FlowEvent,
   maxGapMs: number
 ): boolean {
-  if (previous.targetId !== next_event.sourceId) {
+  if (previous.targetId !== next.sourceId) {
     return false;
   }
 
-  if (previous.timestamp !== null && next_event.timestamp !== null) {
-    if (next_event.timestamp < previous.timestamp) {
+  if (previous.timestamp !== null && next.timestamp !== null) {
+    if (next.timestamp < previous.timestamp) {
       return false;
     }
 
     if (
       Number.isFinite(maxGapMs) &&
       maxGapMs >= 0 &&
-      next_event.timestamp - previous.timestamp > maxGapMs
+      next.timestamp - previous.timestamp > maxGapMs
     ) {
       return false;
     }
   }
 
   return true;
+}
+
+function buildEventAdjacency(
+  events: FlowEvent[],
+  maxGapMs: number
+): {
+  successorsByEventId: Map<string, FlowEvent[]>;
+  predecessorsByEventId: Map<string, FlowEvent[]>;
+} {
+  const successorsByEventId = new Map<string, FlowEvent[]>();
+  const predecessorsByEventId = new Map<string, FlowEvent[]>();
+  const eventsBySource = new Map<string, FlowEvent[]>();
+
+  events.forEach((event) => {
+    const list = eventsBySource.get(event.sourceId);
+    if (list) {
+      list.push(event);
+    } else {
+      eventsBySource.set(event.sourceId, [event]);
+    }
+  });
+
+  events.forEach((event) => {
+    const candidates = eventsBySource.get(event.targetId);
+    if (!candidates) {
+      return;
+    }
+
+    for (const candidate of candidates) {
+      if (event.id === candidate.id) {
+        continue;
+      }
+
+      if (!canChainEvents(event, candidate, maxGapMs)) {
+        if (
+          Number.isFinite(maxGapMs) &&
+          event.timestamp !== null &&
+          candidate.timestamp !== null &&
+          candidate.timestamp > event.timestamp &&
+          candidate.timestamp - event.timestamp > maxGapMs
+        ) {
+          break;
+        }
+        continue;
+      }
+
+      const successors = successorsByEventId.get(event.id);
+      if (successors) {
+        successors.push(candidate);
+      } else {
+        successorsByEventId.set(event.id, [candidate]);
+      }
+
+      const predecessors = predecessorsByEventId.get(candidate.id);
+      if (predecessors) {
+        predecessors.push(event);
+      } else {
+        predecessorsByEventId.set(candidate.id, [event]);
+      }
+    }
+  });
+
+  return { successorsByEventId, predecessorsByEventId };
+}
+
+function buildBranchMeta(
+  successorsByEventId: Map<string, FlowEvent[]>,
+  predecessorsByEventId: Map<string, FlowEvent[]>
+): Record<string, EventBranchMeta> {
+  const meta = new Map<string, EventBranchMeta>();
+
+  const ensure = (eventId: string): EventBranchMeta => {
+    const existing = meta.get(eventId);
+    if (existing) {
+      return existing;
+    }
+    const created: EventBranchMeta = {
+      splitCount: 0,
+      splitTargetCount: 0,
+      mergeCount: 0,
+      mergeSourceCount: 0,
+    };
+    meta.set(eventId, created);
+    return created;
+  };
+
+  successorsByEventId.forEach((successors, eventId) => {
+    if (successors.length <= 1) {
+      return;
+    }
+    const entry = ensure(eventId);
+    entry.splitCount = successors.length;
+    entry.splitTargetCount = new Set(
+      successors.map((candidate) => candidate.targetId)
+    ).size;
+  });
+
+  predecessorsByEventId.forEach((predecessors, eventId) => {
+    if (predecessors.length <= 1) {
+      return;
+    }
+    const entry = ensure(eventId);
+    entry.mergeCount = predecessors.length;
+    entry.mergeSourceCount = new Set(
+      predecessors.map((candidate) => candidate.sourceId)
+    ).size;
+  });
+
+  return Object.fromEntries(meta.entries());
+}
+
+function summarizeBranchNodes(
+  successorsByEventId: Map<string, FlowEvent[]>,
+  predecessorsByEventId: Map<string, FlowEvent[]>,
+  eventLookup: Map<string, FlowEvent>,
+  nodeLookup: Map<string, FlowchartData["nodes"][number]>
+): BranchNodeSummary[] {
+  const summary = new Map<string, BranchNodeSummary>();
+
+  successorsByEventId.forEach((successors, eventId) => {
+    if (successors.length <= 1) {
+      return;
+    }
+
+    const sourceEvent = eventLookup.get(eventId);
+    if (!sourceEvent) {
+      return;
+    }
+
+    const uniqueTargets = new Set(
+      successors.map((candidate) => candidate.targetId)
+    );
+    if (uniqueTargets.size <= 1) {
+      return;
+    }
+
+    const node = nodeLookup.get(sourceEvent.targetId);
+    const label = node?.label ?? sourceEvent.targetLabel;
+    const existing = summary.get(sourceEvent.targetId);
+    const entry: BranchNodeSummary = existing ?? {
+      nodeId: sourceEvent.targetId,
+      label,
+      splitPaths: 0,
+      splitEvents: 0,
+      mergePaths: 0,
+      mergeEvents: 0,
+    };
+    entry.splitEvents += 1;
+    entry.splitPaths += uniqueTargets.size;
+    summary.set(sourceEvent.targetId, entry);
+  });
+
+  predecessorsByEventId.forEach((predecessors, eventId) => {
+    if (predecessors.length <= 1) {
+      return;
+    }
+
+    const targetEvent = eventLookup.get(eventId);
+    if (!targetEvent) {
+      return;
+    }
+
+    const uniqueSources = new Set(
+      predecessors.map((candidate) => candidate.sourceId)
+    );
+    if (uniqueSources.size <= 1) {
+      return;
+    }
+
+    const node = nodeLookup.get(targetEvent.sourceId);
+    const label = node?.label ?? targetEvent.sourceLabel;
+    const existing = summary.get(targetEvent.sourceId);
+    const entry: BranchNodeSummary = existing ?? {
+      nodeId: targetEvent.sourceId,
+      label,
+      splitPaths: 0,
+      splitEvents: 0,
+      mergePaths: 0,
+      mergeEvents: 0,
+    };
+    entry.mergeEvents += 1;
+    entry.mergePaths += uniqueSources.size;
+    summary.set(targetEvent.sourceId, entry);
+  });
+
+  const summaries = Array.from(summary.values());
+  summaries.sort((a, b) => {
+    const aPaths = a.splitPaths + a.mergePaths;
+    const bPaths = b.splitPaths + b.mergePaths;
+    if (aPaths !== bPaths) {
+      return bPaths - aPaths;
+    }
+
+    const aEvents = a.splitEvents + a.mergeEvents;
+    const bEvents = b.splitEvents + b.mergeEvents;
+    if (aEvents !== bEvents) {
+      return bEvents - aEvents;
+    }
+
+    return a.label.localeCompare(b.label);
+  });
+
+  return summaries;
+}
+
+function identifyHubCandidates(
+  chains: FlowChain[],
+  nodeLookup: Map<string, FlowchartData["nodes"][number]>
+): HubCandidate[] {
+  const metrics = new Map<
+    string,
+    {
+      label: string;
+      chainIds: Set<string>;
+      passThroughCount: number;
+      totalInflow: number;
+      totalOutflow: number;
+      uniquePrev: Set<string>;
+      uniqueNext: Set<string>;
+    }
+  >();
+
+  chains.forEach((chain) => {
+    if (chain.events.length < 2) {
+      return;
+    }
+
+    chain.events.forEach((event, index) => {
+      const nextEvent = chain.events[index + 1];
+      if (!nextEvent) {
+        return;
+      }
+
+      const nodeId = event.targetId;
+      const node = nodeLookup.get(nodeId);
+      const label = node?.label ?? event.targetLabel;
+      const current = metrics.get(nodeId);
+      const metric = current ?? {
+        label,
+        chainIds: new Set<string>(),
+        passThroughCount: 0,
+        totalInflow: 0,
+        totalOutflow: 0,
+        uniquePrev: new Set<string>(),
+        uniqueNext: new Set<string>(),
+      };
+
+      metric.chainIds.add(chain.id);
+      metric.passThroughCount += 1;
+      metric.totalInflow += event.amount;
+      metric.totalOutflow += nextEvent.amount;
+      metric.uniquePrev.add(event.sourceId);
+      metric.uniqueNext.add(nextEvent.targetId);
+
+      metrics.set(nodeId, metric);
+    });
+  });
+
+  const results: HubCandidate[] = [];
+
+  metrics.forEach((metric, nodeId) => {
+    results.push({
+      nodeId,
+      label: metric.label,
+      chainCount: metric.chainIds.size,
+      passThroughCount: metric.passThroughCount,
+      inboundConnections: metric.uniquePrev.size,
+      outboundConnections: metric.uniqueNext.size,
+      totalInflow: metric.totalInflow,
+      totalOutflow: metric.totalOutflow,
+    });
+  });
+
+  results.sort((a, b) => {
+    if (a.chainCount !== b.chainCount) {
+      return b.chainCount - a.chainCount;
+    }
+
+    if (a.passThroughCount !== b.passThroughCount) {
+      return b.passThroughCount - a.passThroughCount;
+    }
+
+    const aVolume = a.totalInflow + a.totalOutflow;
+    const bVolume = b.totalInflow + b.totalOutflow;
+    if (aVolume !== bVolume) {
+      return bVolume - aVolume;
+    }
+
+    return a.label.localeCompare(b.label);
+  });
+
+  return results;
+}
+
+function determineHighlightedHubIds(
+  hubCandidates: HubCandidate[]
+): Set<string> {
+  const highlights = new Set<string>();
+
+  hubCandidates.forEach((candidate) => {
+    if (
+      candidate.chainCount >= 2 ||
+      candidate.passThroughCount >= 3 ||
+      candidate.inboundConnections >= 3 ||
+      candidate.outboundConnections >= 3
+    ) {
+      highlights.add(candidate.nodeId);
+    }
+  });
+
+  if (highlights.size === 0) {
+    hubCandidates.slice(0, 3).forEach((candidate) => {
+      highlights.add(candidate.nodeId);
+    });
+  }
+
+  return highlights;
+}
+
+function formatTimeWindowLabel(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "No limit";
+  }
+
+  if (value <= 0) {
+    return "Immediate";
+  }
+
+  const minutes = Math.round(value / (60 * 1000));
+  const minutesPerDay = 24 * 60;
+
+  if (minutes % minutesPerDay === 0) {
+    const days = Math.round(minutes / minutesPerDay);
+    return `${days} day${days === 1 ? "" : "s"}`;
+  }
+
+  if (minutes % 60 === 0) {
+    const hours = Math.round(minutes / 60);
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function buildEventBadges(
+  event: FlowEvent,
+  branchMeta: Record<string, EventBranchMeta>,
+  hubHighlightSet: Set<string>
+): EventBadge[] {
+  const badges: EventBadge[] = [];
+  const seen = new Set<string>();
+  const pushBadge = (badge: EventBadge) => {
+    if (seen.has(badge.label)) {
+      return;
+    }
+    seen.add(badge.label);
+    badges.push(badge);
+  };
+
+  const meta = branchMeta[event.id];
+
+  if (hubHighlightSet.has(event.targetId)) {
+    pushBadge({
+      key: `${event.id}-hub-target`,
+      label: `Hub candidate: ${event.targetLabel}`,
+      className: "bg-amber-100 text-amber-700",
+    });
+  }
+
+  if (
+    hubHighlightSet.has(event.sourceId) &&
+    event.sourceId !== event.targetId
+  ) {
+    pushBadge({
+      key: `${event.id}-hub-source`,
+      label: `Hub candidate: ${event.sourceLabel}`,
+      className: "bg-amber-100 text-amber-700",
+    });
+  }
+
+  if (meta?.splitTargetCount && meta.splitTargetCount > 1) {
+    pushBadge({
+      key: `${event.id}-split`,
+      label: `Splits at ${event.targetLabel} (${meta.splitTargetCount})`,
+      className: "bg-indigo-100 text-indigo-700",
+    });
+  }
+
+  if (meta?.mergeSourceCount && meta.mergeSourceCount > 1) {
+    pushBadge({
+      key: `${event.id}-merge`,
+      label: `Converges at ${event.sourceLabel} (${meta.mergeSourceCount})`,
+      className: "bg-sky-100 text-sky-700",
+    });
+  }
+
+  return badges;
 }
 
 function createChain(events: FlowEvent[]): FlowChain {
@@ -977,4 +1577,82 @@ function buildSignature(events: FlowEvent[]): string {
   ].join("->");
 
   return `${nodeSequence}|${first.txDate}|${last.txDate}`;
+}
+
+function buildNodeSequence(chain: FlowChain): string[] {
+  if (chain.events.length === 0) {
+    return [];
+  }
+
+  const labels = [chain.events[0].sourceLabel];
+  chain.events.forEach((event) => {
+    labels.push(event.targetLabel);
+  });
+  return labels;
+}
+
+function prefers(candidate: FlowChain, incumbent: FlowChain): boolean {
+  if (candidate.totalAmount !== incumbent.totalAmount) {
+    return candidate.totalAmount > incumbent.totalAmount;
+  }
+
+  if (candidate.events.length !== incumbent.events.length) {
+    return candidate.events.length > incumbent.events.length;
+  }
+
+  if (candidate.startDate !== incumbent.startDate) {
+    return candidate.startDate < incumbent.startDate;
+  }
+
+  return candidate.id < incumbent.id;
+}
+
+function formatCurrency(amount: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatDate(value: string) {
+  const parsed = parseDate(value);
+  if (!parsed) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(parsed);
+}
+
+function formatDateTime(value: string) {
+  const parsed = parseDate(value);
+  if (!parsed) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function parseDate(value?: string) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
 }
