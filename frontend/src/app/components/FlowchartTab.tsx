@@ -146,11 +146,25 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
       return null;
     }
 
+    const normalizeName = (name: string) =>
+      name.trim().replace(/\s+/g, " ").toLowerCase();
+
     const entityFilterActive = selectedEntityFilter !== "all";
     const allowedEntities = new Set(selectedEntities);
     const entityLookup = new Map(
       entities.map((entity) => [entity.entity_id, entity])
     );
+    const entityNameLookup = new Map<string, Entity>();
+
+    entities.forEach((entity) => {
+      const normalizedName = normalizeName(entity.entity_name);
+
+      if (!normalizedName || entityNameLookup.has(normalizedName)) {
+        return;
+      }
+
+      entityNameLookup.set(normalizedName, entity);
+    });
 
     const filteredTransactions = transactions.filter((transaction) => {
       const dateKey = transaction.tx_date?.slice(0, 10) ?? "";
@@ -219,7 +233,19 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
     };
 
     const ensureCounterpartyNode = (rawName: string) => {
-      const name = rawName.trim() || "Unknown";
+      const trimmedName = rawName.trim();
+      const name = trimmedName || "Unknown";
+      const normalizedName = trimmedName ? normalizeName(trimmedName) : "";
+
+      if (normalizedName) {
+        const matchingEntity = entityNameLookup.get(normalizedName);
+
+        if (matchingEntity) {
+          ensureEntityNode(matchingEntity.entity_id);
+          return `entity-${matchingEntity.entity_id}`;
+        }
+      }
+
       const nodeId = `counterparty-${name}`;
 
       if (!nodesMap.has(nodeId)) {

@@ -38,6 +38,7 @@ interface FlowchartChronologicalViewProps {
 const MAX_PATHS_PER_NODE = 8;
 const MAX_DISPLAY_CHAINS = 10;
 const CHAIN_COMPUTATION_CAP = FLOWCHAIN_ANALYSIS_CAP;
+const MAX_SEQUENTIAL_RUNS_TO_DISPLAY = 12;
 
 export default function FlowchartChronologicalView({
   data,
@@ -57,6 +58,12 @@ export default function FlowchartChronologicalView({
     () => events.slice(0, safeTimelineLimit),
     [events, safeTimelineLimit]
   );
+  const sequentialRuns = useMemo(
+    () => deriveSequentialRuns(visibleEvents),
+    [visibleEvents]
+  );
+  const displayedRuns = sequentialRuns.slice(0, MAX_SEQUENTIAL_RUNS_TO_DISPLAY);
+  const runsCapped = sequentialRuns.length > displayedRuns.length;
   const showingAllEvents = visibleEvents.length === events.length;
   const nextHigherLimit = TIMELINE_EVENT_LIMIT_OPTIONS.find(
     (option) => option > safeTimelineLimit
@@ -149,6 +156,84 @@ export default function FlowchartChronologicalView({
                           </span>
                           <span className="text-sm font-medium text-gray-800">
                             {index + 1}. {event.sourceLabel}
+                            {" -> "}
+                            {event.targetLabel}
+                          </span>
+                        </div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(event.amount)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h5 className="text-sm font-semibold text-gray-900">
+            Sequential flow runs
+          </h5>
+          <p className="text-xs text-gray-500">
+            We stitch together consecutive transactions where the recipient
+            immediately becomes the next sender. This surfaces direct money hops
+            like A {" -> "} B {" -> "} C.
+          </p>
+          {runsCapped ? (
+            <p className="mt-1 text-xs text-amber-600">
+              Showing the first {MAX_SEQUENTIAL_RUNS_TO_DISPLAY} runs from the
+              loaded timeline slice.
+            </p>
+          ) : null}
+        </div>
+        {displayedRuns.length === 0 ? (
+          <div className="rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-600">
+            No back-to-back flows detected in this slice. Increase the event
+            limit or relax filters to expose longer runs.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {displayedRuns.map((run, index) => {
+              const nodeSequence = buildNodeSequence(run);
+
+              return (
+                <div
+                  key={`${run.signature}-${index}`}
+                  className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm font-medium text-gray-800">
+                      {nodeSequence.join(" -> ")}
+                    </div>
+                    <div className="text-sm font-semibold text-gray-900">
+                      {formatCurrency(run.totalAmount)}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                    <span>Steps: {run.events.length}</span>
+                    <span>|</span>
+                    <span>
+                      Window: {formatDateTime(run.startDate)}
+                      {" -> "}
+                      {formatDateTime(run.endDate)}
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {run.events.map((event, stepIndex) => (
+                      <div
+                        key={event.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded border border-gray-100 bg-gray-50 px-3 py-2"
+                      >
+                        <div className="flex flex-col">
+                          <span className="text-xs text-gray-500">
+                            {formatDateTime(event.txDate)}
+                          </span>
+                          <span className="text-sm font-medium text-gray-800">
+                            {stepIndex + 1}. {event.sourceLabel}
                             {" -> "}
                             {event.targetLabel}
                           </span>
@@ -431,6 +516,49 @@ function deriveFlowChains(events: FlowEvent[]): FlowChain[] {
   });
 
   return chains.slice(0, MAX_DISPLAY_CHAINS);
+}
+
+function deriveSequentialRuns(events: FlowEvent[]): FlowChain[] {
+  if (events.length === 0) {
+    return [];
+  }
+
+  const runs: FlowChain[] = [];
+  let buffer: FlowEvent[] = [];
+
+  const flushBuffer = () => {
+    if (buffer.length >= 2) {
+      runs.push(createChain(buffer));
+    }
+    buffer = [];
+  };
+
+  events.forEach((event) => {
+    if (buffer.length === 0) {
+      buffer.push(event);
+      return;
+    }
+
+    const last = buffer[buffer.length - 1];
+    const nonDecreasingTimestamp =
+      last.timestamp === null ||
+      event.timestamp === null ||
+      last.timestamp <= event.timestamp;
+    const continuesChain =
+      last.targetId === event.sourceId && nonDecreasingTimestamp;
+
+    if (continuesChain) {
+      buffer.push(event);
+      return;
+    }
+
+    flushBuffer();
+    buffer.push(event);
+  });
+
+  flushBuffer();
+
+  return runs;
 }
 
 function createChain(events: FlowEvent[]): FlowChain {
