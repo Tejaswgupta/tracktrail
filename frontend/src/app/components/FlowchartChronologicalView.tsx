@@ -32,6 +32,7 @@ interface FlowchartChronologicalViewProps {
   data: FlowchartData;
   timelineEventLimit: number;
   onTimelineEventLimitChange: (value: number) => void;
+  minAmountThreshold: number;
 }
 
 const MAX_PATHS_PER_NODE = 8;
@@ -42,10 +43,11 @@ export default function FlowchartChronologicalView({
   data,
   timelineEventLimit,
   onTimelineEventLimitChange,
+  minAmountThreshold,
 }: FlowchartChronologicalViewProps) {
   const { events, chains, chainComputationCapped } = useMemo(
-    () => buildChronologicalArtifacts(data),
-    [data]
+    () => buildChronologicalArtifacts(data, minAmountThreshold),
+    [data, minAmountThreshold]
   );
 
   const safeTimelineLimit = Number.isFinite(timelineEventLimit)
@@ -240,7 +242,10 @@ export default function FlowchartChronologicalView({
   );
 }
 
-function buildChronologicalArtifacts(data: FlowchartData) {
+function buildChronologicalArtifacts(
+  data: FlowchartData,
+  minAmountThreshold: number
+) {
   const nodeLookup = new Map(data.nodes.map((node) => [node.id, node]));
 
   const resolveEndpointId = (
@@ -321,7 +326,13 @@ function buildChronologicalArtifacts(data: FlowchartData) {
   const chainSource = chainComputationCapped
     ? events.slice(-CHAIN_COMPUTATION_CAP)
     : events;
-  const chains = deriveFlowChains(chainSource);
+  const chains = deriveFlowChains(chainSource).filter((chain) => {
+    if (minAmountThreshold <= 0) {
+      return true;
+    }
+
+    return chain.totalAmount >= minAmountThreshold;
+  });
 
   return { events, chains, chainComputationCapped };
 }

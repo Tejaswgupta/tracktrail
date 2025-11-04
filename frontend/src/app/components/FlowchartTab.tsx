@@ -295,7 +295,9 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
       ),
     }));
 
-    edges = edges.filter((edge) => edge.amount >= minAmountThreshold);
+    if (minAmountThreshold > 0) {
+      edges = edges.filter((edge) => edge.amount >= minAmountThreshold);
+    }
 
     const connectedNodeIds = new Set<string>();
     edges.forEach((edge) => {
@@ -627,6 +629,7 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
               onTimelineEventLimitChange={(value) =>
                 setTimelineEventLimit(value)
               }
+              minAmountThreshold={minAmountThreshold}
             />
           )}
         </div>
