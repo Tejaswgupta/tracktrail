@@ -6,6 +6,8 @@ interface FlowchartControlsProps {
   entities: Entity[];
   selectedEntityFilter: string;
   onEntityFilterChange: (value: string) => void;
+  selectedEntities: string[];
+  onSelectedEntitiesChange: (value: string[]) => void;
   minAmountThreshold: number;
   onMinAmountThresholdChange: (value: number) => void;
   showInflow: boolean;
@@ -20,6 +22,8 @@ export default function FlowchartControls({
   entities,
   selectedEntityFilter,
   onEntityFilterChange,
+  selectedEntities,
+  onSelectedEntitiesChange,
   minAmountThreshold,
   onMinAmountThresholdChange,
   showInflow,
@@ -40,26 +44,111 @@ export default function FlowchartControls({
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-lg font-medium text-gray-900 mb-4">Filters & Settings</h3>
+      <h3 className="text-lg font-medium text-gray-900 mb-4">
+        Filters & Settings
+      </h3>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* Entity Filter */}
-        <div>
+        <div className="lg:col-span-2">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Entity Filter
+            Entity Selection
           </label>
-          <select
-            value={selectedEntityFilter}
-            onChange={(e) => onEntityFilterChange(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">All Entities</option>
-            {entities.map((entity) => (
-              <option key={entity.entity_id} value={entity.entity_id}>
-                {entity.entity_name}
-              </option>
-            ))}
-          </select>
+
+          {/* Quick select options */}
+          <div className="mb-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                onEntityFilterChange("all");
+                onSelectedEntitiesChange([]);
+              }}
+              className={`px-3 py-1 text-xs rounded ${
+                selectedEntityFilter === "all"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              All Entities
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onEntityFilterChange("custom");
+                onSelectedEntitiesChange(entities.map(e => e.entity_id));
+              }}
+              className={`px-3 py-1 text-xs rounded ${
+                selectedEntityFilter === "custom" && selectedEntities.length === entities.length
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              Select All
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onEntityFilterChange("custom");
+                onSelectedEntitiesChange([]);
+              }}
+              className={`px-3 py-1 text-xs rounded ${
+                selectedEntityFilter === "custom" && selectedEntities.length === 0
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              Clear All
+            </button>
+          </div>
+
+          {/* Entity checkboxes */}
+          <div className="max-h-32 overflow-y-auto border border-gray-300 rounded-md p-3 bg-gray-50">
+            <div className="space-y-2">
+              {entities.map((entity) => {
+                const isSelected = selectedEntityFilter === "all" ||
+                  (selectedEntityFilter === "custom" && selectedEntities.includes(entity.entity_id));
+
+                return (
+                  <label key={entity.entity_id} className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          if (selectedEntityFilter === "all") {
+                            onEntityFilterChange("custom");
+                            onSelectedEntitiesChange([entity.entity_id]);
+                          } else {
+                            onSelectedEntitiesChange([...selectedEntities, entity.entity_id]);
+                          }
+                        } else {
+                          const newSelected = selectedEntities.filter(id => id !== entity.entity_id);
+                          if (newSelected.length === 0) {
+                            onEntityFilterChange("all");
+                            onSelectedEntitiesChange([]);
+                          } else {
+                            onSelectedEntitiesChange(newSelected);
+                          }
+                        }
+                      }}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <span className="ml-2 text-sm text-gray-700 truncate">
+                      {entity.entity_name}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Selection summary */}
+          <div className="text-xs text-gray-500 mt-1">
+            {selectedEntityFilter === "all"
+              ? "All entities selected"
+              : `${selectedEntities.length} of ${entities.length} entities selected`
+            }
+          </div>
         </div>
 
         {/* Minimum Amount Threshold */}
@@ -68,20 +157,16 @@ export default function FlowchartControls({
             Min. Transaction Amount
           </label>
           <input
-            type="range"
+            type="number"
             min="0"
-            max="1000000"
-            step="10000"
+            step="1000"
             value={minAmountThreshold}
             onChange={(e) => onMinAmountThresholdChange(Number(e.target.value))}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+            placeholder="Enter amount"
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
-          <div className="flex justify-between text-xs text-gray-500 mt-1">
-            <span>₹0</span>
-            <span className="font-medium text-gray-700">
-              {formatCurrency(minAmountThreshold)}
-            </span>
-            <span>₹10L+</span>
+          <div className="text-xs text-gray-500 mt-1">
+            Current: {formatCurrency(minAmountThreshold)}
           </div>
         </div>
 
@@ -98,7 +183,9 @@ export default function FlowchartControls({
                 onChange={(e) => onShowInflowChange(e.target.checked)}
                 className="h-4 w-4 text-green-600 focus:ring-blue-500 border-gray-300 rounded"
               />
-              <span className="ml-2 text-sm text-gray-700">Inflow (Credits)</span>
+              <span className="ml-2 text-sm text-gray-700">
+                Inflow (Credits)
+              </span>
             </label>
             <label className="flex items-center">
               <input
@@ -107,7 +194,9 @@ export default function FlowchartControls({
                 onChange={(e) => onShowOutflowChange(e.target.checked)}
                 className="h-4 w-4 text-red-600 focus:ring-blue-500 border-gray-300 rounded"
               />
-              <span className="ml-2 text-sm text-gray-700">Outflow (Debits)</span>
+              <span className="ml-2 text-sm text-gray-700">
+                Outflow (Debits)
+              </span>
             </label>
           </div>
         </div>
@@ -124,7 +213,9 @@ export default function FlowchartControls({
                 name="nodeSizing"
                 value="volume"
                 checked={nodeSizing === "volume"}
-                onChange={(e) => onNodeSizingChange(e.target.value as "count" | "volume")}
+                onChange={(e) =>
+                  onNodeSizingChange(e.target.value as "count" | "volume")
+                }
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
               />
               <span className="ml-2 text-sm text-gray-700">Total Volume</span>
@@ -135,10 +226,14 @@ export default function FlowchartControls({
                 name="nodeSizing"
                 value="count"
                 checked={nodeSizing === "count"}
-                onChange={(e) => onNodeSizingChange(e.target.value as "count" | "volume")}
+                onChange={(e) =>
+                  onNodeSizingChange(e.target.value as "count" | "volume")
+                }
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
               />
-              <span className="ml-2 text-sm text-gray-700">Transaction Count</span>
+              <span className="ml-2 text-sm text-gray-700">
+                Transaction Count
+              </span>
             </label>
           </div>
         </div>

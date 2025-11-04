@@ -62,6 +62,7 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
   // Control states
   const [selectedEntityFilter, setSelectedEntityFilter] =
     useState<string>("all");
+  const [selectedEntities, setSelectedEntities] = useState<string[]>([]);
   const [minAmountThreshold, setMinAmountThreshold] = useState(0);
   const [showInflow, setShowInflow] = useState(true);
   const [showOutflow, setShowOutflow] = useState(true);
@@ -263,15 +264,15 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
     let filteredNodes = normalizedNodes;
     let filteredEdges = normalizedEdges;
 
-    // Filter by selected entity FIRST (this is a hard filter)
+    // Filter by selected entities FIRST (this is a hard filter)
     if (selectedEntityFilter !== "all") {
-      const entityNodeId = `entity-${selectedEntityFilter}`;
+      const entityNodeIds = selectedEntities.map(id => `entity-${id}`);
       filteredNodes = filteredNodes.filter(
-        (node) => node.id === entityNodeId || node.type === "counterparty"
+        (node) => entityNodeIds.includes(node.id) || node.type === "counterparty"
       );
 
       filteredEdges = filteredEdges.filter(
-        (edge) => edge.source === entityNodeId || edge.target === entityNodeId
+        (edge) => entityNodeIds.includes(edge.source) || entityNodeIds.includes(edge.target)
       );
     }
 
@@ -299,10 +300,12 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
       connectedNodes.add(edge.target);
     });
 
-    // If entity filter is active, keep that entity even if it has no edges
+    // If entity filter is active, keep those entities even if they have no edges
     if (selectedEntityFilter !== "all") {
-      const entityNodeId = `entity-${selectedEntityFilter}`;
-      connectedNodes.add(entityNodeId);
+      selectedEntities.forEach(id => {
+        const entityNodeId = `entity-${id}`;
+        connectedNodes.add(entityNodeId);
+      });
     }
 
     filteredNodes = filteredNodes.filter((node) => connectedNodes.has(node.id));
@@ -322,6 +325,7 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
   }, [
     flowchartData,
     selectedEntityFilter,
+    selectedEntities,
     minAmountThreshold,
     showInflow,
     showOutflow,
@@ -504,6 +508,8 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
         entities={entities}
         selectedEntityFilter={selectedEntityFilter}
         onEntityFilterChange={setSelectedEntityFilter}
+        selectedEntities={selectedEntities}
+        onSelectedEntitiesChange={setSelectedEntities}
         minAmountThreshold={minAmountThreshold}
         onMinAmountThresholdChange={setMinAmountThreshold}
         showInflow={showInflow}
