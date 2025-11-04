@@ -2,37 +2,14 @@
 
 import * as d3 from "d3";
 import { useEffect, useRef, useState } from "react";
+import type {
+  FlowchartEdge as BaseFlowchartEdge,
+  FlowchartNode as BaseFlowchartNode,
+  FlowchartData,
+} from "./FlowchartTypes";
 
-interface FlowchartNode extends d3.SimulationNodeDatum {
-  id: string;
-  label: string;
-  type: "entity" | "counterparty";
-  totalInflow: number;
-  totalOutflow: number;
-  netFlow: number;
-  transactionCount: number;
-  riskScore?: number;
-  entityId?: string;
-}
-
-interface FlowchartEdge {
-  source: string | FlowchartNode;
-  target: string | FlowchartNode;
-  amount: number;
-  transactionCount: number;
-  direction: "inflow" | "outflow";
-}
-
-interface FlowchartData {
-  nodes: FlowchartNode[];
-  edges: FlowchartEdge[];
-  summary: {
-    totalEntities: number;
-    totalCounterparties: number;
-    totalVolume: number;
-    totalTransactions: number;
-  };
-}
+type FlowchartNode = BaseFlowchartNode & d3.SimulationNodeDatum;
+type FlowchartEdge = BaseFlowchartEdge;
 
 interface FlowchartVisualizationProps {
   data: FlowchartData;
@@ -72,14 +49,16 @@ export default function FlowchartVisualization({
       typeof endpoint === "string" ? endpoint : endpoint?.id ?? "";
 
     // Clone inbound data so D3 mutations stay isolated to this render cycle.
-    const nodesData = data.nodes.map((node) => ({ ...node }));
+    const nodesData = data.nodes.map((node) => ({
+      ...node,
+    })) as FlowchartNode[];
     const edgesData = data.edges
       .map((edge) => ({
         ...edge,
         source: resolveEndpointId(edge.source),
         target: resolveEndpointId(edge.target),
       }))
-      .filter((edge) => edge.source && edge.target);
+      .filter((edge) => edge.source && edge.target) as FlowchartEdge[];
 
     const nodeById = new Map(nodesData.map((node) => [node.id, node]));
 
@@ -195,7 +174,7 @@ export default function FlowchartVisualization({
     const link = container
       .append("g")
       .attr("class", "links")
-      .selectAll("line")
+      .selectAll<SVGLineElement, FlowchartEdge>("line")
       .data(edgesData)
       .join("line")
       .attr("stroke", (d) => getEdgeColor(d))
@@ -210,7 +189,7 @@ export default function FlowchartVisualization({
     const linkLabel = container
       .append("g")
       .attr("class", "link-labels")
-      .selectAll("text")
+      .selectAll<SVGTextElement, FlowchartEdge>("text")
       .data(edgesData)
       .join("text")
       .attr("font-size", 10)
@@ -233,7 +212,7 @@ export default function FlowchartVisualization({
     const node = container
       .append("g")
       .attr("class", "nodes")
-      .selectAll("g")
+      .selectAll<SVGGElement, FlowchartNode>("g")
       .data(nodesData)
       .join("g")
       .call(
@@ -304,6 +283,15 @@ export default function FlowchartVisualization({
       }).format(amount);
     };
 
+    const formatDate = (value?: string | null) => {
+      if (!value) return "-";
+      return new Intl.DateTimeFormat("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }).format(new Date(value));
+    };
+
     // Add tooltips to nodes
     node
       .on("mouseover", function (_event, d) {
@@ -369,6 +357,21 @@ export default function FlowchartVisualization({
               }<br/>
               <strong>Direction:</strong> ${edge.direction}<br/>
               <strong>Amount:</strong> ${formatCurrency(edge.amount)}<br/>
+              ${
+                edge.firstTransactionDate
+                  ? `<strong>First Tx:</strong> ${formatDate(
+                      edge.firstTransactionDate
+                    )}<br/>`
+                  : ""
+              }
+              ${
+                edge.lastTransactionDate &&
+                edge.lastTransactionDate !== edge.firstTransactionDate
+                  ? `<strong>Last Tx:</strong> ${formatDate(
+                      edge.lastTransactionDate
+                    )}<br/>`
+                  : ""
+              }
               <strong>Transactions:</strong> ${edge.transactionCount.toLocaleString()}
             </div>
           `
@@ -399,7 +402,7 @@ export default function FlowchartVisualization({
         .attr("x", (d: any) => ((d.source as any).x + (d.target as any).x) / 2)
         .attr("y", (d: any) => ((d.source as any).y + (d.target as any).y) / 2);
 
-      node.attr("transform", (d) => `translate(${d.x},${d.y})`);
+      node.attr("transform", (d: FlowchartNode) => `translate(${d.x},${d.y})`);
     });
 
     // Drag functions

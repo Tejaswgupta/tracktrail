@@ -1,51 +1,19 @@
 "use client";
 
-import {
-  counterpartyService,
-  entitiesService,
-  transactionsService,
-} from "@/services/database";
-import type { Entity } from "@/types/database";
-import { useEffect, useMemo, useState } from "react";
-import FlowchartControls from "./FlowchartControls";
+import { entitiesService, transactionsService } from "@/services/database";
+import type { Entity, Transaction } from "@/types/database";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import FlowchartChronologicalView from "./FlowchartChronologicalView";
+import FlowchartControls, { FlowDateRange } from "./FlowchartControls";
 import FlowchartLegend from "./FlowchartLegend";
+import type {
+  EdgeTransactionSummary,
+  FlowchartData,
+  FlowchartEdge,
+  FlowchartNode,
+} from "./FlowchartTypes";
 import FlowchartVisualization from "./FlowchartVisualization";
-
-interface FlowchartNode {
-  id: string;
-  label: string;
-  type: "entity" | "counterparty";
-  totalInflow: number;
-  totalOutflow: number;
-  netFlow: number;
-  transactionCount: number;
-  riskScore?: number;
-  entityId?: string; // Only for entity nodes
-}
-
-interface FlowchartEdge {
-  source: string | FlowchartNode;
-  target: string | FlowchartNode;
-  amount: number;
-  transactionCount: number;
-  direction: "inflow" | "outflow";
-}
-
-type NormalizedFlowchartEdge = Omit<FlowchartEdge, "source" | "target"> & {
-  source: string;
-  target: string;
-};
-
-interface FlowchartData {
-  nodes: FlowchartNode[];
-  edges: FlowchartEdge[];
-  summary: {
-    totalEntities: number;
-    totalCounterparties: number;
-    totalVolume: number;
-    totalTransactions: number;
-  };
-}
 
 interface FlowchartTabProps {
   caseId: string;
@@ -53,9 +21,11 @@ interface FlowchartTabProps {
 
 export default function FlowchartTab({ caseId }: FlowchartTabProps) {
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [flowchartData, setFlowchartData] = useState<FlowchartData | null>(
-    null
-  );
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [dateRange, setDateRange] = useState<FlowDateRange>({
+    from: null,
+    to: null,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,174 +33,98 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
   const [selectedEntityFilter, setSelectedEntityFilter] =
     useState<string>("all");
   const [selectedEntities, setSelectedEntities] = useState<string[]>([]);
-  const [minAmountThreshold, setMinAmountThreshold] = useState(0);
+  const [minAmountThreshold, setMinAmountThreshold] = useState(100000);
   const [showInflow, setShowInflow] = useState(true);
   const [showOutflow, setShowOutflow] = useState(true);
   const [nodeSizing, setNodeSizing] = useState<"count" | "volume">("volume");
+  const [visualizationMode, setVisualizationMode] = useState<
+    "network" | "chronological"
+  >("network");
+  const [timelineEventLimit, setTimelineEventLimit] = useState<number>(500);
 
-  // D3 rewrites link endpoints to node objects; keep comparisons stable by normalizing to IDs.
-  const normalizeEdgeEndpoint = (endpoint: FlowchartEdge["source"]): string =>
-    typeof endpoint === "string" ? endpoint : endpoint?.id ?? "";
+  const availableDateRange = useMemo<FlowDateRange>(() => {
+    if (transactions.length === 0) {
+      return { from: null, to: null };
+    }
+
+    const dateKeys = transactions
+      .map((transaction) => transaction.tx_date?.slice(0, 10) ?? null)
+      .filter((value): value is string => Boolean(value));
+
+    if (dateKeys.length === 0) {
+      return { from: null, to: null };
+    }
+
+    const minDate = dateKeys.reduce((min, current) =>
+      current < min ? current : min
+    );
+    const maxDate = dateKeys.reduce((max, current) =>
+      current > max ? current : max
+    );
+
+    return { from: minDate, to: maxDate };
+  }, [transactions]);
+
+  const handleDateRangeChange = useCallback((value: Partial<FlowDateRange>) => {
+    setDateRange((previous) => {
+      const next = { ...previous, ...value };
+
+      if (next.from && next.to && next.from > next.to) {
+        if (value.from !== undefined) {
+          next.to = next.from;
+        } else if (value.to !== undefined) {
+          next.from = next.to;
+        }
+      }
+
+      return next;
+    });
+  }, []);
+
+  const handleResetDateRange = useCallback(() => {
+    if (availableDateRange.from && availableDateRange.to) {
+      setDateRange({
+        from: availableDateRange.from,
+        to: availableDateRange.to,
+      });
+    }
+  }, [availableDateRange]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-
-        const [entitiesData, counterpartiesData] = await Promise.all([
+        const [entitiesData, transactionsData] = await Promise.all([
           entitiesService.getByCaseId(caseId),
-          counterpartyService.getCaseCounterpartyStatsWithDetails(caseId),
-        ]);
-
-        setEntities(entitiesData);
-
-        // Build nodes
-        const nodes: FlowchartNode[] = [];
-
-        // Add entity nodes
-        entitiesData.forEach((entity) => {
-          nodes.push({
-            id: `entity-${entity.entity_id}`,
-            label: entity.entity_name,
-            type: "entity",
-            totalInflow: 0,
-            totalOutflow: 0,
-            netFlow: 0,
-            transactionCount: 0,
-            riskScore: entity.risk_score,
-            entityId: entity.entity_id,
-          });
-        });
-
-        // Add counterparty nodes
-        const seenCounterparties = new Set<string>();
-        counterpartiesData.forEach((cp) => {
-          const counterpartyName = cp.counterparty_name;
-          if (!seenCounterparties.has(counterpartyName)) {
-            seenCounterparties.add(counterpartyName);
-            nodes.push({
-              id: `counterparty-${counterpartyName}`,
-              label: counterpartyName,
-              type: "counterparty",
-              totalInflow: 0,
-              totalOutflow: 0,
-              netFlow: 0,
-              transactionCount: 0,
-            });
-          }
-        });
-
-        // Build edges by aggregating transactions
-        const edgesMap = new Map<string, FlowchartEdge>();
-
-        // Get all transactions for the case
-        const transactions =
-          await transactionsService.getCaseTransactionsForAnalysis(caseId, [
+          transactionsService.getCaseTransactionsForAnalysis(caseId, [
             "transaction_id",
+            "tx_date",
             "amount",
             "direction",
             "entity_id",
             "counterparty_merged",
-          ]);
+          ]),
+        ]);
 
-        // First pass: collect all counterparties from transactions
-        transactions.forEach((tx) => {
-          const counterpartyName = tx.counterparty_merged || "Unknown";
-          const counterpartyNodeId = `counterparty-${counterpartyName}`;
+        setEntities(entitiesData);
+        setTransactions(transactionsData);
 
-          // Create node if it doesn't exist
-          if (!seenCounterparties.has(counterpartyName)) {
-            seenCounterparties.add(counterpartyName);
-            nodes.push({
-              id: counterpartyNodeId,
-              label: counterpartyName,
-              type: "counterparty",
-              totalInflow: 0,
-              totalOutflow: 0,
-              netFlow: 0,
-              transactionCount: 0,
-            });
-          }
-        });
+        const dateKeys = transactionsData
+          .map((tx) => tx.tx_date?.slice(0, 10) ?? null)
+          .filter((value): value is string => Boolean(value));
 
-        // Second pass: aggregate transactions
-        transactions.forEach((tx) => {
-          const entityId = tx.entity_id;
-          const counterpartyName = tx.counterparty_merged || "Unknown";
-          const isDebit = tx.direction === "DR";
-
-          // Create edge key (entity -> counterparty for debits, counterparty -> entity for credits)
-          const sourceId = isDebit
-            ? `entity-${entityId}`
-            : `counterparty-${counterpartyName}`;
-          const targetId = isDebit
-            ? `counterparty-${counterpartyName}`
-            : `entity-${entityId}`;
-
-          const edgeKey = `${sourceId}-${targetId}`;
-
-          if (!edgesMap.has(edgeKey)) {
-            edgesMap.set(edgeKey, {
-              source: sourceId,
-              target: targetId,
-              amount: 0,
-              transactionCount: 0,
-              direction: isDebit ? "outflow" : "inflow",
-            });
-          }
-
-          const edge = edgesMap.get(edgeKey)!;
-          edge.amount += tx.amount;
-          edge.transactionCount += 1;
-
-          // Update node stats
-          const sourceNode = nodes.find((n) => n.id === sourceId);
-          const targetNode = nodes.find((n) => n.id === targetId);
-
-          if (sourceNode) {
-            if (isDebit) {
-              sourceNode.totalOutflow += tx.amount;
-            } else {
-              sourceNode.totalInflow += tx.amount;
-            }
-            sourceNode.transactionCount += 1;
-          }
-
-          if (targetNode) {
-            if (isDebit) {
-              targetNode.totalInflow += tx.amount;
-            } else {
-              targetNode.totalOutflow += tx.amount;
-            }
-            targetNode.transactionCount += 1;
-          }
-        });
-
-        // Calculate net flow for nodes
-        nodes.forEach((node) => {
-          node.netFlow = node.totalInflow - node.totalOutflow;
-        });
-
-        // Get all edges
-        const edges = Array.from(edgesMap.values());
-
-        // Create summary
-        const summary = {
-          totalEntities: entitiesData.length,
-          totalCounterparties: seenCounterparties.size,
-          totalVolume: edges.reduce((sum, e) => sum + e.amount, 0),
-          totalTransactions: edges.reduce(
-            (sum, e) => sum + e.transactionCount,
-            0
-          ),
-        };
-
-        setFlowchartData({
-          nodes,
-          edges,
-          summary,
-        });
+        if (dateKeys.length > 0) {
+          const minDate = dateKeys.reduce((min, current) =>
+            current < min ? current : min
+          );
+          const maxDate = dateKeys.reduce((max, current) =>
+            current > max ? current : max
+          );
+          setDateRange({ from: minDate, to: maxDate });
+        } else {
+          setDateRange({ from: null, to: null });
+        }
       } catch (err) {
         console.error("Error fetching flowchart data:", err);
         setError(
@@ -247,83 +141,243 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
   }, [caseId]);
 
   // Apply filters to flowchart data
-  const filteredData = useMemo(() => {
-    if (!flowchartData) return null;
-
-    const normalizedNodes = flowchartData.nodes.map((node) => ({ ...node }));
-    const normalizedEdges: NormalizedFlowchartEdge[] = flowchartData.edges
-      .map((edge) => ({
-        ...edge,
-        source: normalizeEdgeEndpoint(edge.source),
-        target: normalizeEdgeEndpoint(edge.target),
-      }))
-      .filter(
-        (edge) => edge.source && edge.target
-      ) as NormalizedFlowchartEdge[];
-
-    let filteredNodes = normalizedNodes;
-    let filteredEdges = normalizedEdges;
-
-    // Filter by selected entities FIRST (this is a hard filter)
-    if (selectedEntityFilter !== "all") {
-      const entityNodeIds = selectedEntities.map(id => `entity-${id}`);
-      filteredNodes = filteredNodes.filter(
-        (node) => entityNodeIds.includes(node.id) || node.type === "counterparty"
-      );
-
-      filteredEdges = filteredEdges.filter(
-        (edge) => entityNodeIds.includes(edge.source) || entityNodeIds.includes(edge.target)
-      );
+  const filteredData = useMemo<FlowchartData | null>(() => {
+    if (loading) {
+      return null;
     }
 
-    // Filter edges by amount and direction (these are soft filters)
-    filteredEdges = filteredEdges.filter(
-      (edge) => edge.amount >= minAmountThreshold
+    const entityFilterActive = selectedEntityFilter !== "all";
+    const allowedEntities = new Set(selectedEntities);
+    const entityLookup = new Map(
+      entities.map((entity) => [entity.entity_id, entity])
     );
 
-    if (!showInflow) {
-      filteredEdges = filteredEdges.filter(
-        (edge) => edge.direction !== "inflow"
-      );
-    }
-    if (!showOutflow) {
-      filteredEdges = filteredEdges.filter(
-        (edge) => edge.direction !== "outflow"
-      );
-    }
+    const filteredTransactions = transactions.filter((transaction) => {
+      const dateKey = transaction.tx_date?.slice(0, 10) ?? "";
 
-    // Only filter nodes after ALL edge filtering is complete
-    // This prevents the "graph disappears and won't come back" bug
-    const connectedNodes = new Set<string>();
-    filteredEdges.forEach((edge) => {
-      connectedNodes.add(edge.source);
-      connectedNodes.add(edge.target);
+      if (dateRange.from && dateKey < dateRange.from) {
+        return false;
+      }
+
+      if (dateRange.to && dateKey > dateRange.to) {
+        return false;
+      }
+
+      if (entityFilterActive && !allowedEntities.has(transaction.entity_id)) {
+        return false;
+      }
+
+      if (!showOutflow && transaction.direction === "DR") {
+        return false;
+      }
+
+      if (!showInflow && transaction.direction === "CR") {
+        return false;
+      }
+
+      return true;
     });
 
-    // If entity filter is active, keep those entities even if they have no edges
-    if (selectedEntityFilter !== "all") {
-      selectedEntities.forEach(id => {
-        const entityNodeId = `entity-${id}`;
-        connectedNodes.add(entityNodeId);
+    if (filteredTransactions.length === 0) {
+      return {
+        nodes: [],
+        edges: [],
+        summary: {
+          totalEntities: entityFilterActive
+            ? allowedEntities.size
+            : entities.length,
+          totalCounterparties: 0,
+          totalVolume: 0,
+          totalTransactions: 0,
+        },
+      };
+    }
+
+    const nodesMap = new Map<string, FlowchartNode>();
+    const edgesMap = new Map<
+      string,
+      FlowchartEdge & { transactions: EdgeTransactionSummary[] }
+    >();
+
+    const ensureEntityNode = (entityId: string) => {
+      const nodeId = `entity-${entityId}`;
+
+      if (!nodesMap.has(nodeId)) {
+        const entity = entityLookup.get(entityId);
+        nodesMap.set(nodeId, {
+          id: nodeId,
+          label: entity?.entity_name ?? `Entity ${entityId}`,
+          type: "entity",
+          totalInflow: 0,
+          totalOutflow: 0,
+          netFlow: 0,
+          transactionCount: 0,
+          riskScore: entity?.risk_score,
+          entityId,
+        });
+      }
+    };
+
+    const ensureCounterpartyNode = (rawName: string) => {
+      const name = rawName.trim() || "Unknown";
+      const nodeId = `counterparty-${name}`;
+
+      if (!nodesMap.has(nodeId)) {
+        nodesMap.set(nodeId, {
+          id: nodeId,
+          label: name,
+          type: "counterparty",
+          totalInflow: 0,
+          totalOutflow: 0,
+          netFlow: 0,
+          transactionCount: 0,
+        });
+      }
+
+      return nodeId;
+    };
+
+    filteredTransactions.forEach((transaction) => {
+      const entityId = transaction.entity_id;
+      const counterpartyName = transaction.counterparty_merged ?? "Unknown";
+      const isDebit = transaction.direction === "DR";
+
+      ensureEntityNode(entityId);
+      const counterpartyNodeId = ensureCounterpartyNode(counterpartyName);
+
+      const sourceId = isDebit ? `entity-${entityId}` : counterpartyNodeId;
+      const targetId = isDebit ? counterpartyNodeId : `entity-${entityId}`;
+
+      const edgeKey = `${sourceId}->${targetId}`;
+
+      if (!edgesMap.has(edgeKey)) {
+        edgesMap.set(edgeKey, {
+          source: sourceId,
+          target: targetId,
+          amount: 0,
+          transactionCount: 0,
+          direction: isDebit ? "outflow" : "inflow",
+          transactions: [],
+          firstTransactionDate: transaction.tx_date,
+          lastTransactionDate: transaction.tx_date,
+        });
+      }
+
+      const edge = edgesMap.get(edgeKey)!;
+      edge.amount += transaction.amount;
+      edge.transactionCount += 1;
+      edge.transactions?.push({
+        transactionId: transaction.transaction_id,
+        txDate: transaction.tx_date,
+        amount: transaction.amount,
+        direction: transaction.direction,
+      });
+
+      if (
+        !edge.firstTransactionDate ||
+        transaction.tx_date < edge.firstTransactionDate
+      ) {
+        edge.firstTransactionDate = transaction.tx_date;
+      }
+
+      if (
+        !edge.lastTransactionDate ||
+        transaction.tx_date > edge.lastTransactionDate
+      ) {
+        edge.lastTransactionDate = transaction.tx_date;
+      }
+    });
+
+    let edges = Array.from(edgesMap.values()).map((edge) => ({
+      ...edge,
+      transactions: edge.transactions?.sort((a, b) =>
+        a.txDate.localeCompare(b.txDate)
+      ),
+    }));
+
+    edges = edges.filter((edge) => edge.amount >= minAmountThreshold);
+
+    const connectedNodeIds = new Set<string>();
+    edges.forEach((edge) => {
+      connectedNodeIds.add(edge.source as string);
+      connectedNodeIds.add(edge.target as string);
+    });
+
+    if (entityFilterActive) {
+      allowedEntities.forEach((entityId) => {
+        ensureEntityNode(entityId);
+        connectedNodeIds.add(`entity-${entityId}`);
       });
     }
 
-    filteredNodes = filteredNodes.filter((node) => connectedNodes.has(node.id));
+    const nodeStats = new Map<
+      string,
+      { totalInflow: number; totalOutflow: number; transactionCount: number }
+    >();
+
+    connectedNodeIds.forEach((id) => {
+      nodeStats.set(id, {
+        totalInflow: 0,
+        totalOutflow: 0,
+        transactionCount: 0,
+      });
+    });
+
+    edges.forEach((edge) => {
+      const sourceId = edge.source as string;
+      const targetId = edge.target as string;
+      const sourceStats = nodeStats.get(sourceId);
+      const targetStats = nodeStats.get(targetId);
+
+      if (sourceStats) {
+        sourceStats.totalOutflow += edge.amount;
+        sourceStats.transactionCount += edge.transactionCount;
+      }
+
+      if (targetStats) {
+        targetStats.totalInflow += edge.amount;
+        targetStats.transactionCount += edge.transactionCount;
+      }
+    });
+
+    const nodes = Array.from(nodesMap.entries())
+      .filter(([nodeId]) => connectedNodeIds.has(nodeId))
+      .map(([, node]) => {
+        const stats = nodeStats.get(node.id);
+        const totalInflow = stats?.totalInflow ?? 0;
+        const totalOutflow = stats?.totalOutflow ?? 0;
+        const transactionCount = stats?.transactionCount ?? 0;
+
+        return {
+          ...node,
+          totalInflow,
+          totalOutflow,
+          netFlow: totalInflow - totalOutflow,
+          transactionCount,
+        };
+      });
+
+    const summary = {
+      totalEntities: nodes.filter((node) => node.type === "entity").length,
+      totalCounterparties: nodes.filter((node) => node.type === "counterparty")
+        .length,
+      totalVolume: edges.reduce((sum, edge) => sum + edge.amount, 0),
+      totalTransactions: edges.reduce(
+        (sum, edge) => sum + edge.transactionCount,
+        0
+      ),
+    };
 
     return {
-      nodes: filteredNodes,
-      edges: filteredEdges,
-      summary: {
-        ...flowchartData.summary,
-        totalVolume: filteredEdges.reduce((sum, e) => sum + e.amount, 0),
-        totalTransactions: filteredEdges.reduce(
-          (sum, e) => sum + e.transactionCount,
-          0
-        ),
-      },
+      nodes,
+      edges,
+      summary,
     };
   }, [
-    flowchartData,
+    loading,
+    entities,
+    transactions,
+    dateRange,
     selectedEntityFilter,
     selectedEntities,
     minAmountThreshold,
@@ -518,6 +572,12 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
         onShowOutflowChange={setShowOutflow}
         nodeSizing={nodeSizing}
         onNodeSizingChange={setNodeSizing}
+        timelineEventLimit={timelineEventLimit}
+        onTimelineEventLimitChange={(value) => setTimelineEventLimit(value)}
+        dateRange={dateRange}
+        availableDateRange={availableDateRange}
+        onDateRangeChange={handleDateRangeChange}
+        onResetDateRange={handleResetDateRange}
       />
 
       {/* Legend */}
@@ -525,7 +585,51 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
 
       {/* Visualization */}
       <div className="bg-white rounded-lg shadow p-6">
-        <FlowchartVisualization data={filteredData} nodeSizing={nodeSizing} />
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h4 className="text-base font-semibold text-gray-900">
+              Visualization
+            </h4>
+            <div className="inline-flex overflow-hidden rounded-md border border-gray-200 bg-white text-sm font-medium">
+              <button
+                type="button"
+                onClick={() => setVisualizationMode("network")}
+                className={`px-3 py-2 transition ${
+                  visualizationMode === "network"
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                Network Graph
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisualizationMode("chronological")}
+                className={`px-3 py-2 transition border-l border-gray-200 ${
+                  visualizationMode === "chronological"
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                Chronological Flow
+              </button>
+            </div>
+          </div>
+          {visualizationMode === "network" ? (
+            <FlowchartVisualization
+              data={filteredData}
+              nodeSizing={nodeSizing}
+            />
+          ) : (
+            <FlowchartChronologicalView
+              data={filteredData}
+              timelineEventLimit={timelineEventLimit}
+              onTimelineEventLimitChange={(value) =>
+                setTimelineEventLimit(value)
+              }
+            />
+          )}
+        </div>
       </div>
     </div>
   );
