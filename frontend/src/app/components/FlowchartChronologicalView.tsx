@@ -90,6 +90,8 @@ interface FlowchartChronologicalViewProps {
   onTimelineEventLimitChange: (value: number) => void;
   minAmountThreshold: number;
   chainTimeWindowMs: number;
+  // Only trigger analysis when this is > 0. Increment when the user clicks Search.
+  searchVersion: number;
 }
 
 const MAX_SEQUENTIAL_RUNS_TO_DISPLAY = 12;
@@ -168,15 +170,26 @@ export default function FlowchartChronologicalView({
   onTimelineEventLimitChange,
   minAmountThreshold,
   chainTimeWindowMs,
+  searchVersion,
 }: FlowchartChronologicalViewProps) {
   const [artifacts, setArtifacts] = useState<ChronologicalArtifacts | null>(
     null
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasTriggeredSearch = searchVersion > 0;
 
   // Fetch chain analysis from backend
   useEffect(() => {
+    // Only fetch when a search has been explicitly triggered by the user.
+    if (!hasTriggeredSearch) {
+      // Ensure we are not stuck in a loading state when the child mounts
+      // without an explicit Search invocation.
+      setLoading(false);
+      setError(null);
+      setArtifacts(null);
+      return;
+    }
     const fetchChainAnalysis = async () => {
       setLoading(true);
       setError(null);
@@ -233,6 +246,8 @@ export default function FlowchartChronologicalView({
     chainTimeWindowMs,
     showInflow,
     showOutflow,
+    hasTriggeredSearch,
+    searchVersion,
   ]);
 
   const events = artifacts?.events ?? [];
@@ -277,6 +292,23 @@ export default function FlowchartChronologicalView({
   );
   const displayedHubCandidates = hubCandidates.slice(0, 6);
   const displayedBranchNodes = branchNodeSummaries.slice(0, 8);
+
+  if (!hasTriggeredSearch) {
+    return (
+      <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50">
+        <div className="text-center">
+          <p className="text-sm font-medium text-gray-600">
+            Click "Search" to run chronological analysis with the applied
+            filters.
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            The analysis runs server-side and may take a moment for large
+            datasets.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

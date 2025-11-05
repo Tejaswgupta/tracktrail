@@ -48,6 +48,22 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
     )?.value ?? 7 * 24 * 60 * 60 * 1000
   );
 
+  // Applied filters — used to control when the chronological view will
+  // re-run server-side analysis. Controls update local state immediately,
+  // but the server call is only triggered when the user clicks Search.
+  const [appliedFilters, setAppliedFilters] = useState({
+    selectedEntities: [] as string[],
+    dateRange: { from: null as string | null, to: null as string | null },
+    showInflow: true,
+    showOutflow: true,
+    minAmountThreshold,
+    chainTimeWindowMs,
+  });
+  // Tracks how many times the user has clicked Search. Passed to the
+  // chronological view so it only fetches when the user explicitly triggers
+  // an analysis run.
+  const [searchVersion, setSearchVersion] = useState(0);
+
   const availableDateRange = useMemo<FlowDateRange>(() => {
     if (transactions.length === 0) {
       return { from: null, to: null };
@@ -128,8 +144,17 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
             current > max ? current : max
           );
           setDateRange({ from: minDate, to: maxDate });
+          // initialize applied filters to the initial date range on first load
+          setAppliedFilters((prev) => ({
+            ...prev,
+            dateRange: { from: minDate, to: maxDate },
+          }));
         } else {
           setDateRange({ from: null, to: null });
+          setAppliedFilters((prev) => ({
+            ...prev,
+            dateRange: { from: null, to: null },
+          }));
         }
       } catch (err) {
         console.error("Error fetching flowchart data:", err);
@@ -145,6 +170,44 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
 
     fetchData();
   }, [caseId]);
+
+  const filtersAreDifferent = () => {
+    try {
+      const a = JSON.stringify({
+        selectedEntities,
+        dateRange,
+        showInflow,
+        showOutflow,
+        minAmountThreshold,
+        chainTimeWindowMs,
+      });
+
+      const b = JSON.stringify(appliedFilters);
+      return a !== b;
+    } catch (e) {
+      return true;
+    }
+  };
+
+  const handleApplyFilters = useCallback(() => {
+    setAppliedFilters({
+      selectedEntities,
+      dateRange,
+      showInflow,
+      showOutflow,
+      minAmountThreshold,
+      chainTimeWindowMs,
+    });
+    // bump the version to signal the chronological view to run analysis
+    setSearchVersion((v) => v + 1);
+  }, [
+    selectedEntities,
+    dateRange,
+    showInflow,
+    showOutflow,
+    minAmountThreshold,
+    chainTimeWindowMs,
+  ]);
 
   // Apply filters to flowchart data
   const filteredData = useMemo<FlowchartData | null>(() => {
@@ -650,6 +713,20 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
                 Chronological Flow
               </button>
             </div>
+            <div className="ml-3">
+              <button
+                type="button"
+                onClick={handleApplyFilters}
+                disabled={!filtersAreDifferent()}
+                className={`rounded border px-3 py-2 text-sm font-medium transition ${
+                  filtersAreDifferent()
+                    ? "bg-blue-600 text-white border-blue-600 hover:opacity-90"
+                    : "bg-gray-50 text-gray-500 border-gray-200 cursor-not-allowed"
+                }`}
+              >
+                {filtersAreDifferent() ? "Search" : "Filters applied"}
+              </button>
+            </div>
           </div>
           {visualizationMode === "network" ? (
             <FlowchartVisualization
@@ -660,16 +737,21 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
             <FlowchartChronologicalView
               caseId={caseId}
               data={filteredData}
-              selectedEntities={selectedEntities}
-              dateRange={dateRange}
-              showInflow={showInflow}
-              showOutflow={showOutflow}
+              // Use applied filters for chronological analysis so the
+              // server-side request only runs when the user clicks Search.
+              // The child will only fetch when `searchVersion` is > 0 and
+              // whenever this value increments (i.e. user clicks Search).
+              selectedEntities={appliedFilters.selectedEntities}
+              dateRange={appliedFilters.dateRange}
+              showInflow={appliedFilters.showInflow}
+              showOutflow={appliedFilters.showOutflow}
+              searchVersion={searchVersion}
               timelineEventLimit={timelineEventLimit}
               onTimelineEventLimitChange={(value) =>
                 setTimelineEventLimit(value)
               }
-              minAmountThreshold={minAmountThreshold}
-              chainTimeWindowMs={chainTimeWindowMs}
+              minAmountThreshold={appliedFilters.minAmountThreshold}
+              chainTimeWindowMs={appliedFilters.chainTimeWindowMs}
             />
           )}
         </div>
