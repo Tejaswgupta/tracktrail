@@ -67,7 +67,7 @@ export class AMLDataTransformer {
    * Transform backend CycleDetectionResult to frontend RoundTrippingResult
    */
   static transformCycleDetectionResult(
-    backendResult: CycleDetectionResult,
+    backendResult: CycleDetectionResult
   ): RoundTrippingResult {
     const alerts: AMLAlert[] = [];
     const patterns: RoundTrippingResult["patterns"] = [];
@@ -311,6 +311,7 @@ export class AMLDataTransformer {
           inCounterparty:
             metadata.inCounterparty ||
             creditTx?.counterparty_merged ||
+            creditTx?.description ||
             "Unknown",
           inDescription: metadata.inDescription || creditTx?.description || "",
           outDate:
@@ -319,6 +320,7 @@ export class AMLDataTransformer {
           outCounterparty:
             metadata.outCounterparty ||
             debitTx?.counterparty_merged ||
+            debitTx?.description ||
             "Unknown",
           outDescription: metadata.outDescription || debitTx?.description || "",
           amountDifference: metadata.amountDifference || 0,
@@ -424,11 +426,12 @@ export class AMLDataTransformer {
           amountDifference: movement.amount_difference_percent,
           inDate: movement.in_date,
           inAmount: movement.in_amount,
-          inCounterparty: movement.in_counterparty,
+          inCounterparty: movement.in_counterparty || movement.in_description,
           inDescription: movement.in_description,
           outDate: movement.out_date,
           outAmount: movement.out_amount,
-          outCounterparty: movement.out_counterparty,
+          outCounterparty:
+            movement.out_counterparty || movement.out_description,
           outDescription: movement.out_description,
         },
         detectedAt: new Date(),

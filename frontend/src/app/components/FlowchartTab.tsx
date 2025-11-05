@@ -334,7 +334,11 @@ export default function FlowchartTab({ caseId }: FlowchartTabProps) {
 
     filteredTransactions.forEach((transaction) => {
       const entityId = transaction.entity_id;
-      const counterpartyName = transaction.counterparty_merged ?? "Unknown";
+      const counterpartyName =
+        transaction.counterparty_merged &&
+        transaction.counterparty_merged.trim()
+          ? transaction.counterparty_merged
+          : transaction.description || "";
       const isDebit = transaction.direction === "DR";
 
       ensureEntityNode(entityId);

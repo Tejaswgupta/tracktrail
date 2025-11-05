@@ -5,9 +5,7 @@ import {
   type RoundTrippingConfig,
   type RoundTrippingResult,
 } from "@/services/amlDetection";
-import { transactionsService } from "@/services/database";
-import type { Transaction } from "@/types/database";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 interface AMLMetadata {
   entityIds: string[];
@@ -36,8 +34,6 @@ export default function RoundTrippingDetectionTab({
     RoundTrippingResult["patterns"][0] | null
   >(null);
 
-
-
   const runDetection = async () => {
     if (selectedEntityIds.length === 0) {
       setError("No transactions available for analysis");
@@ -65,10 +61,6 @@ export default function RoundTrippingDetectionTab({
       setLoading(false);
     }
   };
-
-
-
-
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -108,28 +100,25 @@ export default function RoundTrippingDetectionTab({
           </div>
           <button
             onClick={runDetection}
-            disabled={
-              loading ||
-              selectedEntityIds.length === 0
-            }
+            disabled={loading || selectedEntityIds.length === 0}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
             <>
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-                {error ? "Retry Analysis" : "Run Detection"}
-              </>
+              <svg
+                className="w-4 h-4 mr-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              {error ? "Retry Analysis" : "Run Detection"}
+            </>
           </button>
         </div>
 
@@ -552,7 +541,9 @@ export default function RoundTrippingDetectionTab({
                               </span>
                             </td>
                             <td className="px-4 py-2 text-xs text-gray-900">
-                              {transaction.counterparty_merged || "Unknown"}
+                              {transaction.counterparty_merged ||
+                                transaction.description ||
+                                "Unknown"}
                             </td>
                           </tr>
                         ))}
@@ -649,7 +640,6 @@ export default function RoundTrippingDetectionTab({
           </div>
         </div>
       )}
-
     </div>
   );
 }

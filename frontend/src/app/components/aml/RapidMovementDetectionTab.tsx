@@ -14,9 +14,7 @@ import {
   type RapidMovementResult,
 } from "@/services/amlDetection";
 
-import { transactionsService } from "@/services/database";
-import { Transaction } from "@/types/database";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 interface AMLMetadata {
   entityIds: string[];
@@ -26,7 +24,6 @@ interface AMLMetadata {
 }
 
 interface RapidMovementDetectionTabProps {
-
   selectedEntityIds: string[];
 }
 
@@ -98,8 +95,6 @@ export default function RapidMovementDetectionTab({
     runDetection(true);
   };
 
-
-
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
@@ -133,28 +128,25 @@ export default function RapidMovementDetectionTab({
           </div>
           <button
             onClick={() => runDetection()}
-            disabled={
-              loading ||
-              selectedEntityIds.length === 0
-            }
+            disabled={loading || selectedEntityIds.length === 0}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center"
           >
-              <>
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 10V3L4 14h7v7l9-11h-7z"
-                  />
-                </svg>
-                Run Detection
-              </>
+            <>
+              <svg
+                className="w-4 h-4 mr-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+              Run Detection
+            </>
           </button>
         </div>
 
@@ -424,9 +416,15 @@ export default function RapidMovementDetectionTab({
                         </td>
                         <td
                           className="px-4 py-3 text-sm text-gray-900 max-w-xs truncate"
-                          title={metadata.inCounterparty || "Unknown"}
+                          title={
+                            metadata.inCounterparty ||
+                            metadata.inDescription ||
+                            "Unknown"
+                          }
                         >
-                          {metadata.inCounterparty || "Unknown"}
+                          {metadata.inCounterparty ||
+                            metadata.inDescription ||
+                            "Unknown"}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900">
                           {formatDate(metadata.outDate)}
@@ -436,9 +434,15 @@ export default function RapidMovementDetectionTab({
                         </td>
                         <td
                           className="px-4 py-3 text-sm text-gray-900 max-w-xs truncate"
-                          title={metadata.outCounterparty || "Unknown"}
+                          title={
+                            metadata.outCounterparty ||
+                            metadata.outDescription ||
+                            "Unknown"
+                          }
                         >
-                          {metadata.outCounterparty || "Unknown"}
+                          {metadata.outCounterparty ||
+                            metadata.outDescription ||
+                            "Unknown"}
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <span
@@ -616,7 +620,9 @@ export default function RapidMovementDetectionTab({
                               </span>
                             </td>
                             <td className="px-4 py-2 text-xs text-gray-900">
-                              {transaction.counterparty_merged || "Unknown"}
+                              {transaction.counterparty_merged ||
+                                transaction.description ||
+                                "Unknown"}
                             </td>
                           </tr>
                         ))}
@@ -681,7 +687,6 @@ export default function RapidMovementDetectionTab({
           </p>
         </div>
       )}
-
     </div>
   );
 }
