@@ -111,7 +111,8 @@ export default function CreateEntityModal({
           alert(`Failed to create entity: ${error.message}`);
         }
       } else {
-        alert("An unexpected error occurred while creating the entity.");
+        console.error("Unknown error type:", error);
+        alert(`An unexpected error occurred while creating the entity. Please try again or contact support if the issue persists. Error details: ${JSON.stringify(error)}`);
       }
     } finally {
       setIsSubmitting(false);
