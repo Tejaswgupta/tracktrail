@@ -174,6 +174,7 @@ export default function FlowchartChronologicalView({
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedChains, setExpandedChains] = useState<Set<string>>(new Set());
 
   // Fetch chain analysis from backend
   useEffect(() => {
@@ -278,6 +279,18 @@ export default function FlowchartChronologicalView({
   const displayedHubCandidates = hubCandidates.slice(0, 6);
   const displayedBranchNodes = branchNodeSummaries.slice(0, 8);
 
+  const toggleChainExpansion = (chainId: string) => {
+    setExpandedChains((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(chainId)) {
+        newSet.delete(chainId);
+      } else {
+        newSet.add(chainId);
+      }
+      return newSet;
+    });
+  };
+
   
   if (loading) {
     return (
@@ -367,78 +380,108 @@ export default function FlowchartChronologicalView({
               const isCycle =
                 chain.events[0]?.sourceId ===
                 chain.events[chain.events.length - 1]?.targetId;
+              const isExpanded = expandedChains.has(chain.id);
 
               return (
                 <div
                   key={chain.id}
-                  className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
+                  className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden"
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-sm font-medium text-gray-800">
-                      {nodeSequence.join(" -> ")}
-                    </div>
-                    <div className="text-sm font-semibold text-gray-900">
-                      {formatCurrency(chain.totalAmount)}
-                    </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                    <span>Steps: {chain.events.length}</span>
-                    <span>|</span>
-                    <span>
-                      Span: {formatDate(chain.startDate)}
-                      {" -> "}
-                      {formatDate(chain.endDate)}
-                    </span>
-                    {isCycle ? (
-                      <span className="rounded bg-indigo-100 px-2 py-1 font-medium text-indigo-600">
-                        Cycle detected
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {chain.events.map((event, index) => {
-                      const eventBadges = buildEventBadges(
-                        event,
-                        branchMeta,
-                        hubHighlightSet
-                      );
-
-                      return (
-                        <div
-                          key={event.id}
-                          className="rounded border border-gray-100 bg-gray-50 px-3 py-2"
+                  <button
+                    onClick={() => toggleChainExpansion(chain.id)}
+                    className="w-full p-4 text-left hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <svg
+                          className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${
+                            isExpanded ? "rotate-90" : ""
+                          }`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
                         >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex flex-col">
-                              <span className="text-xs text-gray-500">
-                                {formatDateTime(event.txDate)}
-                              </span>
-                              <span className="text-sm font-medium text-gray-800">
-                                {index + 1}. {event.sourceLabel}
-                                {" -> "}
-                                {event.targetLabel}
-                              </span>
-                            </div>
-                            <div className="text-sm font-semibold text-gray-900">
-                              {formatCurrency(event.amount)}
-                            </div>
-                          </div>
-                          {eventBadges.length > 0 ? (
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium">
-                              {eventBadges.map((badge) => (
-                                <span
-                                  key={badge.key}
-                                  className={`inline-flex items-center rounded px-2 py-0.5 ${badge.className}`}
-                                >
-                                  {badge.label}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 5l7 7-7 7"
+                          />
+                        </svg>
+                        <div className="text-sm font-medium text-gray-800 truncate">
+                          {nodeSequence.join(" -> ")}
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {isCycle ? (
+                          <span className="rounded bg-indigo-100 px-2 py-1 text-[11px] font-medium text-indigo-600">
+                            Cycle detected
+                          </span>
+                        ) : null}
+                        <div className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(chain.totalAmount)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                      <span>Steps: {chain.events.length}</span>
+                      <span>|</span>
+                      <span>
+                        Span: {formatDate(chain.startDate)}
+                        {" -> "}
+                        {formatDate(chain.endDate)}
+                      </span>
+                    </div>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="border-t border-gray-100 bg-gray-50/50 p-4">
+                      <div className="space-y-2">
+                        {chain.events.map((event, index) => {
+                          const eventBadges = buildEventBadges(
+                            event,
+                            branchMeta,
+                            hubHighlightSet
+                          );
+
+                          return (
+                            <div
+                              key={event.id}
+                              className="rounded border border-gray-100 bg-white px-3 py-2"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex flex-col">
+                                  <span className="text-xs text-gray-500">
+                                    {formatDateTime(event.txDate)}
+                                  </span>
+                                  <span className="text-sm font-medium text-gray-800">
+                                    {index + 1}. {event.sourceLabel}
+                                    {" -> "}
+                                    {event.targetLabel}
+                                  </span>
+                                </div>
+                                <div className="text-sm font-semibold text-gray-900">
+                                  {formatCurrency(event.amount)}
+                                </div>
+                              </div>
+                              {eventBadges.length > 0 ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium">
+                                  {eventBadges.map((badge) => (
+                                    <span
+                                      key={badge.key}
+                                      className={`inline-flex items-center rounded px-2 py-0.5 ${badge.className}`}
+                                    >
+                                      {badge.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
