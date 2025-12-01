@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  BANK_PRESETS,
   inferBankPresetFromBankName,
   type BankPreset,
 } from "@/constants/banks";
@@ -53,7 +52,9 @@ export default function UploadStatementModalWizard({
   );
   const [deletedRows, setDeletedRows] = useState<number[]>([]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
-  const [pdfProcessingMode, setPdfProcessingMode] = useState<"line-spacing" | "table-spacing">("line-spacing");
+  const [pdfProcessingMode, setPdfProcessingMode] = useState<
+    "line-spacing" | "table-spacing"
+  >("line-spacing");
 
   useEffect(() => {
     const fetchAccountAndInferBank = async () => {
@@ -119,7 +120,8 @@ export default function UploadStatementModalWizard({
         setIsProcessingFile(false);
       }
     } else if (
-      selectedFile.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      selectedFile.type ===
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
       selectedFile.type === "application/vnd.ms-excel"
     ) {
       setIsProcessingFile(true);
@@ -197,9 +199,7 @@ export default function UploadStatementModalWizard({
     } catch (error) {
       console.error("PDF processing error:", error);
       setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to process PDF"
+        error instanceof Error ? error.message : "Failed to process PDF"
       );
     } finally {
       setIsProcessingFile(false);
@@ -519,7 +519,7 @@ export default function UploadStatementModalWizard({
                     Uploading...
                   </>
                 ) : (
-                  "Upload Statement"
+                  "Upload Statement(s)"
                 )}
               </button>
             )}
