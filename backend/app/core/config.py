@@ -5,6 +5,7 @@ Handles environment-based configuration without pydantic.
 
 import os
 from typing import List
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,8 +33,6 @@ class Settings:
         self.database_max_overflow = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
         self.database_timeout = int(os.getenv("DATABASE_TIMEOUT", "30"))
 
-        cors_origins_str = os.getenv("CORS_ORIGINS", "*")
-        self.cors_origins = self._parse_cors_origins(cors_origins_str)
         self.max_request_size = int(os.getenv("MAX_REQUEST_SIZE", "10485760"))
 
         self.max_entities_per_request = int(os.getenv("MAX_ENTITIES_PER_REQUEST", "50"))
@@ -43,12 +42,6 @@ class Settings:
         self.log_level = self._validate_log_level(os.getenv("LOG_LEVEL", "INFO"))
 
         self._validate_positive_ints()
-
-    def _parse_cors_origins(self, origins_str: str) -> List[str]:
-        """Parse CORS origins from string."""
-        if origins_str == "*":
-            return ["*"]
-        return [origin.strip() for origin in origins_str.split(",")]
 
     def _validate_log_level(self, level: str) -> str:
         """Validate log level."""

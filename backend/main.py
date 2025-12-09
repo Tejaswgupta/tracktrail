@@ -6,20 +6,15 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
 import uvicorn
-
-from app.core.config import settings
-from app.core.database import init_database, close_database
-from app.core.exceptions import (
-    EXCEPTION_HANDLERS
-)
 from app.api.v1.router import api_router
-
+from app.core.config import settings
+from app.core.database import close_database, init_database
+from app.core.exceptions import EXCEPTION_HANDLERS
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # Configure logging
 logging.basicConfig(
@@ -168,67 +163,66 @@ For technical support or questions about specific analysis capabilities, please 
     ]
 )
 
-# Configure middleware
+# Configure CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=[
+        "http://localhost:3000",  # Next.js development server
+        "http://127.0.0.1:3000",  # Alternative localhost
+        "http://localhost:3001",  # Alternative port
+        "http://127.0.0.1:3001",  # Alternative localhost with port 3001
+        "https://localhost:3000",  # HTTPS localhost
+        "https://127.0.0.1:3000",  # HTTPS localhost
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["*"]
 )
 
-# Add trusted host middleware for security
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=["*"]  # Configure appropriately for production
-)
-
-
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all requests with timing information."""
-    start_time = time.time()
+# # Request logging middleware
+# @app.middleware("http")
+# async def log_requests(request: Request, call_next):
+#     """Log all requests with timing information."""
+#     start_time = time.time()
     
-    # Log request
-    logger.info(f"Request: {request.method} {request.url}")
+#     # Log request
+#     logger.info(f"Request: {request.method} {request.url}")
     
-    # Process request
-    response = await call_next(request)
+#     # Process request
+#     response = await call_next(request)
     
-    # Calculate processing time
-    process_time = time.time() - start_time
+#     # Calculate processing time
+#     process_time = time.time() - start_time
     
-    # Log response
-    logger.info(f"Response: {response.status_code} - {process_time:.3f}s")
+#     # Log response
+#     logger.info(f"Response: {response.status_code} - {process_time:.3f}s")
     
-    # Add processing time header
-    response.headers["X-Process-Time"] = str(process_time)
+#     # Add processing time header
+#     response.headers["X-Process-Time"] = str(process_time)
     
-    return response
+#     return response
 
 
 # Request size limiting middleware
-@app.middleware("http")
-async def limit_request_size(request: Request, call_next):
-    """Limit request body size to prevent DoS attacks."""
-    content_length = request.headers.get("content-length")
+# @app.middleware("http")
+# async def limit_request_size(request: Request, call_next):
+#     """Limit request body size to prevent DoS attacks."""
+#     content_length = request.headers.get("content-length")
     
-    if content_length:
-        content_length = int(content_length)
-        if content_length > settings.max_request_size:
-            return JSONResponse(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                content={
-                    "success": False,
-                    "error_code": "REQUEST_TOO_LARGE",
-                    "message": f"Request body too large. Maximum size: {settings.max_request_size // 1048576}MB",
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            )
+#     if content_length:
+#         content_length = int(content_length)
+#         if content_length > settings.max_request_size:
+#             return JSONResponse(
+#                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+#                 content={
+#                     "success": False,
+#                     "error_code": "REQUEST_TOO_LARGE",
+#                     "message": f"Request body too large. Maximum size: {settings.max_request_size // 1048576}MB",
+#                     "timestamp": datetime.utcnow().isoformat()
+#                 }
+#             )
     
-    return await call_next(request)
+#     return await call_next(request)
 
 
 # Custom exception handlers
@@ -415,7 +409,7 @@ def main():
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8080,
         reload=True,
         log_level="info"
     )

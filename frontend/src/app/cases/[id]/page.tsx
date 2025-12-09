@@ -1,17 +1,15 @@
 "use client";
 
-import AMLTab from "@/app/components/AMLTab";
 import AIModeTab from "@/app/components/AIModeTab";
+import AMLTab from "@/app/components/AMLTab";
 import EfficientCounterpartyMerge from "@/app/components/EfficientCounterpartyMerge";
-import EntityStandardizationTab from "@/app/components/EntityStandardizationTab";
-import OverviewTab from "@/app/components/OverviewTab";
+import EntityList from "@/app/components/EntityList";
 import FlowchartTab from "@/app/components/FlowchartTab";
+import OverviewTab from "@/app/components/OverviewTab";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppHeader from "../../components/AppHeader";
 import CreateEntityModal from "../../components/CreateEntityModal";
-import EntityList from "@/app/components/EntityList";
-
 
 interface Case {
   id: string;
@@ -49,13 +47,15 @@ export default function CaseDetailPage() {
   useEffect(() => {
     const fetchCase = async () => {
       try {
-        const { casesService, cacheManagement } = await import("@/services/database");
+        const { casesService, cacheManagement } = await import(
+          "@/services/database"
+        );
         const caseData = await casesService.getById(caseId);
 
         if (caseData) {
           // Warm the cache for this case
           cacheManagement.warmCaseCache(caseId).catch(console.warn);
-          
+
           // Transform to match component interface
           setCaseData({
             id: caseData.case_id,
@@ -189,7 +189,6 @@ export default function CaseDetailPage() {
     </div>
   );
 
-
   return (
     <div className="min-h-screen bg-gray-50">
       <AppHeader
@@ -235,15 +234,12 @@ export default function CaseDetailPage() {
             {[
               { key: "overview", label: "Overview" },
               { key: "entities", label: "Entities" },
-              // { key: "timeline", label: "Timeline" },
+              {
+                key: "counterparty-merge",
+                label: "De-duplicate Counterparties",
+              },
               { key: "analytics", label: "AML Analytics" },
               { key: "flowchart", label: "Flowchart" },
-              { key: "ai-mode", label: "AI Mode" },
-              { key: "counterparty-merge", label: "Counterparty Merge" },
-              {
-                key: "entity-standardization",
-                label: "Entity Standardization",
-              },
             ].map((tab) => (
               <button
                 key={tab.key}
@@ -347,10 +343,6 @@ export default function CaseDetailPage() {
 
         {activeTab === "counterparty-merge" && (
           <EfficientCounterpartyMerge caseId={caseData.id} />
-        )}
-
-        {activeTab === "entity-standardization" && (
-          <EntityStandardizationTab caseId={caseData.id} />
         )}
       </main>
 
