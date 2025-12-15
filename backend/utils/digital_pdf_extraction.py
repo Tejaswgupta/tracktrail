@@ -64,24 +64,70 @@ def extract_tables_from_pdf(
 
         if best_method:
             logger.info(f"Using best method: {best_method} (found {max_tables_found} tables in test)")
-            return _extract_with_method(pdf_path, best_method)
-        else:
+            result = _extract_with_method(pdf_path, best_method)
+            
+            # Validate that tables are properly formatted
+            if result:
+                valid_tables = []
+                for table in result:
+                    table_data = table.get("data", [])
+                    if table_data and len(table_data) > 0:
+                        col_count = len(table_data[0])
+                        if col_count >= 5:  # Bank statements need at least 5 columns
+                            valid_tables.append(table)
+                
+                if valid_tables:
+                    logger.info(f"Best method returned {len(valid_tables)} valid tables")
+                    return valid_tables
+                else:
+                    logger.info(f"Best method returned {len(result)} tables but all were malformed")
+                    # Fall through to try full extraction with all methods
+            
+        # If no best method or best method failed, try full extraction
             logger.info("No method found tables in first 5 pages, trying full processing with all methods")
             # Fallback: try each method on full document
+            all_results = []
             for extraction_method in extractor.extraction_methods:
                 try:
                     logger.info(f"Trying full extraction with method: {extraction_method}")
                     result = _extract_with_method(pdf_path, extraction_method)
                     if result and len(result) > 0:
-                        logger.info(
-                            f"Successfully extracted {len(result)} tables with {extraction_method}"
-                        )
-                        return result
+                        logger.info(f"Extracted {len(result)} tables with {extraction_method}")
+                        all_results.extend(result)
                 except Exception as e:
                     logger.warning(f"Method {extraction_method} failed: {str(e)}")
                     continue
 
-            logger.info("All table methods failed")
+            # Check if we got valid tables (enough columns)
+            if all_results:
+                logger.info(f"Checking if {len(all_results)} extracted tables are properly formatted...")
+                valid_tables = []
+                for table in all_results:
+                    table_data = table.get("data", [])
+                    if table_data and len(table_data) > 0:
+                        col_count = len(table_data[0])
+                        if col_count >= 5:  # Bank statements need at least 5 columns
+                            valid_tables.append(table)
+                        else:
+                            logger.warning(f"Skipping malformed table with only {col_count} columns")
+                
+                if valid_tables:
+                    logger.info(f"Found {len(valid_tables)} valid tables out of {len(all_results)}")
+                    return valid_tables
+                else:
+                    logger.info(f"All {len(all_results)} tables were malformed (too few columns)")
+            
+            logger.info("All table methods failed or returned malformed tables, trying text-based extraction fallback")
+            # Text-based extraction fallback for PDFs without table structures
+            try:
+                result = _extract_text_based(pdf_path)
+                if result and len(result) > 0:
+                    logger.info(f"Successfully extracted {len(result)} tables using text-based parsing")
+                    return result
+            except Exception as e:
+                logger.warning(f"Text-based extraction also failed: {str(e)}")
+            
+            logger.info("All extraction methods failed")
             return []
     else:
         return _extract_with_method(pdf_path, method)
@@ -273,7 +319,66 @@ def _extract_with_pymupdf_limited(pdf_path: str, max_pages: int = 5) -> List[Dic
         return []
 
 
+
+
+def _extract_text_based(pdf_path: str) -> List[Dict]:
+    """
+    Extract bank statement data from text-based PDF (no table structures)
+    This is a fallback method for PDFs where table detection fails
+    """
+    try:
+        document = fitz.Document(pdf_path)
+        logger.info(f"Starting text-based extraction for: {pdf_path}")
+        
+        all_transactions = []
+        
+        # Common date patterns for Indian bank statements
+        date_pattern = r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b'
+        
+        for page_num in range(len(document)):
+            page = document[page_num]
+            text = page.get_text()
+            
+            # Split into lines
+            lines = text.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if not line or len(line) < 10:  # Skip very short lines
+                    continue
+                
+                # Check if line starts with or contains a date (likely a transaction)
+                if re.search(date_pattern, line):
+                    # Split by multiple spaces (common in bank PDFs)
+                    parts = re.split(r'\s{2,}', line)
+                    
+                    # Only keep lines with enough data (at least 4 columns)
+                    if len(parts) >= 4:
+                        all_transactions.append(parts)
+        
+        document.close()
+        
+        if not all_transactions:
+            logger.info("No transactions found using text-based extraction")
+            return []
+        
+        logger.info(f"Extracted {len(all_transactions)} transaction rows from text")
+        
+        # Format as a single table structure compatible with existing code
+        return [{
+            "page": 1,  # Aggregate all pages
+            "table_number": 1,
+            "data": all_transactions,
+            "confidence": 0.6,  # Lower confidence for text-based extraction
+        }]
+        
+    except Exception as e:
+        logger.error(f"Text-based extraction failed: {str(e)}")
+        return []
+
+
 def is_statement_table(table_data, reference_col_count=None) -> Tuple[bool, bool]:
+
     """
     Determine if table data represents a bank statement table
     Returns: (is_statement_table, has_header_row)
