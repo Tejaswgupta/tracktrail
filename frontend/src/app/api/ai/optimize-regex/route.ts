@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
-// OpenAI client configuration
-
-console.log("OpenAI API Key configured:", !!process.env.OPENAI_API_KEY);
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL: "https://model.thevotum.com/v1",
-});
+// Force Node.js runtime (OpenAI SDK not compatible with Edge Runtime)
+export const runtime = 'nodejs';
 
 interface OptimizationRequest {
   prompt: string;
@@ -25,7 +20,7 @@ interface OptimizationResponse {
 
 export async function POST(request: NextRequest) {
   try {
-    // Validate API key
+    // Validate API key at runtime (not build time)
     if (!process.env.OPENAI_API_KEY) {
       console.error("OpenAI API key not configured");
       return NextResponse.json(
@@ -33,6 +28,12 @@ export async function POST(request: NextRequest) {
         { status: 503 }
       );
     }
+
+    // Initialize OpenAI client at runtime
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: "https://model.thevotum.com/v1",
+    });
 
     const body: OptimizationRequest = await request.json();
     const { prompt } = body;
