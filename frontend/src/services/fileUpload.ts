@@ -69,7 +69,7 @@ export const fileUploadService = {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "application/vnd.ms-excel",
     ];
-    
+
     if (!allowedTypes.includes(file.type)) {
       throw new Error("File must be an Excel file (.xlsx or .xls)");
     }
@@ -77,19 +77,19 @@ export const fileUploadService = {
     try {
       // Dynamically import xlsx
       const XLSX = await import('xlsx');
-      
+
       // Read the Excel file
       const arrayBuffer = await file.arrayBuffer();
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      
+
       // Get the first sheet
       const firstSheetName = workbook.SheetNames[0];
       if (!firstSheetName) {
         throw new Error("Excel file has no sheets");
       }
-      
+
       const worksheet = workbook.Sheets[firstSheetName];
-      
+
       // Convert sheet to JSON first to clean the data, then to CSV
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
 
@@ -101,15 +101,15 @@ export const fileUploadService = {
       // Convert cleaned data back to CSV
       const csvText = XLSX.utils.aoa_to_sheet(cleanedData) ?
         XLSX.utils.sheet_to_csv(XLSX.utils.aoa_to_sheet(cleanedData)) : '';
-      
+
       if (!csvText || !csvText.trim()) {
         throw new Error("Excel sheet is empty");
       }
-      
+
       // Create a temporary CSV File object for validation
       const csvBlob = new Blob([csvText], { type: 'text/csv' });
       const csvFile = new File([csvBlob], 'temp.csv', { type: 'text/csv' });
-      
+
       // Validate using existing CSV validation logic
       return await validateCSVFile(csvFile);
     } catch (error) {
@@ -236,12 +236,16 @@ export const fileUploadService = {
 
         console.log("Found account with entity_id:", account.entity_id);
 
-        // Update progress to show extraction started
-        await statementsService.updateProcessingStatus(
-          statement.statement_id,
-          "processing",
-          30
-        );
+        // Update progress to show extraction started (non-blocking)
+        try {
+          await statementsService.updateProcessingStatus(
+            statement.statement_id,
+            "processing",
+            30
+          );
+        } catch (e) {
+          console.warn("Could not update status (non-critical):", e);
+        }
 
         if (onProgress) {
           onProgress({
@@ -279,12 +283,16 @@ export const fileUploadService = {
           summary: extractionResult.summary,
         });
 
-        // Update progress after extraction
-        await statementsService.updateProcessingStatus(
-          statement.statement_id,
-          "processing",
-          60
-        );
+        // Update progress after extraction (non-blocking)
+        try {
+          await statementsService.updateProcessingStatus(
+            statement.statement_id,
+            "processing",
+            60
+          );
+        } catch (e) {
+          console.warn("Could not update status (non-critical):", e);
+        }
 
         if (onProgress) {
           onProgress({
@@ -332,12 +340,16 @@ export const fileUploadService = {
             "transactions"
           );
 
-          // Update progress after saving transactions
-          await statementsService.updateProcessingStatus(
-            statement.statement_id,
-            "processing",
-            90
-          );
+          // Update progress after saving transactions (non-blocking)
+          try {
+            await statementsService.updateProcessingStatus(
+              statement.statement_id,
+              "processing",
+              90
+            );
+          } catch (e) {
+            console.warn("Could not update status (non-critical):", e);
+          }
 
           if (onProgress) {
             onProgress({
@@ -348,21 +360,29 @@ export const fileUploadService = {
           }
         }
 
-        // Update statement with final status and transaction count
-        await statementsService.updateProcessingStatus(
-          statement.statement_id,
-          extractionResult.errors.length > 0 ? "completed" : "completed",
-          100
-        );
+        // Update statement with final status and transaction count (non-blocking)
+        try {
+          await statementsService.updateProcessingStatus(
+            statement.statement_id,
+            extractionResult.errors.length > 0 ? "completed" : "completed",
+            100
+          );
+        } catch (e) {
+          console.warn("Could not update status (non-critical):", e);
+        }
 
-        // Update transaction count
-        const { error: updateError } = await supabase
-          .from("bank_statements")
-          .update({ transaction_count: extractionResult.transactions.length })
-          .eq("statement_id", statement.statement_id);
+        // Update transaction count (non-blocking, may fail due to CORS)
+        try {
+          const { error: updateError } = await supabase
+            .from("bank_statements")
+            .update({ transaction_count: extractionResult.transactions.length })
+            .eq("statement_id", statement.statement_id);
 
-        if (updateError) {
-          console.warn("Failed to update transaction count:", updateError);
+          if (updateError) {
+            console.warn("Failed to update transaction count:", updateError);
+          }
+        } catch (error) {
+          console.warn("Could not update transaction count (non-critical):", error);
         }
 
         if (onProgress) {

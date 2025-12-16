@@ -158,8 +158,8 @@ export const transactionExtractorService = {
           : -1,
         DIRECTION: columnMapping.DIRECTION
           ? headers.findIndex(
-              (h) => h.trim() === columnMapping.DIRECTION?.trim()
-            )
+            (h) => h.trim() === columnMapping.DIRECTION?.trim()
+          )
           : -1,
       };
       console.log("Using column mapping:", columnIndices);
@@ -183,15 +183,13 @@ export const transactionExtractorService = {
       // Validate that required columns were found
       if (columnIndices.DATE === -1) {
         throw new Error(
-          `Date column "${
-            columnMapping.DATE
+          `Date column "${columnMapping.DATE
           }" not found in CSV headers: ${headers.join(", ")}`
         );
       }
       if (columnIndices.DESCRIPTION === -1) {
         throw new Error(
-          `Description column "${
-            columnMapping.DESCRIPTION
+          `Description column "${columnMapping.DESCRIPTION
           }" not found in CSV headers: ${headers.join(", ")}`
         );
       }
@@ -240,9 +238,8 @@ export const transactionExtractorService = {
           transactions.push(transaction);
         }
       } catch (error) {
-        const errorMsg = `Line ${i + 2}: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`;
+        const errorMsg = `Line ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"
+          }`;
         console.warn("CSV parsing error:", errorMsg);
         errors.push(errorMsg);
       }
@@ -533,10 +530,9 @@ export const transactionExtractorService = {
   async previewPDFColumns(file: File): Promise<CSVValidationResult> {
     // Reuse the backend PDF->CSV endpoint to get a CSV snapshot and validate headers
     const formData = new FormData();
-    formData.append("file", file, file.name);
+    formData.append("in_file", file, file.name);
 
-    const baseUrl = amlBackendClient.getConfig().baseUrl;
-    const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
+    const response = await fetch("https://ai.thevotum.com/extract_tables", {
       method: "POST",
       body: formData,
     });
@@ -545,27 +541,42 @@ export const transactionExtractorService = {
       let errText = "";
       try {
         errText = await response.text();
-      } catch {}
+      } catch { }
       throw new Error(
-        `PDF preview extraction failed (${response.status}): ${
-          errText || response.statusText
+        `PDF preview extraction failed (${response.status}): ${errText || response.statusText
         }`
       );
     }
 
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("text/csv")) {
-      const body = await response.text().catch(() => "");
-      throw new Error(
-        `Unexpected content-type from preview: ${contentType}. Body: ${body}`
-      );
+    // Parse JSON response from external API
+    const jsonResponse = await response.json();
+    console.log('=== PDF API Response ===', jsonResponse);
+
+    // API returns: { results: [{ res: { parsing_res_list: [...] } }] }
+    if (!jsonResponse.results || !Array.isArray(jsonResponse.results)) {
+      throw new Error("Invalid response format from PDF extraction API");
     }
 
-    let csvText = await response.text();
-    if (csvText.charCodeAt(0) === 0xfeff) csvText = csvText.slice(1);
+    // Extract all table blocks and convert HTML to CSV
+    let csvText = '';
+    for (const pageResult of jsonResponse.results) {
+      const parsingResList = pageResult.res?.parsing_res_list || [];
+
+      for (const block of parsingResList) {
+        if (block.block_label === 'table' && block.block_content) {
+          const tableCSV = this.convertHTMLTableToCSV(block.block_content);
+          if (tableCSV) {
+            csvText += (csvText ? '\n' : '') + tableCSV;
+          }
+        }
+      }
+    }
+
+    if (!csvText || !csvText.trim()) {
+      throw new Error("No table data extracted from PDF");
+    }
+
     const lines = this.splitCSVRows(csvText);
-    if (lines.length === 0)
-      throw new Error("No CSV content returned from PDF extraction");
 
     const headers = this.parseCSVColumns(lines[0]);
 
@@ -621,10 +632,9 @@ export const transactionExtractorService = {
           let errText = "";
           try {
             errText = await response.text();
-          } catch {}
+          } catch { }
           throw new Error(
-            `PDF extraction failed (${response.status}): ${
-              errText || response.statusText
+            `PDF extraction failed (${response.status}): ${errText || response.statusText
             }`
           );
         }
@@ -664,38 +674,36 @@ export const transactionExtractorService = {
             ),
             DEBIT: columnMapping.DEBIT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.DEBIT.trim()
-                )
+                (h) => h.trim() === columnMapping.DEBIT.trim()
+              )
               : -1,
             CREDIT: columnMapping.CREDIT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.CREDIT.trim()
-                )
+                (h) => h.trim() === columnMapping.CREDIT.trim()
+              )
               : -1,
             AMOUNT: columnMapping.AMOUNT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.AMOUNT?.trim()
-                )
+                (h) => h.trim() === columnMapping.AMOUNT?.trim()
+              )
               : -1,
             DIRECTION: columnMapping.DIRECTION
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.DIRECTION?.trim()
-                )
+                (h) => h.trim() === columnMapping.DIRECTION?.trim()
+              )
               : -1,
           };
 
           // Validate that required columns were found
           if (columnIndices.DATE === -1) {
             throw new Error(
-              `Date column "${
-                columnMapping.DATE
+              `Date column "${columnMapping.DATE
               }" not found in extracted headers: ${headers.join(", ")}`
             );
           }
           if (columnIndices.DESCRIPTION === -1) {
             throw new Error(
-              `Description column "${
-                columnMapping.DESCRIPTION
+              `Description column "${columnMapping.DESCRIPTION
               }" not found in extracted headers: ${headers.join(", ")}`
             );
           }
@@ -738,24 +746,24 @@ export const transactionExtractorService = {
             ),
             DEBIT: validation.requiredColumns.DEBIT
               ? headers.findIndex(
-                  (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
-                )
+                (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
+              )
               : -1,
             CREDIT: validation.requiredColumns.CREDIT
               ? headers.findIndex(
-                  (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
-                )
+                (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
+              )
               : -1,
             AMOUNT: validation.requiredColumns.AMOUNT
               ? headers.findIndex(
-                  (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
-                )
+                (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
+              )
               : -1,
             DIRECTION: validation.requiredColumns.DIRECTION
               ? headers.findIndex(
-                  (h) =>
-                    h.trim() === validation.requiredColumns.DIRECTION!.trim()
-                )
+                (h) =>
+                  h.trim() === validation.requiredColumns.DIRECTION!.trim()
+              )
               : -1,
           };
         }
@@ -778,8 +786,7 @@ export const transactionExtractorService = {
             if (tx) transactions.push(tx);
           } catch (err) {
             errors.push(
-              `Line ${i + 1}: ${
-                err instanceof Error ? err.message : "Unknown error"
+              `Line ${i + 1}: ${err instanceof Error ? err.message : "Unknown error"
               }`
             );
           }
@@ -816,38 +823,36 @@ export const transactionExtractorService = {
             ),
             DEBIT: columnMapping.DEBIT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.DEBIT.trim()
-                )
+                (h) => h.trim() === columnMapping.DEBIT.trim()
+              )
               : -1,
             CREDIT: columnMapping.CREDIT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.CREDIT.trim()
-                )
+                (h) => h.trim() === columnMapping.CREDIT.trim()
+              )
               : -1,
             AMOUNT: columnMapping.AMOUNT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.AMOUNT?.trim()
-                )
+                (h) => h.trim() === columnMapping.AMOUNT?.trim()
+              )
               : -1,
             DIRECTION: columnMapping.DIRECTION
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.DIRECTION?.trim()
-                )
+                (h) => h.trim() === columnMapping.DIRECTION?.trim()
+              )
               : -1,
           };
 
           // Validate that required columns were found
           if (columnIndices.DATE === -1) {
             throw new Error(
-              `Date column "${
-                columnMapping.DATE
+              `Date column "${columnMapping.DATE
               }" not found in CSV headers: ${headers.join(", ")}`
             );
           }
           if (columnIndices.DESCRIPTION === -1) {
             throw new Error(
-              `Description column "${
-                columnMapping.DESCRIPTION
+              `Description column "${columnMapping.DESCRIPTION
               }" not found in CSV headers: ${headers.join(", ")}`
             );
           }
@@ -889,8 +894,8 @@ export const transactionExtractorService = {
                 : -1,
               DIRECTION: mapping.DIRECTION
                 ? headers.findIndex(
-                    (h) => h.trim() === mapping.DIRECTION?.trim()
-                  )
+                  (h) => h.trim() === mapping.DIRECTION?.trim()
+                )
                 : -1,
             };
           } else {
@@ -920,9 +925,8 @@ export const transactionExtractorService = {
               transactions.push(transaction);
             }
           } catch (error) {
-            const errorMsg = `Line ${i + 2}: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`;
+            const errorMsg = `Line ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"
+              }`;
             errors.push(errorMsg);
           }
         }
@@ -937,19 +941,19 @@ export const transactionExtractorService = {
         // For Excel files, convert to CSV and process
         console.log(`processing excel file for preview`, file);
         const XLSX = await import('xlsx');
-        
+
         // Read the Excel file
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        
+
         // Get the first sheet
         const firstSheetName = workbook.SheetNames[0];
         if (!firstSheetName) {
           throw new Error("Excel file has no sheets");
         }
-        
+
         const worksheet = workbook.Sheets[firstSheetName];
-        
+
         // Convert sheet to JSON first to clean the data, then to CSV
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
 
@@ -961,25 +965,25 @@ export const transactionExtractorService = {
         // Convert cleaned data back to CSV
         const csvText = XLSX.utils.aoa_to_sheet(cleanedData) ?
           XLSX.utils.sheet_to_csv(XLSX.utils.aoa_to_sheet(cleanedData)) : '';
-        
+
         if (!csvText || !csvText.trim()) {
           throw new Error("Excel sheet is empty");
         }
 
         const lines = this.splitCSVRows(csvText);
-        
+
         if (lines.length === 0) {
           throw new Error("No data found in Excel file");
         }
-        
+
         const transactions: ExtractedTransaction[] = [];
         const errors: string[] = [];
-        
+
         // Parse header row to get column indices
         const headers = this.parseCSVColumns(lines[0]);
-        
+
         let columnIndices: Record<string, number> = {};
-        
+
         if (columnMapping) {
           // Use provided column mapping with exact string matching
           columnIndices = {
@@ -991,38 +995,36 @@ export const transactionExtractorService = {
             ),
             DEBIT: columnMapping.DEBIT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.DEBIT.trim()
-                )
+                (h) => h.trim() === columnMapping.DEBIT.trim()
+              )
               : -1,
             CREDIT: columnMapping.CREDIT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.CREDIT.trim()
-                )
+                (h) => h.trim() === columnMapping.CREDIT.trim()
+              )
               : -1,
             AMOUNT: columnMapping.AMOUNT
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.AMOUNT?.trim()
-                )
+                (h) => h.trim() === columnMapping.AMOUNT?.trim()
+              )
               : -1,
             DIRECTION: columnMapping.DIRECTION
               ? headers.findIndex(
-                  (h) => h.trim() === columnMapping.DIRECTION?.trim()
-                )
+                (h) => h.trim() === columnMapping.DIRECTION?.trim()
+              )
               : -1,
           };
-          
+
           // Validate that required columns were found
           if (columnIndices.DATE === -1) {
             throw new Error(
-              `Date column "${
-                columnMapping.DATE
+              `Date column "${columnMapping.DATE
               }" not found in Excel headers: ${headers.join(", ")}`
             );
           }
           if (columnIndices.DESCRIPTION === -1) {
             throw new Error(
-              `Description column "${
-                columnMapping.DESCRIPTION
+              `Description column "${columnMapping.DESCRIPTION
               }" not found in Excel headers: ${headers.join(", ")}`
             );
           }
@@ -1064,8 +1066,8 @@ export const transactionExtractorService = {
                 : -1,
               DIRECTION: mapping.DIRECTION
                 ? headers.findIndex(
-                    (h) => h.trim() === mapping.DIRECTION?.trim()
-                  )
+                  (h) => h.trim() === mapping.DIRECTION?.trim()
+                )
                 : -1,
             };
           } else {
@@ -1076,7 +1078,7 @@ export const transactionExtractorService = {
             );
           }
         }
-        
+
         // Parse rows into transactions (up to 50 for preview)
         const dataLines = lines.slice(1);
         for (let i = 0; i < Math.min(50, dataLines.length); i++) {
@@ -1091,13 +1093,12 @@ export const transactionExtractorService = {
               transactions.push(transaction);
             }
           } catch (error) {
-            const errorMsg = `Line ${i + 2}: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`;
+            const errorMsg = `Line ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"
+              }`;
             errors.push(errorMsg);
           }
         }
-        
+
         return this.buildExtractionResult(transactions, errors);
       } else {
         throw new Error(`Unsupported file type for preview: ${file.type}`);
@@ -1127,19 +1128,19 @@ export const transactionExtractorService = {
     try {
       // Dynamically import xlsx to avoid increasing bundle size for users who don't need it
       const XLSX = await import('xlsx');
-      
+
       // Read the Excel file
       const arrayBuffer = await file.arrayBuffer();
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      
+
       // Get the first sheet
       const firstSheetName = workbook.SheetNames[0];
       if (!firstSheetName) {
         throw new Error("Excel file has no sheets");
       }
-      
+
       const worksheet = workbook.Sheets[firstSheetName];
-      
+
       // Convert sheet to JSON first to clean the data, then to CSV
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
 
@@ -1151,29 +1152,29 @@ export const transactionExtractorService = {
       // Convert cleaned data back to CSV
       const csvText = XLSX.utils.aoa_to_sheet(cleanedData) ?
         XLSX.utils.sheet_to_csv(XLSX.utils.aoa_to_sheet(cleanedData)) : '';
-      
+
       if (!csvText || !csvText.trim()) {
         throw new Error("Excel sheet is empty");
       }
-      
+
       console.log("Converted Excel to CSV, processing...");
-      
+
       // Parse the CSV data using existing CSV logic
       const lines = this.splitCSVRows(csvText);
-      
+
       if (lines.length === 0) {
         throw new Error("No data found in Excel file");
       }
-      
+
       const transactions: ExtractedTransaction[] = [];
       const errors: string[] = [];
-      
+
       // Parse header row to get column indices
       const headers = this.parseCSVColumns(lines[0]);
       console.log("Excel headers:", headers);
-      
+
       let columnIndices: Record<string, number> = {};
-      
+
       if (columnMapping) {
         // Use provided column mapping with exact string matching
         columnIndices = {
@@ -1192,25 +1193,23 @@ export const transactionExtractorService = {
             : -1,
           DIRECTION: columnMapping.DIRECTION
             ? headers.findIndex(
-                (h) => h.trim() === columnMapping.DIRECTION?.trim()
-              )
+              (h) => h.trim() === columnMapping.DIRECTION?.trim()
+            )
             : -1,
         };
-        
+
         console.log("Using Excel column mapping:", columnIndices);
-        
+
         // Validate that required columns were found
         if (columnIndices.DATE === -1) {
           throw new Error(
-            `Date column "${
-              columnMapping.DATE
+            `Date column "${columnMapping.DATE
             }" not found in Excel headers: ${headers.join(", ")}`
           );
         }
         if (columnIndices.DESCRIPTION === -1) {
           throw new Error(
-            `Description column "${
-              columnMapping.DESCRIPTION
+            `Description column "${columnMapping.DESCRIPTION
             }" not found in Excel headers: ${headers.join(", ")}`
           );
         }
@@ -1252,8 +1251,8 @@ export const transactionExtractorService = {
               : -1,
             DIRECTION: mapping.DIRECTION
               ? headers.findIndex(
-                  (h) => h.trim() === mapping.DIRECTION?.trim()
-                )
+                (h) => h.trim() === mapping.DIRECTION?.trim()
+              )
               : -1,
           };
           console.log("Auto-detected Excel column mapping:", columnIndices);
@@ -1265,10 +1264,10 @@ export const transactionExtractorService = {
           );
         }
       }
-      
+
       // Skip header row and parse data
       const dataLines = lines.slice(1);
-      
+
       for (let i = 0; i < dataLines.length; i++) {
         try {
           const transaction = await this.parseCSVLineWithMapping(
@@ -1281,14 +1280,13 @@ export const transactionExtractorService = {
             transactions.push(transaction);
           }
         } catch (error) {
-          const errorMsg = `Line ${i + 2}: ${
-            error instanceof Error ? error.message : "Unknown error"
-          }`;
+          const errorMsg = `Line ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"
+            }`;
           console.warn("Excel parsing error:", errorMsg);
           errors.push(errorMsg);
         }
       }
-      
+
       console.log(
         `Extracted ${transactions.length} transactions from Excel with ${errors.length} errors`
       );
@@ -1319,13 +1317,11 @@ export const transactionExtractorService = {
     columnMapping?: ColumnMapping
   ): Promise<ExtractionResult> {
     try {
-      // 1) Send PDF to backend for extraction
+      // 1) Send PDF to external ai.thevotum.com API for extraction
       const formData = new FormData();
-      formData.append("file", file, file.name);
+      formData.append("in_file", file, file.name);
 
-      const baseUrl = amlBackendClient.getConfig().baseUrl;
-      console.log(`baseUrl`, baseUrl);
-      const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
+      const response = await fetch("https://ai.thevotum.com/extract_tables", {
         method: "POST",
         body: formData,
         // Keep a generous timeout since PDF parsing may take longer
@@ -1336,36 +1332,43 @@ export const transactionExtractorService = {
         let errText = "";
         try {
           errText = await response.text();
-        } catch {}
+        } catch { }
         throw new Error(
-          `PDF extraction failed (${response.status}): ${
-            errText || response.statusText
+          `PDF extraction failed (${response.status}): ${errText || response.statusText
           }`
         );
       }
 
-      // 2) Validate content-type and read CSV content returned by backend
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("text/csv")) {
-        const body = await response.text().catch(() => "");
-        throw new Error(
-          `Unexpected content-type: ${contentType}. Body: ${body}`
-        );
+      // 2) Parse JSON response from external API
+      const jsonResponse = await response.json();
+      console.log('=== PDF API Response (Extract) ===', jsonResponse);
+
+      // API returns: { results: [{ res: { parsing_res_list: [...] } }] }
+      if (!jsonResponse.results || !Array.isArray(jsonResponse.results)) {
+        throw new Error("Invalid response format from PDF extraction API");
       }
 
-      let csvText = await response.text();
-      // Strip UTF-8 BOM if present
-      if (csvText.charCodeAt(0) === 0xfeff) {
-        csvText = csvText.slice(1);
+      // Extract all table blocks and convert HTML to CSV
+      let csvText = '';
+      for (const pageResult of jsonResponse.results) {
+        const parsingResList = pageResult.res?.parsing_res_list || [];
+
+        for (const block of parsingResList) {
+          if (block.block_label === 'table' && block.block_content) {
+            const tableCSV = this.convertHTMLTableToCSV(block.block_content);
+            if (tableCSV) {
+              csvText += (csvText ? '\n' : '') + tableCSV;
+            }
+          }
+        }
       }
+
+      if (!csvText || !csvText.trim()) {
+        throw new Error("No table data extracted from PDF");
+      }
+
       // Split into lines while respecting quoted newlines
       const lines = this.splitCSVRows(csvText);
-
-      console.log(`lines`, lines);
-
-      if (lines.length === 0) {
-        throw new Error("No CSV content returned from PDF extraction");
-      }
 
       // 3) Parse headers
       const headers = this.parseCSVColumns(lines[0]);
@@ -1390,13 +1393,13 @@ export const transactionExtractorService = {
             : -1,
           AMOUNT: columnMapping.AMOUNT
             ? headers.findIndex(
-                (h) => h.trim() === columnMapping.AMOUNT?.trim()
-              )
+              (h) => h.trim() === columnMapping.AMOUNT?.trim()
+            )
             : -1,
           DIRECTION: columnMapping.DIRECTION
             ? headers.findIndex(
-                (h) => h.trim() === columnMapping.DIRECTION?.trim()
-              )
+              (h) => h.trim() === columnMapping.DIRECTION?.trim()
+            )
             : -1,
         };
 
@@ -1421,15 +1424,13 @@ export const transactionExtractorService = {
         // Validate that required columns were found
         if (columnIndices.DATE === -1) {
           throw new Error(
-            `Date column "${
-              columnMapping.DATE
+            `Date column "${columnMapping.DATE
             }" not found in extracted headers: ${headers.join(", ")}`
           );
         }
         if (columnIndices.DESCRIPTION === -1) {
           throw new Error(
-            `Description column "${
-              columnMapping.DESCRIPTION
+            `Description column "${columnMapping.DESCRIPTION
             }" not found in extracted headers: ${headers.join(", ")}`
           );
         }
@@ -1482,23 +1483,23 @@ export const transactionExtractorService = {
           ),
           DEBIT: validation.requiredColumns.DEBIT
             ? headers.findIndex(
-                (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
-              )
+              (h) => h.trim() === validation.requiredColumns.DEBIT!.trim()
+            )
             : -1,
           CREDIT: validation.requiredColumns.CREDIT
             ? headers.findIndex(
-                (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
-              )
+              (h) => h.trim() === validation.requiredColumns.CREDIT!.trim()
+            )
             : -1,
           AMOUNT: validation.requiredColumns.AMOUNT
             ? headers.findIndex(
-                (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
-              )
+              (h) => h.trim() === validation.requiredColumns.AMOUNT!.trim()
+            )
             : -1,
           DIRECTION: validation.requiredColumns.DIRECTION
             ? headers.findIndex(
-                (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
-              )
+              (h) => h.trim() === validation.requiredColumns.DIRECTION!.trim()
+            )
             : -1,
         };
       }
@@ -1521,8 +1522,7 @@ export const transactionExtractorService = {
           if (tx) transactions.push(tx);
         } catch (err) {
           errors.push(
-            `Line ${i + 1}: ${
-              err instanceof Error ? err.message : "Unknown error"
+            `Line ${i + 1}: ${err instanceof Error ? err.message : "Unknown error"
             }`
           );
         }
@@ -1757,5 +1757,37 @@ export const transactionExtractorService = {
     bankPreset: string = "generic"
   ): Promise<string[]> {
     return await getBankRegexPatterns(bankPreset);
+  },
+
+  // Helper to convert HTML table to CSV
+  convertHTMLTableToCSV(htmlTable: string): string {
+    try {
+      // Parse HTML table
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(htmlTable, 'text/html');
+      const rows = doc.querySelectorAll('tr');
+
+      const csvRows: string[] = [];
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td, th');
+        const values = Array.from(cells).map(cell => {
+          let text = cell.textContent || '';
+          text = text.trim();
+          // Escape quotes and wrap in quotes if contains comma
+          if (text.includes(',') || text.includes('"') || text.includes('\n')) {
+            text = `"${text.replace(/"/g, '""')}"`;
+          }
+          return text;
+        });
+        if (values.some(v => v)) { // Only add non-empty rows
+          csvRows.push(values.join(','));
+        }
+      });
+
+      return csvRows.join('\n');
+    } catch (error) {
+      console.error('Error converting HTML table to CSV:', error);
+      return '';
+    }
   },
 };
