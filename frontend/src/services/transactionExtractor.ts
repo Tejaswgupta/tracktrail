@@ -1759,30 +1759,54 @@ export const transactionExtractorService = {
     return await getBankRegexPatterns(bankPreset);
   },
 
-  // Helper to convert HTML table to CSV
+  // Helper to convert HTML table to CSV - uses regex instead of DOMParser for Node.js compatibility
   convertHTMLTableToCSV(htmlTable: string): string {
     try {
-      // Parse HTML table
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(htmlTable, 'text/html');
-      const rows = doc.querySelectorAll('tr');
-
+      // Use regex-based parsing instead of DOMParser (which is browser-only)
+      // This works in both browser and Node.js environments
       const csvRows: string[] = [];
-      rows.forEach(row => {
-        const cells = row.querySelectorAll('td, th');
-        const values = Array.from(cells).map(cell => {
-          let text = cell.textContent || '';
-          text = text.trim();
-          // Escape quotes and wrap in quotes if contains comma
+
+      // Extract all table rows
+      const rowMatches = htmlTable.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
+
+      for (const rowMatch of rowMatches) {
+        const rowContent = rowMatch[1];
+        const values: string[] = [];
+
+        // Extract all cells (td or th)
+        const cellMatches = rowContent.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi);
+
+        for (const cellMatch of cellMatches) {
+          let text = cellMatch[1];
+
+          // Remove HTML tags
+          text = text.replace(/<[^>]*>/g, '');
+
+          // Decode HTML entities
+          text = text
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+
+          // Trim and normalize whitespace
+          text = text.replace(/\s+/g, ' ').trim();
+
+          // Escape quotes and wrap in quotes if contains comma, quote, or newline
           if (text.includes(',') || text.includes('"') || text.includes('\n')) {
             text = `"${text.replace(/"/g, '""')}"`;
           }
-          return text;
-        });
-        if (values.some(v => v)) { // Only add non-empty rows
+
+          values.push(text);
+        }
+
+        // Only add non-empty rows
+        if (values.some(v => v)) {
           csvRows.push(values.join(','));
         }
-      });
+      }
 
       return csvRows.join('\n');
     } catch (error) {
