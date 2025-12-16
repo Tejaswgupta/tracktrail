@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
+// Force dynamic rendering to prevent build-time execution
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 // OpenAI client configuration - lazy initialization to avoid build-time errors
 function getOpenAIClient() {
   return new OpenAI({
