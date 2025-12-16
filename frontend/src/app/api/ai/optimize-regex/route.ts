@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
-// OpenAI client configuration
-
-console.log("OpenAI API Key configured:", !!process.env.OPENAI_API_KEY);
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL: "https://model.thevotum.com/v1",
-});
+// OpenAI client configuration - lazy initialization to avoid build-time errors
+function getOpenAIClient() {
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: "https://model.thevotum.com/v1",
+  });
+}
 
 interface OptimizationRequest {
   prompt: string;
@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Call OpenAI API using SDK
+    const openai = getOpenAIClient();
     const completion = await openai.chat.completions.create({
       model,
       messages: [
