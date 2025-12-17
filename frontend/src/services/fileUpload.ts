@@ -364,7 +364,7 @@ export const fileUploadService = {
         try {
           await statementsService.updateProcessingStatus(
             statement.statement_id,
-            extractionResult.errors.length > 0 ? "completed" : "completed",
+            extractionResult.errors.length > 0 ? "completed_with_warnings" : "completed",
             100
           );
         } catch (e) {
