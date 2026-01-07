@@ -12,8 +12,6 @@ export default function Step1FileUpload({
   onFileSelect,
   disabled = false,
   isProcessing = false,
-  pdfProcessingMode = "line-spacing",
-  onPdfProcessingModeChange,
 }: Step1FileUploadProps) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -226,67 +224,6 @@ export default function Step1FileUpload({
             </div>
           )}
 
-          {/* PDF Processing Mode Selection */}
-          {file && file.type === "application/pdf" && onPdfProcessingModeChange && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <div className="space-y-3">
-                <div>
-                  <h4 className="text-sm font-medium text-gray-900 mb-1">
-                    PDF Processing Mode
-                  </h4>
-                  <p className="text-xs text-gray-600">
-                    Choose how your PDF should be processed for optimal transaction extraction.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="flex items-start space-x-3 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="pdf-processing-mode"
-                      value="line-spacing"
-                      checked={pdfProcessingMode === "line-spacing"}
-                      onChange={() => onPdfProcessingModeChange("line-spacing")}
-                      disabled={disabled || isProcessing}
-                      className="mt-1 h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 disabled:opacity-50"
-                    />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-gray-900">
-                        Line Spacing Format
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        For PDFs with clear line separation between transactions. Standard processing that works for most bank statements.
-                      </div>
-                    </div>
-                  </label>
-
-                  <label className="flex items-start space-x-3 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="pdf-processing-mode"
-                      value="table-spacing"
-                      checked={pdfProcessingMode === "table-spacing"}
-                      onChange={() => onPdfProcessingModeChange("table-spacing")}
-                      disabled={disabled || isProcessing}
-                      className="mt-1 h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 disabled:opacity-50"
-                    />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-gray-900">
-                        Table Spacing Format
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        For PDFs with complex table layouts and spaced columns. Advanced processing for better table recognition.
-                      </div>
-                      <div className="mt-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                        Coming Soon
-                      </div>
-                    </div>
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <div className="flex">
               <svg
@@ -302,7 +239,7 @@ export default function Step1FileUpload({
               </svg>
               <div className="ml-3">
                 <p className="text-sm text-blue-800">
-                  File selected successfully! {file && file.type === "application/pdf" ? "Choose your processing mode and" : ""} Click "Next" to continue with
+                  File selected successfully! Click "Next" to continue with
                   column mapping.
                 </p>
               </div>
