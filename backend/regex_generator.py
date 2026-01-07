@@ -5,7 +5,7 @@ import re
 
 import pandas as pd
 from dotenv import load_dotenv
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain.agents import create_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
@@ -153,18 +153,11 @@ def generate_regex_with_iterative_agent(df, description_col):
         ])
         
         # Create agent with higher iteration limit for iterative refinement
-        agent = create_tool_calling_agent(llm, tools, prompt)
-        agent_executor = AgentExecutor(
-            agent=agent,
-            tools=tools,
-            verbose=True,
-            max_iterations=40,  # More iterations for iterative testing with tool calls
-            handle_parsing_errors=True
-        )
+        agent = create_agent(llm, tools, prompt)
         
         # Run agent
         print("Agent is generating and iteratively refining patterns using testing tool...\n")
-        result = agent_executor.invoke({"input": AGENT_PROMPT_TEMPLATE.format(total_descriptions=len(all_descriptions))})
+        result = agent.invoke({"input": AGENT_PROMPT_TEMPLATE.format(total_descriptions=len(all_descriptions))})
         
         print("\n" + "="*80)
         print("Agent Execution Complete")
