@@ -25,7 +25,6 @@ export interface ExtractionResult {
 import { getBankRegexPatterns } from "@/constants/banks";
 import type { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
 import { validateCSVColumns } from "@/utils/csvValidator";
-import { amlBackendClient } from "./amlBackendClient";
 import { parseAndConvertToISO } from "./dateParser";
 
 /**
@@ -54,6 +53,122 @@ function cleanCellValue(cellValue: any): string {
     .trim();
 
   return cleaned;
+}
+
+function parseHtmlTableToRows(tableHtml: string): string[][] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(tableHtml, "text/html");
+  const table = doc.querySelector("table");
+  if (!table) return [];
+
+  const rows: string[][] = [];
+  table.querySelectorAll("tr").forEach((tr) => {
+    const cells = Array.from(tr.querySelectorAll("th, td")).map((cell) =>
+      cleanCellValue(cell.textContent ?? "")
+    );
+    if (cells.some((cell) => cell.length > 0)) {
+      rows.push(cells);
+    }
+  });
+
+  return rows;
+}
+
+function isHeaderRow(row: string[], headers: string[]): boolean {
+  if (row.length !== headers.length) return false;
+  return row.every(
+    (cell, idx) =>
+      cell.trim().toLowerCase() === headers[idx].trim().toLowerCase()
+  );
+}
+
+function extractTablesFromResponse(json: any): string[][][] {
+  if (!json || !Array.isArray(json.results)) {
+    throw new Error("Invalid JSON response from PDF extraction");
+  }
+
+  const tables: string[][][] = [];
+  json.results.forEach((result: any) => {
+    const parsingList = result?.res?.parsing_res_list;
+    if (!Array.isArray(parsingList)) return;
+    parsingList.forEach((block: any) => {
+      if (block?.block_label === "table" && typeof block.block_content === "string") {
+        const rows = parseHtmlTableToRows(block.block_content);
+        if (rows.length > 0) tables.push(rows);
+      }
+    });
+  });
+
+  if (tables.length === 0) {
+    throw new Error("No table content returned from PDF extraction");
+  }
+
+  return tables;
+}
+
+function deriveHeadersAndRows(tables: string[][][]): {
+  headers: string[];
+  rows: string[][];
+} {
+  let headers: string[] = [];
+  const rows: string[][] = [];
+
+  tables.forEach((tableRows) => {
+    if (tableRows.length === 0) return;
+    if (headers.length === 0) {
+      const candidateHeaders = tableRows[0];
+      if (candidateHeaders.every((cell) => cell.trim().length === 0)) return;
+      headers = candidateHeaders;
+      rows.push(...tableRows.slice(1));
+      return;
+    }
+
+    const startIndex = isHeaderRow(tableRows[0], headers) ? 1 : 0;
+    rows.push(...tableRows.slice(startIndex));
+  });
+
+  if (headers.length === 0) {
+    throw new Error("No header row found in extracted tables");
+  }
+
+  const filteredRows = rows.filter((row) =>
+    row.some((cell) => cell.trim().length > 0)
+  );
+
+  return { headers, rows: filteredRows };
+}
+
+async function fetchExtractTablesJson(
+  file: File,
+  timeoutMs?: number
+): Promise<any> {
+  const formData = new FormData();
+  formData.append("in_file", file, file.name);
+
+  const response = await fetch(`https://ai.thevotum.com/extract_tables`, {
+    method: "POST",
+    body: formData,
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+  });
+
+  if (!response.ok) {
+    let errText = "";
+    try {
+      errText = await response.text();
+    } catch {}
+    throw new Error(
+      `PDF extraction failed (${response.status}): ${
+        errText || response.statusText
+      }`
+    );
+  }
+
+  const json = await response.json().catch(() => null);
+  if (!json) {
+    throw new Error("Invalid JSON response from PDF extraction");
+  }
+
+  return json;
 }
 
 export const transactionExtractorService = {
@@ -265,7 +380,20 @@ export const transactionExtractorService = {
     }
 
     const columns = this.parseCSVColumns(line);
+    return this.parseColumnsWithMapping(
+      columns,
+      lineNumber,
+      columnIndices,
+      originalIndex
+    );
+  },
 
+  async parseColumnsWithMapping(
+    columns: string[],
+    lineNumber: number,
+    columnIndices: Record<string, number>,
+    originalIndex: number
+  ): Promise<ExtractedTransaction | null> {
     // Extract values using column mapping
     const dateStr =
       columnIndices.DATE >= 0 && columns[columnIndices.DATE]
@@ -531,49 +659,16 @@ export const transactionExtractorService = {
 
   // Preview PDF extraction to obtain headers and suggested mapping before full upload
   async previewPDFColumns(file: File): Promise<CSVValidationResult> {
-    // Reuse the backend PDF->CSV endpoint to get a CSV snapshot and validate headers
-    const formData = new FormData();
-    formData.append("file", file, file.name);
-
-    const baseUrl = amlBackendClient.getConfig().baseUrl;
-    const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      let errText = "";
-      try {
-        errText = await response.text();
-      } catch {}
-      throw new Error(
-        `PDF preview extraction failed (${response.status}): ${
-          errText || response.statusText
-        }`
-      );
-    }
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("text/csv")) {
-      const body = await response.text().catch(() => "");
-      throw new Error(
-        `Unexpected content-type from preview: ${contentType}. Body: ${body}`
-      );
-    }
-
-    let csvText = await response.text();
-    if (csvText.charCodeAt(0) === 0xfeff) csvText = csvText.slice(1);
-    const lines = this.splitCSVRows(csvText);
-    if (lines.length === 0)
-      throw new Error("No CSV content returned from PDF extraction");
-
-    const headers = this.parseCSVColumns(lines[0]);
+    // Call the table-extraction endpoint to obtain headers and a preview
+    const json = await fetchExtractTablesJson(file);
+    const tables = extractTablesFromResponse(json);
+    const { headers, rows: dataRows } = deriveHeadersAndRows(tables);
 
     // Build preview data (up to 5 rows)
     const previewData: Record<string, string>[] = [];
-    const previewRows = Math.min(5, Math.max(0, lines.length - 1));
-    for (let i = 1; i <= previewRows; i++) {
-      const values = this.parseCSVColumns(lines[i] || "");
+    const previewRows = Math.min(5, Math.max(0, dataRows.length));
+    for (let i = 0; i < previewRows; i++) {
+      const values = dataRows[i] || [];
       const row: Record<string, string> = {};
       headers.forEach((h, idx) => {
         row[h] = values[idx] || "";
@@ -607,46 +702,9 @@ export const transactionExtractorService = {
       // For PDF files, we need to first convert to CSV
       if (file.type === "application/pdf") {
         console.log(`processing pdf file for preview`, file);
-        // Get CSV from PDF using the backend
-        const formData = new FormData();
-        formData.append("file", file, file.name);
-
-        const baseUrl = amlBackendClient.getConfig().baseUrl;
-        const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          let errText = "";
-          try {
-            errText = await response.text();
-          } catch {}
-          throw new Error(
-            `PDF extraction failed (${response.status}): ${
-              errText || response.statusText
-            }`
-          );
-        }
-
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.includes("text/csv")) {
-          const body = await response.text().catch(() => "");
-          throw new Error(
-            `Unexpected content-type: ${contentType}. Body: ${body}`
-          );
-        }
-
-        let csvText = await response.text();
-        if (csvText.charCodeAt(0) === 0xfeff) csvText = csvText.slice(1);
-        const lines = this.splitCSVRows(csvText);
-
-        if (lines.length === 0) {
-          throw new Error("No CSV content returned from PDF extraction");
-        }
-
-        // Parse headers
-        const headers = this.parseCSVColumns(lines[0]);
+        const json = await fetchExtractTablesJson(file);
+        const tables = extractTablesFromResponse(json);
+        const { headers, rows: dataRows } = deriveHeadersAndRows(tables);
 
         // Determine column indices either from provided mapping or via auto-detection
         let columnIndices: Record<string, number> = {} as Record<
@@ -763,14 +821,13 @@ export const transactionExtractorService = {
         // Parse rows into transactions (up to 5 for preview)
         const transactions: ExtractedTransaction[] = [];
         const errors: string[] = [];
-        console.log("lines.length", lines.length);
-        //shuffle hte transactions
-        lines.sort(() => Math.random() - 0.5);
+        console.log("dataRows.length", dataRows.length);
+        const shuffledRows = [...dataRows].sort(() => Math.random() - 0.5);
 
-        for (let i = 1; i < Math.min(50, lines.length); i++) {
+        for (let i = 0; i < Math.min(50, shuffledRows.length); i++) {
           try {
-            const tx = await this.parseCSVLineWithMapping(
-              lines[i],
+            const tx = await this.parseColumnsWithMapping(
+              shuffledRows[i],
               i + 1,
               columnIndices,
               i // original index (0-based here); display as 1-based
@@ -1319,59 +1376,12 @@ export const transactionExtractorService = {
     columnMapping?: ColumnMapping
   ): Promise<ExtractionResult> {
     try {
-      // 1) Send PDF to backend for extraction
-      const formData = new FormData();
-      formData.append("file", file, file.name);
-
-      const baseUrl = amlBackendClient.getConfig().baseUrl;
-      console.log(`baseUrl`, baseUrl);
-      const response = await fetch(`${baseUrl}/api/v1/extract/pdf-to-csv`, {
-        method: "POST",
-        body: formData,
-        // Keep a generous timeout since PDF parsing may take longer
-        signal: AbortSignal.timeout(120000),
-      });
-
-      if (!response.ok) {
-        let errText = "";
-        try {
-          errText = await response.text();
-        } catch {}
-        throw new Error(
-          `PDF extraction failed (${response.status}): ${
-            errText || response.statusText
-          }`
-        );
-      }
-
-      // 2) Validate content-type and read CSV content returned by backend
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("text/csv")) {
-        const body = await response.text().catch(() => "");
-        throw new Error(
-          `Unexpected content-type: ${contentType}. Body: ${body}`
-        );
-      }
-
-      let csvText = await response.text();
-      // Strip UTF-8 BOM if present
-      if (csvText.charCodeAt(0) === 0xfeff) {
-        csvText = csvText.slice(1);
-      }
-      // Split into lines while respecting quoted newlines
-      const lines = this.splitCSVRows(csvText);
-
-      console.log(`lines`, lines);
-
-      if (lines.length === 0) {
-        throw new Error("No CSV content returned from PDF extraction");
-      }
-
-      // 3) Parse headers
-      const headers = this.parseCSVColumns(lines[0]);
+      const json = await fetchExtractTablesJson(file, 120000);
+      const tables = extractTablesFromResponse(json);
+      const { headers, rows: dataRows } = deriveHeadersAndRows(tables);
       console.log(`headers`, headers);
 
-      // 4) Determine column indices either from provided mapping or via auto-detection
+      // Determine column indices either from provided mapping or via auto-detection
       let columnIndices: Record<string, number> = {} as Record<string, number>;
       if (columnMapping) {
         // Use provided column mapping with exact string matching (same as CSV flow)
@@ -1505,14 +1515,14 @@ export const transactionExtractorService = {
 
       console.log(`columnIndices`, columnIndices);
 
-      // 5) Parse rows into transactions
+      // Parse rows into transactions
       const transactions: ExtractedTransaction[] = [];
       const errors: string[] = [];
 
-      for (let i = 1; i < lines.length; i++) {
+      for (let i = 0; i < dataRows.length; i++) {
         try {
-          const tx = await this.parseCSVLineWithMapping(
-            lines[i],
+          const tx = await this.parseColumnsWithMapping(
+            dataRows[i],
             i + 1,
             columnIndices,
             i // original index (0-based here); display as 1-based

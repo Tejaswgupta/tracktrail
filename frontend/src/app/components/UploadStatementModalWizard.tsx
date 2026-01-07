@@ -52,9 +52,6 @@ export default function UploadStatementModalWizard({
   );
   const [deletedRows, setDeletedRows] = useState<number[]>([]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
-  const [pdfProcessingMode, setPdfProcessingMode] = useState<
-    "line-spacing" | "table-spacing"
-  >("line-spacing");
 
   useEffect(() => {
     const fetchAccountAndInferBank = async () => {
@@ -155,8 +152,6 @@ export default function UploadStatementModalWizard({
         setIsProcessingFile(false);
       }
     } else if (selectedFile.type === "application/pdf") {
-      // For PDFs, defer processing until next button is clicked
-      // Just validate that it's a PDF file
       setIsProcessingFile(false);
     }
   };
@@ -166,17 +161,9 @@ export default function UploadStatementModalWizard({
     setError(null);
 
     try {
-      let validation;
-
-      if (pdfProcessingMode === "line-spacing") {
-        // Use existing PDF extraction method
-        validation = await transactionExtractorService.previewPDFColumns(file);
-      } else {
-        // For table-spacing mode, we'll use the advanced method (placeholder for now)
-        // This will be implemented later in the backend
-        validation = await transactionExtractorService.previewPDFColumns(file);
-      }
-
+      const validation = await transactionExtractorService.previewPDFColumns(
+        file
+      );
       setCsvValidation(validation);
 
       if (validation.isValid && validation.suggestedMapping) {
@@ -346,8 +333,6 @@ export default function UploadStatementModalWizard({
               onFileSelect={handleFileSelect}
               disabled={isUploading}
               isProcessing={isProcessingFile}
-              pdfProcessingMode={pdfProcessingMode}
-              onPdfProcessingModeChange={setPdfProcessingMode}
             />
           )}
 
