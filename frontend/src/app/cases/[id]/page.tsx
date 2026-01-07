@@ -2,14 +2,34 @@
 
 import AIModeTab from "@/app/components/AIModeTab";
 import AMLTab from "@/app/components/AMLTab";
+import CaseTransactionsDataTable, {
+  CaseTransactionRow,
+} from "@/app/components/CaseTransactionsDataTable";
 import EfficientCounterpartyMerge from "@/app/components/EfficientCounterpartyMerge";
-import EntityList from "@/app/components/EntityList";
 import FlowchartTab from "@/app/components/FlowchartTab";
 import OverviewTab from "@/app/components/OverviewTab";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  caseTransactionsService,
+  entitiesService,
+  transactionsService,
+} from "@/services/database";
+import type {
+  CaseTransaction,
+  EntityWithAccounts,
+  Transaction,
+} from "@/types/database";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import AppHeader from "../../components/AppHeader";
-import CreateEntityModal from "../../components/CreateEntityModal";
 
 interface Case {
   id: string;
@@ -41,8 +61,37 @@ export default function CaseDetailPage() {
     | "entity-standardization"
     | "flowchart"
   >("overview");
-  const [isCreateEntityModalOpen, setIsCreateEntityModalOpen] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeView, setActiveView] = useState<
+    "all" | "needs-review" | "failed"
+  >("all");
+  const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactionsLoading, setTransactionsLoading] = useState(true);
+  const [transactionsProgress, setTransactionsProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
+  const [flagsByTxId, setFlagsByTxId] = useState<
+    Record<string, CaseTransaction | null>
+  >({});
+  const [filters, setFilters] = useState<
+    Array<{
+      id: string;
+      field:
+        | "entity"
+        | "account"
+        | "status"
+        | "date"
+        | "amount"
+        | "counterparty"
+        | "direction"
+        | "description";
+      operator: "is" | "contains" | "before" | "after" | "greater" | "less" | "between";
+      value: string;
+      valueTo?: string;
+    }>
+  >([]);
 
   useEffect(() => {
     const fetchCase = async () => {
@@ -89,26 +138,102 @@ export default function CaseDetailPage() {
     fetchCase();
   }, [caseId]);
 
-  const handleEntityCreated = () => {
-    setRefreshTrigger((prev) => prev + 1);
-    setIsCreateEntityModalOpen(false);
-    if (caseData) {
-      setCaseData((prev) =>
-        prev ? { ...prev, entityCount: prev.entityCount + 1 } : null
-      );
-    }
-  };
+  useEffect(() => {
+    const fetchEntities = async () => {
+      try {
+        const caseEntities = await entitiesService.getByCaseId(caseId);
+        setEntities(caseEntities);
+      } catch (error) {
+        console.error("Error fetching entities:", error);
+      }
+    };
 
-  const handleEntityDeleted = () => {
-    setRefreshTrigger((prev) => prev + 1);
-    if (caseData) {
-      setCaseData((prev) =>
-        prev
-          ? { ...prev, entityCount: Math.max(0, prev.entityCount - 1) }
-          : null
-      );
-    }
-  };
+    fetchEntities();
+  }, [caseId]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const TRANSACTIONS_PER_PAGE = 1000;
+
+    const loadTransactions = async () => {
+      try {
+        setTransactionsLoading(true);
+        setTransactionsProgress(null);
+
+        const totalCount = await transactionsService.getByCaseIdCount(caseId);
+        const allTransactions: Transaction[] = [];
+        let offset = 0;
+
+        while (!isCancelled) {
+          const page = await transactionsService.getByCaseId(caseId, {
+            offset,
+            limit: TRANSACTIONS_PER_PAGE,
+          });
+
+          allTransactions.push(...page);
+
+          if (!isCancelled && totalCount > 0) {
+            setTransactionsProgress({
+              current: allTransactions.length,
+              total: totalCount,
+            });
+          }
+
+          if (page.length < TRANSACTIONS_PER_PAGE) {
+            break;
+          }
+
+          offset += TRANSACTIONS_PER_PAGE;
+        }
+
+        if (!isCancelled) {
+          setTransactions(allTransactions);
+          setTransactionsProgress(null);
+        }
+      } catch (error) {
+        console.error("Error fetching transactions:", error);
+        if (!isCancelled) {
+          setTransactionsProgress(null);
+        }
+      } finally {
+        if (!isCancelled) {
+          setTransactionsLoading(false);
+        }
+      }
+    };
+
+    loadTransactions();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [caseId]);
+
+  useEffect(() => {
+    const loadFlags = async () => {
+      if (!transactions.length) {
+        setFlagsByTxId({});
+        return;
+      }
+      try {
+        const txIds = transactions.map((tx) => tx.transaction_id);
+        const flags = await caseTransactionsService.getFlagsForTransactions(
+          caseId,
+          txIds
+        );
+        const map: Record<string, CaseTransaction> = {};
+        flags.forEach((flag) => {
+          map[flag.transaction_id] = flag;
+        });
+        setFlagsByTxId(map);
+      } catch (error) {
+        console.error("Error fetching flags:", error);
+      }
+    };
+
+    loadFlags();
+  }, [caseId, transactions]);
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "active":
@@ -141,6 +266,291 @@ export default function CaseDetailPage() {
       month: "long",
       day: "numeric",
     });
+  };
+
+  const formatDateCompact = useCallback(
+    (dateString: string) =>
+      new Date(dateString).toLocaleDateString("en-IN", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }),
+    []
+  );
+
+  const formatCurrency = useCallback(
+    (amount: number) =>
+      new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0,
+      }).format(amount),
+    []
+  );
+
+  const entityMap = useMemo(() => {
+    const map = new Map<string, EntityWithAccounts>();
+    entities.forEach((entity) => map.set(entity.entity_id, entity));
+    return map;
+  }, [entities]);
+
+  const accountMap = useMemo(() => {
+    const map = new Map<
+      string,
+      { entity: EntityWithAccounts; accountLabel: string }
+    >();
+    entities.forEach((entity) => {
+      entity.accounts?.forEach((account) => {
+        const label = `${account.bank_name || "Bank"} (${account.account_number})`;
+        map.set(account.account_id, { entity, accountLabel: label });
+      });
+    });
+    return map;
+  }, [entities]);
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  const filtersWithLabels = useMemo(() => {
+    return filters
+      .map((filter) => {
+        if (!filter.value || (filter.operator === "between" && !filter.valueTo)) {
+          return null;
+        }
+        const operatorLabel =
+          filter.operator === "is"
+            ? "="
+            : filter.operator === "contains"
+              ? "contains"
+              : filter.operator === "before"
+                ? "before"
+                : filter.operator === "after"
+                  ? "after"
+                  : filter.operator === "greater"
+                    ? ">"
+                    : filter.operator === "less"
+                      ? "<"
+                      : "between";
+        const valueLabel =
+          filter.operator === "between"
+            ? `${filter.value} → ${filter.valueTo}`
+            : filter.value;
+        return {
+          id: filter.id,
+          label: `${filter.field}: ${operatorLabel} ${valueLabel}`,
+        };
+      })
+      .filter(Boolean) as Array<{ id: string; label: string }>;
+  }, [filters]);
+
+  const filteredTransactions = useMemo(() => {
+    const matchesFilters = (transaction: Transaction) => {
+      const entityName = entityMap.get(transaction.entity_id)?.entity_name || "";
+      const accountLabel = accountMap.get(transaction.account_id)?.accountLabel || "";
+      const counterparty = transaction.counterparty_merged || "Unknown";
+      const status =
+        flagsByTxId[transaction.transaction_id] ? "Failed" : "Success";
+
+      const baseMatch = normalizedQuery
+        ? [
+            entityName,
+            accountLabel,
+            transaction.description || "",
+            transaction.transaction_id,
+            counterparty,
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(normalizedQuery)
+        : true;
+
+      const viewMatch =
+        activeView === "all"
+          ? true
+          : activeView === "failed"
+            ? status === "Failed"
+            : flagsByTxId[transaction.transaction_id]?.flag_type ===
+              "Under Review";
+
+      const filterMatch = filters.every((filter) => {
+        if (!filter.value || (filter.operator === "between" && !filter.valueTo)) {
+          return true;
+        }
+        switch (filter.field) {
+          case "entity":
+            return filter.operator === "is"
+              ? entityName === filter.value
+              : entityName.toLowerCase().includes(filter.value.toLowerCase());
+          case "account":
+            return filter.operator === "is"
+              ? accountLabel === filter.value
+              : accountLabel.toLowerCase().includes(filter.value.toLowerCase());
+          case "status":
+            return status === filter.value;
+          case "direction":
+            return transaction.direction === filter.value;
+          case "counterparty":
+            return filter.operator === "is"
+              ? counterparty === filter.value
+              : counterparty.toLowerCase().includes(filter.value.toLowerCase());
+          case "description":
+            return (transaction.description || "")
+              .toLowerCase()
+              .includes(filter.value.toLowerCase());
+          case "date": {
+            const txDate = new Date(transaction.tx_date).getTime();
+            const from = new Date(filter.value).getTime();
+            const to = filter.valueTo ? new Date(filter.valueTo).getTime() : from;
+            if (filter.operator === "before") return txDate < from;
+            if (filter.operator === "after") return txDate > from;
+            if (filter.operator === "between") return txDate >= from && txDate <= to;
+            return true;
+          }
+          case "amount": {
+            const amount = transaction.amount;
+            const value = Number(filter.value);
+            const valueTo = filter.valueTo ? Number(filter.valueTo) : value;
+            if (Number.isNaN(value)) return true;
+            if (filter.operator === "greater") return amount > value;
+            if (filter.operator === "less") return amount < value;
+            if (filter.operator === "between")
+              return amount >= value && amount <= valueTo;
+            return true;
+          }
+          default:
+            return true;
+        }
+      });
+
+      return baseMatch && viewMatch && filterMatch;
+    };
+
+    return transactions.filter(matchesFilters);
+  }, [
+    transactions,
+    normalizedQuery,
+    activeView,
+    filters,
+    entityMap,
+    accountMap,
+    flagsByTxId,
+  ]);
+
+  const filteredTotal = useMemo(
+    () =>
+      filteredTransactions.reduce((sum, transaction) => sum + transaction.amount, 0),
+    [filteredTransactions]
+  );
+
+  const isFailedFocused =
+    activeView === "failed" ||
+    filters.some(
+      (filter) => filter.field === "status" && filter.value === "Failed"
+    );
+
+  const tableRows = useMemo<CaseTransactionRow[]>(() => {
+    return filteredTransactions.map((transaction) => {
+      const entity = entityMap.get(transaction.entity_id);
+      const account = accountMap.get(transaction.account_id);
+      const counterparty = transaction.counterparty_merged || "Unknown";
+      const hasFlag = Boolean(flagsByTxId[transaction.transaction_id]);
+      return {
+        id: transaction.transaction_id,
+        entityName: entity?.entity_name || "Unknown Entity",
+        accountLabel: account?.accountLabel || "Unknown Account",
+        dateLabel: formatDateCompact(transaction.tx_date),
+        description: transaction.description || "No description",
+        refId: transaction.transaction_id,
+        amountLabel: formatCurrency(transaction.amount),
+        amountValue: transaction.amount,
+        counterparty,
+        status: hasFlag ? "Failed" : "Success",
+        onCounterpartySave: async (newName) => {
+          if (!counterparty || counterparty === newName) {
+            return;
+          }
+          await transactionsService.updateTransactionCounterparty(
+            caseId,
+            counterparty,
+            newName
+          );
+          setTransactions((prev) =>
+            prev.map((tx) =>
+              tx.counterparty_merged === counterparty
+                ? { ...tx, counterparty_merged: newName }
+                : tx
+            )
+          );
+        },
+      };
+    });
+  }, [
+    filteredTransactions,
+    entityMap,
+    accountMap,
+    flagsByTxId,
+    caseId,
+    formatDateCompact,
+    formatCurrency,
+  ]);
+
+  const filterFieldOptions = [
+    { value: "entity", label: "Entity" },
+    { value: "account", label: "Account" },
+    { value: "status", label: "Status" },
+    { value: "date", label: "Date" },
+    { value: "amount", label: "Amount" },
+    { value: "counterparty", label: "Counterparty" },
+    { value: "direction", label: "Direction" },
+    { value: "description", label: "Description" },
+  ];
+
+  const getOperatorOptions = (field: string) => {
+    if (field === "date") {
+      return [
+        { value: "before", label: "Before" },
+        { value: "after", label: "After" },
+        { value: "between", label: "Between" },
+      ];
+    }
+    if (field === "amount") {
+      return [
+        { value: "greater", label: "Greater than" },
+        { value: "less", label: "Less than" },
+        { value: "between", label: "Between" },
+      ];
+    }
+    if (field === "status" || field === "direction") {
+      return [{ value: "is", label: "Is" }];
+    }
+    return [
+      { value: "is", label: "Is" },
+      { value: "contains", label: "Contains" },
+    ];
+  };
+
+  const addFilter = () => {
+    setFilters((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${prev.length}`,
+        field: "entity",
+        operator: "is",
+        value: "",
+      },
+    ]);
+  };
+
+  const updateFilter = (
+    id: string,
+    updates: Partial<(typeof filters)[number]>
+  ) => {
+    setFilters((prev) =>
+      prev.map((filter) => (filter.id === id ? { ...filter, ...updates } : filter))
+    );
+  };
+
+  const removeFilter = (id: string) => {
+    setFilters((prev) => prev.filter((filter) => filter.id !== id));
   };
 
   if (loading) {
@@ -197,39 +607,9 @@ export default function CaseDetailPage() {
         showBackButton={true}
       />
 
-      {/* Stats Bar */}
-      <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 py-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">
-                {caseData.entityCount}
-              </div>
-              <div className="text-sm text-gray-600">Entities</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-600">
-                {caseData.accountCount}
-              </div>
-              <div className="text-sm text-gray-600">Bank Accounts</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-purple-600">
-                {caseData.statementCount}
-              </div>
-              <div className="text-sm text-gray-600">Statements</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-orange-600">-</div>
-              <div className="text-sm text-gray-600">Total Volume</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Tabs */}
       <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8">
           <nav className="flex space-x-8">
             {[
               { key: "overview", label: "Overview" },
@@ -257,43 +637,299 @@ export default function CaseDetailPage() {
         </div>
       </div>
       {/* Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === "overview" && <OverviewTab caseId={caseData.id} />}
 
         {activeTab === "entities" && (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-lg font-medium text-gray-900">
-                Case Entities
-              </h2>
-              <button
-                onClick={() => setIsCreateEntityModalOpen(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-              >
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-                Add Entity
-              </button>
+          <div className="space-y-6">
+            <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
+              <aside className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 h-fit">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Smart Views
+                </h3>
+                <div className="mt-3 space-y-2">
+                  {[
+                    { key: "all", label: "All Transactions" },
+                    { key: "needs-review", label: "Needs Review" },
+                    { key: "failed", label: "Failed Extractions" },
+                  ].map((view) => (
+                    <button
+                      key={view.key}
+                      onClick={() => setActiveView(view.key as any)}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium ${
+                        activeView === view.key
+                          ? "bg-blue-50 text-blue-700 border border-blue-200"
+                          : "text-gray-700 hover:bg-gray-50 border border-transparent"
+                      }`}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
+                </div>
+              </aside>
+
+              <section className="space-y-4">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex-1">
+                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Global Search
+                      </label>
+                      <div className="mt-2 relative">
+                        <Input
+                          value={searchQuery}
+                          onChange={(event) => setSearchQuery(event.target.value)}
+                          placeholder="Search entity, account, ref ID, or counterparty"
+                          className="w-full bg-gray-50 pr-10"
+                        />
+                        <svg
+                          className="absolute right-3 top-2.5 h-4 w-4 text-gray-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M21 21l-4.35-4.35m1.6-5.4a7 7 0 11-14 0 7 7 0 0114 0z"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {filtersWithLabels.map((pill) => (
+                        <span
+                          key={pill.id}
+                          className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                        >
+                          {pill.label}
+                          <button
+                            onClick={() => removeFilter(pill.id)}
+                            className="ml-2 text-slate-500 hover:text-slate-700"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-dashed text-xs"
+                        onClick={addFilter}
+                      >
+                        + Add Filter
+                      </Button>
+                    </div>
+                  </div>
+
+                  {filters.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      {filters.map((filter) => {
+                        const operatorOptions = getOperatorOptions(filter.field);
+                        const isBetween = filter.operator === "between";
+                        const valueSelectOptions =
+                          filter.field === "entity"
+                            ? entities.map((entity) => ({
+                                value: entity.entity_name,
+                                label: entity.entity_name,
+                              }))
+                            : filter.field === "account"
+                              ? Array.from(accountMap.values()).map(
+                                  (account) => ({
+                                    value: account.accountLabel,
+                                    label: account.accountLabel,
+                                  })
+                                )
+                              : filter.field === "status"
+                                ? [
+                                    { value: "Success", label: "Success" },
+                                    { value: "Failed", label: "Failed" },
+                                  ]
+                                : filter.field === "direction"
+                                  ? [
+                                      { value: "DR", label: "Debit (DR)" },
+                                      { value: "CR", label: "Credit (CR)" },
+                                    ]
+                                  : [];
+
+                        const showSelectValue =
+                          filter.operator === "is" &&
+                          (filter.field === "entity" ||
+                            filter.field === "account" ||
+                            filter.field === "status" ||
+                            filter.field === "direction");
+
+                        const inputType =
+                          filter.field === "date"
+                            ? "date"
+                            : filter.field === "amount"
+                              ? "number"
+                              : "text";
+
+                        return (
+                          <div
+                            key={filter.id}
+                            className="grid gap-2 lg:grid-cols-[160px_160px_1fr_1fr_auto]"
+                          >
+                            <Select
+                              value={filter.field}
+                              onValueChange={(value) => {
+                                const nextOperator =
+                                  getOperatorOptions(value)[0]?.value || "is";
+                                updateFilter(filter.id, {
+                                  field: value as any,
+                                  operator: nextOperator as any,
+                                  value: "",
+                                  valueTo: undefined,
+                                });
+                              }}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Field" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {filterFieldOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+
+                            <Select
+                              value={filter.operator}
+                              onValueChange={(value) =>
+                                updateFilter(filter.id, {
+                                  operator: value as any,
+                                  valueTo: value === "between" ? filter.valueTo : undefined,
+                                })
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Operator" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {operatorOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+
+                            {showSelectValue ? (
+                              <Select
+                                value={filter.value}
+                                onValueChange={(value) =>
+                                  updateFilter(filter.id, { value })
+                                }
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Value" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {valueSelectOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input
+                                type={inputType}
+                                value={filter.value}
+                                placeholder="Value"
+                                onChange={(event) =>
+                                  updateFilter(filter.id, {
+                                    value: event.target.value,
+                                  })
+                                }
+                              />
+                            )}
+
+                            {isBetween ? (
+                              <Input
+                                type={inputType}
+                                value={filter.valueTo || ""}
+                                placeholder="To"
+                                onChange={(event) =>
+                                  updateFilter(filter.id, {
+                                    valueTo: event.target.value,
+                                  })
+                                }
+                              />
+                            ) : (
+                              <div className="hidden lg:block" />
+                            )}
+
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-gray-500"
+                              onClick={() => removeFilter(filter.id)}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-gray-900 bg-gray-900 px-4 py-2 text-xs font-semibold text-white">
+                  {filteredTransactions.length.toLocaleString()} Transactions
+                  <span className="mx-2 text-gray-400">|</span>
+                  Total Value: {formatCurrency(filteredTotal)}
+                  <span className="mx-2 text-gray-400">|</span>
+                  Risk:{" "}
+                  <span className="text-amber-300">
+                    {isFailedFocused ? "High" : "Medium"}
+                  </span>
+                  {!filtersWithLabels.length && (
+                    <span className="ml-2 text-gray-400">
+                      (Whole case view)
+                    </span>
+                  )}
+                </div>
+
+                {transactionsLoading ? (
+                  <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-600">
+                    <div className="flex items-center justify-between">
+                      <span>Loading transactions…</span>
+                      {transactionsProgress && (
+                        <span>
+                          {transactionsProgress.current.toLocaleString()} /{" "}
+                          {transactionsProgress.total.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    {transactionsProgress && (
+                      <div className="mt-3 h-2 w-full rounded-full bg-gray-200">
+                        <div
+                          className="h-2 rounded-full bg-blue-600"
+                          style={{
+                            width: `${
+                              (transactionsProgress.current /
+                                transactionsProgress.total) *
+                              100
+                            }%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <CaseTransactionsDataTable data={tableRows} />
+                )}
+              </section>
             </div>
-            <EntityList
-              caseId={caseData.id}
-              key={refreshTrigger}
-              onEntityDeleted={handleEntityDeleted}
-              onEntityUpdated={() => setRefreshTrigger((prev) => prev + 1)}
-            />
           </div>
         )}
+
         {activeTab === "timeline" && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-medium text-gray-900 mb-6">
@@ -346,14 +982,6 @@ export default function CaseDetailPage() {
         )}
       </main>
 
-      {/* Create Entity Modal */}
-      {isCreateEntityModalOpen && (
-        <CreateEntityModal
-          caseId={caseData.id}
-          onClose={() => setIsCreateEntityModalOpen(false)}
-          onEntityCreated={handleEntityCreated}
-        />
-      )}
     </div>
   );
 }
