@@ -1,9 +1,9 @@
 "use client";
 
+import { BANK_PRESETS, type BankPreset } from "@/constants/banks";
 import { useAuth } from "@/contexts/AuthContext";
 import { accountsService } from "@/services/database";
-import { BANK_PRESETS, type BankPreset } from "@/constants/banks";
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface CreateAccountModalProps {
   entityId: string;
@@ -76,7 +76,8 @@ export default function CreateAccountModal({
       await accountsService.create({
         entity_id: entityId,
         account_number: formData.accountNumber,
-        account_name: formData.accountName || `${BANK_PRESETS[formData.bankName]} Account`,
+        account_name:
+          formData.accountName || `${BANK_PRESETS[formData.bankName]} Account`,
         account_type: formData.accountType,
         bank_name: BANK_PRESETS[formData.bankName],
         branch_name: formData.branchName,
@@ -188,7 +189,7 @@ export default function CreateAccountModal({
             </div>
           </div>
 
-          <div>
+          {/* <div>
             <label
               htmlFor="accountType"
               className="block text-sm font-medium text-gray-700 mb-2"
@@ -215,7 +216,7 @@ export default function CreateAccountModal({
               <option value="Escrow">Escrow</option>
               <option value="Other">Other</option>
             </select>
-          </div>
+          </div> */}
 
           <div className="relative" ref={bankDropdownRef}>
             <label
@@ -232,7 +233,9 @@ export default function CreateAccountModal({
             >
               <div className="flex items-center">
                 <span className="block truncate">
-                  {formData.bankName ? BANK_PRESETS[formData.bankName] : "Select a bank"}
+                  {formData.bankName
+                    ? BANK_PRESETS[formData.bankName]
+                    : "Select a bank"}
                 </span>
               </div>
               <span className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
@@ -298,7 +301,7 @@ export default function CreateAccountModal({
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label
                 htmlFor="ifscCode"
@@ -336,9 +339,9 @@ export default function CreateAccountModal({
                 placeholder="e.g., Mumbai Main Branch"
               />
             </div>
-          </div>
+          </div> */}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label
                 htmlFor="openingDate"
@@ -376,7 +379,7 @@ export default function CreateAccountModal({
                 <option value="Dormant">Dormant</option>
               </select>
             </div>
-          </div>
+          </div> */}
 
           <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
             <button

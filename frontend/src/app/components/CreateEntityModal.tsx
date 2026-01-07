@@ -112,7 +112,11 @@ export default function CreateEntityModal({
         }
       } else {
         console.error("Unknown error type:", error);
-        alert(`An unexpected error occurred while creating the entity. Please try again or contact support if the issue persists. Error details: ${JSON.stringify(error)}`);
+        alert(
+          `An unexpected error occurred while creating the entity. Please try again or contact support if the issue persists. Error details: ${JSON.stringify(
+            error
+          )}`
+        );
       }
     } finally {
       setIsSubmitting(false);
@@ -278,7 +282,7 @@ export default function CreateEntityModal({
             />
           </div>
 
-          <div>
+          {/* <div>
             <label
               htmlFor="description"
               className="block text-sm font-medium text-gray-700 mb-2"
@@ -294,9 +298,9 @@ export default function CreateEntityModal({
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               placeholder="Enter entity description or role in the case"
             />
-          </div>
+          </div> */}
 
-          <div>
+          {/* <div>
             <label
               htmlFor="address"
               className="block text-sm font-medium text-gray-700 mb-2"
@@ -312,9 +316,9 @@ export default function CreateEntityModal({
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               placeholder="Enter registered address"
             />
-          </div>
+          </div> */}
 
-          <div>
+          {/* <div>
             <label
               htmlFor="contactInfo"
               className="block text-sm font-medium text-gray-700 mb-2"
@@ -330,9 +334,9 @@ export default function CreateEntityModal({
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               placeholder="Phone, email, or other contact details"
             />
-          </div>
+          </div> */}
 
-          <div>
+          {/* <div>
             <label
               htmlFor="role"
               className="block text-sm font-medium text-gray-700 mb-2"
@@ -354,7 +358,7 @@ export default function CreateEntityModal({
               <option value="Victim">Victim</option>
               <option value="Related Party">Related Party</option>
             </select>
-          </div>
+          </div> */}
 
           <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
             <button

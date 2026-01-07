@@ -203,7 +203,7 @@ export default function CreateCaseModal({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
+            {/* <div>
               <label
                 htmlFor="investigator"
                 className="block text-sm font-medium text-gray-700 mb-2"
@@ -220,8 +220,8 @@ export default function CreateCaseModal({
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                 placeholder="Enter investigator name"
               />
-            </div>
-
+            </div> */}
+            {/* 
             <div>
               <label
                 htmlFor="priority"
@@ -240,7 +240,7 @@ export default function CreateCaseModal({
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
               </select>
-            </div>
+            </div> */}
           </div>
 
           <div>

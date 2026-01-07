@@ -236,7 +236,7 @@ export default function CaseDetailPage() {
               { key: "entities", label: "Entities" },
               {
                 key: "counterparty-merge",
-                label: "De-duplicate Counterparties",
+                label: "De-duplicate data",
               },
               { key: "analytics", label: "AML Analytics" },
               { key: "flowchart", label: "Flowchart" },

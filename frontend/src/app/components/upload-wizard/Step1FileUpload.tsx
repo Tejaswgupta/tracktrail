@@ -5,8 +5,6 @@ interface Step1FileUploadProps {
   onFileSelect: (file: File | null) => void;
   disabled?: boolean;
   isProcessing?: boolean;
-  pdfProcessingMode?: "line-spacing" | "table-spacing";
-  onPdfProcessingModeChange?: (mode: "line-spacing" | "table-spacing") => void;
 }
 
 export default function Step1FileUpload({
