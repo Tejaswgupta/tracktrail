@@ -269,6 +269,37 @@ class TransferPatternData(BaseModel):
     entity_roles: Dict[str, str] = Field(..., description="Entity roles in patterns")
 
 
+class RegexEntry(BaseModel):
+    """Schema representing a stored regex configuration."""
+
+    regex_id: str = Field(..., description="Unique identifier for the regex entry")
+    workspace_id: str = Field(..., description="Workspace or organization identifier")
+    name: str = Field(..., description="Display name for the regex setup")
+    description: Optional[str] = Field(None, description="Details about the configuration")
+    source_csv: Optional[str] = Field(None, description="CSV file used for generation")
+    patterns: List[str] = Field(..., description="Regex patterns in this entry")
+    created_by: Optional[str] = Field(None, description="Creator user ID")
+    is_active: bool = Field(True, description="Whether the pattern is active")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
+
+
+class RegexListResponse(BaseModel):
+    """Response wrapper for listing workspace regex patterns."""
+
+    workspace_id: str = Field(..., description="Workspace identifier the list belongs to")
+    entries: List[RegexEntry] = Field(..., description="Stored regex configurations")
+
+
+class RegexGenerateResponse(BaseModel):
+    """Structure returned after regex generation from CSV."""
+
+    workspace_id: str = Field(..., description="Workspace identifier for the generation")
+    name: Optional[str] = Field(None, description="Optional label provided at generation time")
+    description: Optional[str] = Field(None, description="Optional notes provided")
+    patterns: List[str] = Field(..., description="Generated regex patterns")
+
+
 AnalysisDataType = Union[
     CashFlowAnalysisData,
     CounterpartyTrendsData,
