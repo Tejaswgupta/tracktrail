@@ -20,6 +20,7 @@ cp backend/.env.example backend/.env
 ```
 
 Edit `backend/.env` and fill in your actual values:
+
 - `SUPABASE_URL`: Your Supabase project URL
 - `SUPABASE_ANON_KEY`: Your Supabase anonymous key
 - Optional: `OPENAI_API_KEY` if using AI features
@@ -37,6 +38,7 @@ docker-compose -f docker-compose.dev.yml up --build
 ```
 
 The backend API will be available at:
+
 - **Backend API**: http://localhost:3011
 - **API Documentation**: http://localhost:3011/docs
 - **Health Check**: http://localhost:3011/health
@@ -52,16 +54,19 @@ docker-compose -f docker-compose.prod.yml up -d --build
 ## Docker Compose Files
 
 ### `docker-compose.yml` (Default)
+
 - Development configuration with hot-reload
 - Mounts backend code as volume
 - Runs with `--reload` flag for uvicorn
 
 ### `docker-compose.dev.yml`
+
 - Explicit development configuration
 - Same as default but can be customized separately
 - Useful for different development setups
 
 ### `docker-compose.prod.yml`
+
 - Production-optimized configuration
 - No volume mounts for code
 - Optimized builds
@@ -80,6 +85,7 @@ Multi-stage build using `uv` package manager:
 4. Includes health checks
 
 Key features:
+
 - Fast builds with `uv` package manager (10-100x faster than pip)
 - Small final image size
 - Security-focused (non-root user)
@@ -154,15 +160,15 @@ docker-compose ps
 
 ## Environment Variables
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `SUPABASE_URL` | Supabase project URL | - | Yes |
-| `SUPABASE_ANON_KEY` | Supabase anonymous key | - | Yes |
-| `DEBUG` | Enable debug mode | `false` | No |
-| `LOG_LEVEL` | Logging level | `INFO` | No |
-| `CORS_ORIGINS` | Allowed CORS origins | `http://localhost:3000` | No |
-| `OPENAI_API_KEY` | OpenAI API key | - | No |
-| `OPENAI_BASE_URL` | OpenAI base URL | `https://model.thevotum.com/v1` | No |
+| Variable            | Description            | Default                         | Required |
+| ------------------- | ---------------------- | ------------------------------- | -------- |
+| `SUPABASE_URL`      | Supabase project URL   | -                               | Yes      |
+| `SUPABASE_ANON_KEY` | Supabase anonymous key | -                               | Yes      |
+| `DEBUG`             | Enable debug mode      | `false`                         | No       |
+| `LOG_LEVEL`         | Logging level          | `INFO`                          | No       |
+| `CORS_ORIGINS`      | Allowed CORS origins   | `http://localhost:3000`         | No       |
+| `OPENAI_API_KEY`    | OpenAI API key         | -                               | No       |
+| `OPENAI_BASE_URL`   | OpenAI base URL        | `https://model.thevotum.com/v1` | No       |
 
 ## Troubleshooting
 
@@ -185,6 +191,7 @@ docker-compose logs backend
 ```
 
 Common issues:
+
 - Missing environment variables in `backend/.env`
 - Supabase connection failed
 - Database migration needed
@@ -209,6 +216,7 @@ sudo chown -R $USER:$USER backend/
 ### Health Check Failing
 
 The health check expects the `/health` endpoint to return 200. Check:
+
 - Backend is running on port 3011
 - No startup errors in logs
 - Database connection is working
@@ -224,6 +232,7 @@ The project includes a GitHub Actions workflow (`.github/workflows/ci-cd.yml`) t
 5. Prunes unused Docker images
 
 Required GitHub Secrets:
+
 - `HOST`: Server hostname/IP
 - `USERNAME`: SSH username
 - `SSH_KEY`: Private SSH key
@@ -263,10 +272,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
+          cpus: "1.0"
           memory: 1G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 ```
 
@@ -289,8 +298,11 @@ services:
 ## Support
 
 For issues or questions:
+
 1. Check logs: `docker-compose logs -f backend`
 2. Verify environment variables in `backend/.env`
 3. Ensure port 3011 is available
 4. Check Supabase connection
 5. Review health status: `docker-compose ps`
+
+trigger build
