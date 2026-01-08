@@ -1,332 +1,296 @@
-# TrackTrail Docker Setup
+# Docker Setup for TrackTrail Backend
 
-This document explains how to build and run the TrackTrail application using Docker, which includes both the frontend (Next.js) and backend (FastAPI) services.
+This document provides comprehensive instructions for running the TrackTrail backend using Docker.
+
+## Prerequisites
+
+- Docker Engine 20.10 or later
+- Docker Compose 2.0 or later
+- At least 1GB of available RAM
+- Supabase project URL and API keys
 
 ## Quick Start
 
-### Option 1: Using Docker Compose (Recommended)
+### 1. Environment Configuration
+
+Copy the example environment file in the backend folder and configure it:
 
 ```bash
-# Build and run both services
+cp backend/.env.example backend/.env
+```
+
+Edit `backend/.env` and fill in your actual values:
+- `SUPABASE_URL`: Your Supabase project URL
+- `SUPABASE_ANON_KEY`: Your Supabase anonymous key
+- Optional: `OPENAI_API_KEY` if using AI features
+
+### 2. Development Mode
+
+Start the backend with hot-reload enabled:
+
+```bash
+# Using default docker-compose.yml (development mode)
 docker-compose up --build
 
-# Run in detached mode
-docker-compose up -d --build
+# Or explicitly use development config
+docker-compose -f docker-compose.dev.yml up --build
+```
 
-# Stop services
+The backend API will be available at:
+- **Backend API**: http://localhost:3011
+- **API Documentation**: http://localhost:3011/docs
+- **Health Check**: http://localhost:3011/health
+
+### 3. Production Mode
+
+For production deployment:
+
+```bash
+docker-compose -f docker-compose.prod.yml up -d --build
+```
+
+## Docker Compose Files
+
+### `docker-compose.yml` (Default)
+- Development configuration with hot-reload
+- Mounts backend code as volume
+- Runs with `--reload` flag for uvicorn
+
+### `docker-compose.dev.yml`
+- Explicit development configuration
+- Same as default but can be customized separately
+- Useful for different development setups
+
+### `docker-compose.prod.yml`
+- Production-optimized configuration
+- No volume mounts for code
+- Optimized builds
+- Includes logging and health checks
+- Used by CI/CD pipeline
+
+## Dockerfile
+
+### Backend (`backend/Dockerfile`)
+
+Multi-stage build using `uv` package manager:
+
+1. **Builder Stage**: Installs dependencies
+2. **Runtime Stage**: Minimal Python 3.11 runtime
+3. Uses non-root user for security
+4. Includes health checks
+
+Key features:
+- Fast builds with `uv` package manager (10-100x faster than pip)
+- Small final image size
+- Security-focused (non-root user)
+- Health check endpoint at `/health`
+
+## Common Commands
+
+### Build and Start
+
+```bash
+# Development (with hot-reload)
+docker-compose up --build
+
+# Production (detached)
+docker-compose -f docker-compose.prod.yml up -d --build
+
+# Rebuild backend
+docker-compose build backend
+```
+
+### Stop Services
+
+```bash
+# Stop running containers
 docker-compose down
+
+# Stop and remove volumes
+docker-compose down -v
+
+# Stop production containers
+docker-compose -f docker-compose.prod.yml down
 ```
 
-### Option 2: Using the Management Script
+### View Logs
 
 ```bash
-# Make the script executable
-chmod +x docker.sh
+# View all logs
+docker-compose logs -f
 
-# Build the image
-./docker.sh build
+# View backend logs
+docker-compose logs -f backend
 
-# Run the container
-./docker.sh run --detach
-
-# View logs
-./docker.sh logs --follow
-
-# Stop the container
-./docker.sh stop
+# View last 100 lines
+docker-compose logs --tail=100 backend
 ```
 
-### Option 3: Manual Docker Commands
+### Access Container
 
 ```bash
-# Build the image
-docker build -t tracktrail .
+# Access backend container
+docker-compose exec backend bash
 
-# Run the container
-docker run -d \
-  --name tracktrail-app \
-  -p 3000:3000 \
-  -p 8000:8000 \
-  tracktrail
+# Run Python command in container
+docker-compose exec backend python -c "import polars; print(polars.__version__)"
+
+# Check uvicorn version
+docker-compose exec backend uvicorn --version
 ```
 
-## Services
+### Health Checks
 
-Once running, you can access:
-
-- **Frontend (Next.js)**: http://localhost:3000
-- **Backend API (FastAPI)**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-- **Alternative API Docs**: http://localhost:8000/redoc
-
-## Architecture
-
-The Docker setup uses a multi-stage build process:
-
-1. **Frontend Builder Stage**: Builds the Next.js application using Node.js 18 and pnpm
-2. **Backend Base Stage**: Sets up Python 3.11 environment and installs backend dependencies
-3. **Production Stage**: Combines both services using supervisor to manage processes
-
-### Multi-Service Management
-
-The container uses [Supervisor](http://supervisord.org/) to manage both the frontend and backend processes:
-
-- **Backend**: FastAPI server running on port 8000
-- **Frontend**: Next.js server running on port 3000
-
-## Configuration
-
-### Environment Variables
-
-The application supports various environment variables for configuration:
-
-#### Backend Configuration
 ```bash
-# Application settings
-APP_NAME=Financial Analysis API
-APP_VERSION=1.0.0
-DEBUG=false
-LOG_LEVEL=INFO
+# Check backend health
+curl http://localhost:3011/health
 
-# Database settings
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_key
-DATABASE_POOL_SIZE=10
-DATABASE_MAX_OVERFLOW=20
-DATABASE_TIMEOUT=30
+# Check API documentation
+curl http://localhost:3011/docs
 
-# API settings
-API_V1_PREFIX=/api/v1
-CORS_ORIGINS=*
-MAX_REQUEST_SIZE=10485760
-MAX_ENTITIES_PER_REQUEST=50
-MAX_DATE_RANGE_DAYS=365
-
-# AI/LLM settings (optional)
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_BASE_URL=https://model.thevotum.com/v1
+# View container health status
+docker-compose ps
 ```
 
-#### Frontend Configuration
+## Environment Variables
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `SUPABASE_URL` | Supabase project URL | - | Yes |
+| `SUPABASE_ANON_KEY` | Supabase anonymous key | - | Yes |
+| `DEBUG` | Enable debug mode | `false` | No |
+| `LOG_LEVEL` | Logging level | `INFO` | No |
+| `CORS_ORIGINS` | Allowed CORS origins | `http://localhost:3000` | No |
+| `OPENAI_API_KEY` | OpenAI API key | - | No |
+| `OPENAI_BASE_URL` | OpenAI base URL | `https://model.thevotum.com/v1` | No |
+
+## Troubleshooting
+
+### Port Already in Use
+
+If port 3011 is already in use:
+
 ```bash
-NODE_ENV=production
+# Change port in docker-compose.yml
+ports:
+  - "3012:3011"  # Use 3012 instead of 3011
 ```
 
-### Custom Environment File
+### Backend Crashes Immediately
 
-Create a `.env` file in the root directory to override default values:
+Check backend logs:
 
 ```bash
-# .env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your_actual_key
-OPENAI_API_KEY=your_openai_key
-DEBUG=true
-LOG_LEVEL=DEBUG
+docker-compose logs backend
 ```
 
-## Development
+Common issues:
+- Missing environment variables in `backend/.env`
+- Supabase connection failed
+- Database migration needed
 
-### Development Mode
-
-For development with hot reloading, use the development profile:
+### Build Fails
 
 ```bash
-# Start development services
-docker-compose --profile dev up --build
-
-# Or using the script
-./docker.sh dev
+# Clear Docker cache and rebuild
+docker-compose build --no-cache backend
+docker-compose up backend
 ```
 
-This will:
-- Mount source code volumes for hot reloading
-- Enable debug mode
-- Run services on different ports (8001 for backend, 3001 for frontend)
+### Volume Permission Issues
 
-### Local Development Without Docker
+If you encounter permission errors with mounted volumes:
 
-#### Backend
 ```bash
-cd backend
-pip install -r requirements.txt
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# Fix backend directory permissions
+sudo chown -R $USER:$USER backend/
 ```
 
-#### Frontend
+### Health Check Failing
+
+The health check expects the `/health` endpoint to return 200. Check:
+- Backend is running on port 3011
+- No startup errors in logs
+- Database connection is working
+
+## CI/CD Integration
+
+The project includes a GitHub Actions workflow (`.github/workflows/ci-cd.yml`) that:
+
+1. Triggers on push to `main` branch
+2. Connects to remote VM via SSH
+3. Pulls latest code
+4. Builds and starts backend with `docker-compose.prod.yml`
+5. Prunes unused Docker images
+
+Required GitHub Secrets:
+- `HOST`: Server hostname/IP
+- `USERNAME`: SSH username
+- `SSH_KEY`: Private SSH key
+
+## Running with Frontend
+
+The frontend should be run separately (not via Docker):
+
 ```bash
+# Terminal 1: Start backend with Docker
+docker-compose up
+
+# Terminal 2: Start frontend locally
 cd frontend
 pnpm install
 pnpm dev
 ```
 
-## Monitoring and Logs
-
-### View Logs
-
-```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker logs -f tracktrail-app
-
-# Using the management script
-./docker.sh logs --follow
-```
-
-### Health Checks
-
-The container includes health checks that verify both services are running:
-
-```bash
-# Check health status
-docker inspect --format='{{.State.Health.Status}}' tracktrail-app
-```
-
-### Supervisor Logs
-
-Inside the container, supervisor logs are available at:
-- `/var/log/supervisor/supervisord.log` - Main supervisor log
-- `/var/log/supervisor/backend.out.log` - Backend stdout
-- `/var/log/supervisor/backend.err.log` - Backend stderr
-- `/var/log/supervisor/frontend.out.log` - Frontend stdout
-- `/var/log/supervisor/frontend.err.log` - Frontend stderr
-
-## Production Deployment
-
-### Security Considerations
-
-1. **Environment Variables**: Use proper environment variable management (Kubernetes secrets, Docker Swarm secrets, etc.)
-2. **Network Security**: Configure proper firewall rules and network policies
-3. **CORS Origins**: Set specific origins instead of `*` in production
-4. **Trusted Hosts**: Configure the TrustedHostMiddleware with specific hosts
-5. **SSL/TLS**: Use a reverse proxy (nginx, traefik) for SSL termination
-
-### Example Production Docker Compose
-
-```yaml
-version: '3.8'
-
-services:
-  tracktrail:
-    image: tracktrail:latest
-    ports:
-      - "3000:3000"
-      - "8000:8000"
-    environment:
-      - NODE_ENV=production
-      - DEBUG=false
-      - CORS_ORIGINS=https://yourapp.com,https://api.yourapp.com
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://localhost:8000/health && curl -f http://localhost:3000 || exit 1"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 60s
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/ssl/certs
-    depends_on:
-      - tracktrail
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Port conflicts**: Ensure ports 3000 and 8000 are not in use
-   ```bash
-   lsof -i :3000
-   lsof -i :8000
-   ```
-
-2. **Build failures**: Check Docker logs and ensure all dependencies are available
-   ```bash
-   docker build --no-cache -t tracktrail .
-   ```
-
-3. **Permission issues**: On Linux, you might need to run Docker with sudo or add user to docker group
-
-4. **Memory issues**: Increase Docker memory allocation in Docker Desktop settings
-
-### Debug Mode
-
-Enable debug mode by setting environment variables:
-
-```bash
-docker run -d \
-  --name tracktrail-app \
-  -p 3000:3000 \
-  -p 8000:8000 \
-  -e DEBUG=true \
-  -e LOG_LEVEL=DEBUG \
-  tracktrail
-```
-
-### Container Shell Access
-
-```bash
-# Access running container
-docker exec -it tracktrail-app /bin/sh
-
-# Or using the script
-./docker.sh shell
-```
-
-## Cleanup
-
-Remove all Docker resources:
-
-```bash
-# Using docker-compose
-docker-compose down --rmi all --volumes
-
-# Using the management script
-./docker.sh clean
-
-# Manual cleanup
-docker stop tracktrail-app
-docker rm tracktrail-app
-docker rmi tracktrail
-docker system prune -f
-```
+The frontend will connect to the backend at `http://localhost:3011`.
 
 ## Performance Optimization
 
-### Build Optimization
+### Backend Optimization
 
-1. **Multi-stage builds**: Already implemented to reduce final image size
-2. **Layer caching**: Dependencies are installed before copying source code
-3. **`.dockerignore`**: Excludes unnecessary files from build context
+- Uses `uv` for 10-100x faster dependency installation
+- Multi-stage build reduces final image size
+- Non-root user improves security
+- Health checks ensure reliability
 
-### Runtime Optimization
+### Resource Limits
 
-1. **Resource limits**: Set appropriate CPU and memory limits
-   ```bash
-   docker run -d \
-     --name tracktrail-app \
-     --memory="2g" \
-     --cpus="2.0" \
-     -p 3000:3000 \
-     -p 8000:8000 \
-     tracktrail
-   ```
+Add to `docker-compose.yml` if needed:
 
-2. **Health checks**: Monitor service health and restart if needed
-3. **Log rotation**: Configure log rotation to prevent disk space issues
+```yaml
+services:
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+```
+
+## Security Best Practices
+
+1. **Never commit `backend/.env` file** - Use `backend/.env.example` as template
+2. **Use non-root user** - Already configured in Dockerfile
+3. **Minimal base image** - Using Python 3.11 slim variant
+4. **Health checks** - Monitor service health
+5. **CORS configuration** - Restrict in production
+6. **Volume mounts** - Only in development, never in production
+
+## Additional Resources
+
+- [Docker Documentation](https://docs.docker.com/)
+- [Docker Compose Reference](https://docs.docker.com/compose/)
+- [FastAPI Deployment](https://fastapi.tiangolo.com/deployment/)
+- [uv Package Manager](https://github.com/astral-sh/uv)
 
 ## Support
 
-For issues related to:
-- **Docker setup**: Check this documentation and Docker logs
-- **Frontend issues**: Check the frontend README and Next.js documentation
-- **Backend issues**: Check the backend README and FastAPI documentation
-- **API usage**: Visit http://localhost:8000/docs for interactive API documentation
+For issues or questions:
+1. Check logs: `docker-compose logs -f backend`
+2. Verify environment variables in `backend/.env`
+3. Ensure port 3011 is available
+4. Check Supabase connection
+5. Review health status: `docker-compose ps`

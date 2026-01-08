@@ -9,6 +9,7 @@ import EfficientCounterpartyMerge from "@/app/components/EfficientCounterpartyMe
 import FlowchartTab from "@/app/components/FlowchartTab";
 import OverviewTab from "@/app/components/OverviewTab";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -87,11 +88,35 @@ export default function CaseDetailPage() {
         | "counterparty"
         | "direction"
         | "description";
-      operator: "is" | "contains" | "before" | "after" | "greater" | "less" | "between";
-      value: string;
+      operator:
+        | "is"
+        | "contains"
+        | "before"
+        | "after"
+        | "greater"
+        | "less"
+        | "between";
+      value: string | string[];
       valueTo?: string;
     }>
   >([]);
+  const [openMultiSelectId, setOpenMultiSelectId] = useState<string | null>(
+    null
+  );
+
+  useEffect(() => {
+    if (!openMultiSelectId) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest(`[data-multi-select-id="${openMultiSelectId}"]`)) {
+        return;
+      }
+      setOpenMultiSelectId(null);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [openMultiSelectId]);
 
   useEffect(() => {
     const fetchCase = async () => {
@@ -301,7 +326,9 @@ export default function CaseDetailPage() {
     >();
     entities.forEach((entity) => {
       entity.accounts?.forEach((account) => {
-        const label = `${account.bank_name || "Bank"} (${account.account_number})`;
+        const label = `${account.bank_name || "Bank"} (${
+          account.account_number
+        })`;
         map.set(account.account_id, { entity, accountLabel: label });
       });
     });
@@ -313,27 +340,35 @@ export default function CaseDetailPage() {
   const filtersWithLabels = useMemo(() => {
     return filters
       .map((filter) => {
-        if (!filter.value || (filter.operator === "between" && !filter.valueTo)) {
+        const filterValues = Array.isArray(filter.value)
+          ? filter.value.filter(Boolean)
+          : filter.value
+          ? [filter.value]
+          : [];
+        if (filterValues.length === 0) {
+          return null;
+        }
+        if (filter.operator === "between" && !filter.valueTo) {
           return null;
         }
         const operatorLabel =
           filter.operator === "is"
             ? "="
             : filter.operator === "contains"
-              ? "contains"
-              : filter.operator === "before"
-                ? "before"
-                : filter.operator === "after"
-                  ? "after"
-                  : filter.operator === "greater"
-                    ? ">"
-                    : filter.operator === "less"
-                      ? "<"
-                      : "between";
+            ? "contains"
+            : filter.operator === "before"
+            ? "before"
+            : filter.operator === "after"
+            ? "after"
+            : filter.operator === "greater"
+            ? ">"
+            : filter.operator === "less"
+            ? "<"
+            : "between";
         const valueLabel =
           filter.operator === "between"
             ? `${filter.value} → ${filter.valueTo}`
-            : filter.value;
+            : filterValues.join(", ");
         return {
           id: filter.id,
           label: `${filter.field}: ${operatorLabel} ${valueLabel}`,
@@ -344,11 +379,15 @@ export default function CaseDetailPage() {
 
   const filteredTransactions = useMemo(() => {
     const matchesFilters = (transaction: Transaction) => {
-      const entityName = entityMap.get(transaction.entity_id)?.entity_name || "";
-      const accountLabel = accountMap.get(transaction.account_id)?.accountLabel || "";
-      const counterparty = transaction.counterparty_merged || "Unknown";
-      const status =
-        flagsByTxId[transaction.transaction_id] ? "Failed" : "Success";
+      const entityName =
+        entityMap.get(transaction.entity_id)?.entity_name || "";
+      const accountLabel =
+        accountMap.get(transaction.account_id)?.accountLabel || "";
+      const counterpartyRaw = transaction.counterparty_merged;
+      const counterparty = counterpartyRaw || "Unknown";
+      const isCounterpartyMissing =
+        !counterpartyRaw || counterpartyRaw.trim() === "";
+      const status = isCounterpartyMissing ? "Failed" : "Success";
 
       const baseMatch = normalizedQuery
         ? [
@@ -367,47 +406,64 @@ export default function CaseDetailPage() {
         activeView === "all"
           ? true
           : activeView === "failed"
-            ? status === "Failed"
-            : flagsByTxId[transaction.transaction_id]?.flag_type ===
-              "Under Review";
+          ? isCounterpartyMissing
+          : flagsByTxId[transaction.transaction_id]?.flag_type ===
+            "Under Review";
 
       const filterMatch = filters.every((filter) => {
-        if (!filter.value || (filter.operator === "between" && !filter.valueTo)) {
+        const filterValues = Array.isArray(filter.value)
+          ? filter.value.filter(Boolean)
+          : filter.value
+          ? [filter.value]
+          : [];
+        if (filterValues.length === 0) {
+          return true;
+        }
+        if (filter.operator === "between" && !filter.valueTo) {
           return true;
         }
         switch (filter.field) {
           case "entity":
             return filter.operator === "is"
-              ? entityName === filter.value
-              : entityName.toLowerCase().includes(filter.value.toLowerCase());
+              ? filterValues.includes(entityName)
+              : filterValues.some((value) =>
+                  entityName.toLowerCase().includes(value.toLowerCase())
+                );
           case "account":
             return filter.operator === "is"
-              ? accountLabel === filter.value
-              : accountLabel.toLowerCase().includes(filter.value.toLowerCase());
+              ? filterValues.includes(accountLabel)
+              : filterValues.some((value) =>
+                  accountLabel.toLowerCase().includes(value.toLowerCase())
+                );
           case "status":
-            return status === filter.value;
+            return filterValues.includes(status);
           case "direction":
-            return transaction.direction === filter.value;
+            return filterValues.includes(transaction.direction);
           case "counterparty":
             return filter.operator === "is"
-              ? counterparty === filter.value
-              : counterparty.toLowerCase().includes(filter.value.toLowerCase());
+              ? filterValues.includes(counterparty)
+              : filterValues.some((value) =>
+                  counterparty.toLowerCase().includes(value.toLowerCase())
+                );
           case "description":
             return (transaction.description || "")
               .toLowerCase()
-              .includes(filter.value.toLowerCase());
+              .includes(filterValues[0]?.toLowerCase() || "");
           case "date": {
             const txDate = new Date(transaction.tx_date).getTime();
-            const from = new Date(filter.value).getTime();
-            const to = filter.valueTo ? new Date(filter.valueTo).getTime() : from;
+            const from = new Date(filterValues[0] || "").getTime();
+            const to = filter.valueTo
+              ? new Date(filter.valueTo).getTime()
+              : from;
             if (filter.operator === "before") return txDate < from;
             if (filter.operator === "after") return txDate > from;
-            if (filter.operator === "between") return txDate >= from && txDate <= to;
+            if (filter.operator === "between")
+              return txDate >= from && txDate <= to;
             return true;
           }
           case "amount": {
             const amount = transaction.amount;
-            const value = Number(filter.value);
+            const value = Number(filterValues[0]);
             const valueTo = filter.valueTo ? Number(filter.valueTo) : value;
             if (Number.isNaN(value)) return true;
             if (filter.operator === "greater") return amount > value;
@@ -437,22 +493,31 @@ export default function CaseDetailPage() {
 
   const filteredTotal = useMemo(
     () =>
-      filteredTransactions.reduce((sum, transaction) => sum + transaction.amount, 0),
+      filteredTransactions.reduce(
+        (sum, transaction) => sum + transaction.amount,
+        0
+      ),
     [filteredTransactions]
   );
 
   const isFailedFocused =
     activeView === "failed" ||
     filters.some(
-      (filter) => filter.field === "status" && filter.value === "Failed"
+      (filter) =>
+        filter.field === "status" &&
+        (Array.isArray(filter.value)
+          ? filter.value.includes("Failed")
+          : filter.value === "Failed")
     );
 
   const tableRows = useMemo<CaseTransactionRow[]>(() => {
     return filteredTransactions.map((transaction) => {
       const entity = entityMap.get(transaction.entity_id);
       const account = accountMap.get(transaction.account_id);
-      const counterparty = transaction.counterparty_merged || "Unknown";
-      const hasFlag = Boolean(flagsByTxId[transaction.transaction_id]);
+      const counterpartyRaw = transaction.counterparty_merged;
+      const counterparty = counterpartyRaw || "Unknown";
+      const isCounterpartyMissing =
+        !counterpartyRaw || counterpartyRaw.trim() === "";
       return {
         id: transaction.transaction_id,
         entityName: entity?.entity_name || "Unknown Entity",
@@ -463,7 +528,7 @@ export default function CaseDetailPage() {
         amountLabel: formatCurrency(transaction.amount),
         amountValue: transaction.amount,
         counterparty,
-        status: hasFlag ? "Failed" : "Success",
+        status: isCounterpartyMissing ? "Failed" : "Success",
         onCounterpartySave: async (newName) => {
           if (!counterparty || counterparty === newName) {
             return;
@@ -545,7 +610,9 @@ export default function CaseDetailPage() {
     updates: Partial<(typeof filters)[number]>
   ) => {
     setFilters((prev) =>
-      prev.map((filter) => (filter.id === id ? { ...filter, ...updates } : filter))
+      prev.map((filter) =>
+        filter.id === id ? { ...filter, ...updates } : filter
+      )
     );
   };
 
@@ -613,7 +680,7 @@ export default function CaseDetailPage() {
           <nav className="flex space-x-8">
             {[
               { key: "overview", label: "Overview" },
-              { key: "entities", label: "Entities" },
+              { key: "entities", label: "Transactions" },
               {
                 key: "counterparty-merge",
                 label: "De-duplicate data",
@@ -678,7 +745,9 @@ export default function CaseDetailPage() {
                       <div className="mt-2 relative">
                         <Input
                           value={searchQuery}
-                          onChange={(event) => setSearchQuery(event.target.value)}
+                          onChange={(event) =>
+                            setSearchQuery(event.target.value)
+                          }
                           placeholder="Search entity, account, ref ID, or counterparty"
                           className="w-full bg-gray-50 pr-10"
                         />
@@ -727,8 +796,15 @@ export default function CaseDetailPage() {
                   {filters.length > 0 && (
                     <div className="mt-4 space-y-2">
                       {filters.map((filter) => {
-                        const operatorOptions = getOperatorOptions(filter.field);
+                        const operatorOptions = getOperatorOptions(
+                          filter.field
+                        );
                         const isBetween = filter.operator === "between";
+                        const filterValues = Array.isArray(filter.value)
+                          ? filter.value
+                          : filter.value
+                          ? [filter.value]
+                          : [];
                         const valueSelectOptions =
                           filter.field === "entity"
                             ? entities.map((entity) => ({
@@ -736,37 +812,39 @@ export default function CaseDetailPage() {
                                 label: entity.entity_name,
                               }))
                             : filter.field === "account"
-                              ? Array.from(accountMap.values()).map(
-                                  (account) => ({
-                                    value: account.accountLabel,
-                                    label: account.accountLabel,
-                                  })
-                                )
-                              : filter.field === "status"
-                                ? [
-                                    { value: "Success", label: "Success" },
-                                    { value: "Failed", label: "Failed" },
-                                  ]
-                                : filter.field === "direction"
-                                  ? [
-                                      { value: "DR", label: "Debit (DR)" },
-                                      { value: "CR", label: "Credit (CR)" },
-                                    ]
-                                  : [];
+                            ? Array.from(accountMap.values()).map(
+                                (account) => ({
+                                  value: account.accountLabel,
+                                  label: account.accountLabel,
+                                })
+                              )
+                            : filter.field === "status"
+                            ? [
+                                { value: "Success", label: "Success" },
+                                { value: "Failed", label: "Failed" },
+                              ]
+                            : filter.field === "direction"
+                            ? [
+                                { value: "DR", label: "Debit (DR)" },
+                                { value: "CR", label: "Credit (CR)" },
+                              ]
+                            : [];
 
                         const showSelectValue =
                           filter.operator === "is" &&
-                          (filter.field === "entity" ||
-                            filter.field === "account" ||
-                            filter.field === "status" ||
+                          (filter.field === "status" ||
                             filter.field === "direction");
+                        const showMultiSelect =
+                          filter.operator === "is" &&
+                          (filter.field === "entity" ||
+                            filter.field === "account");
 
                         const inputType =
                           filter.field === "date"
                             ? "date"
                             : filter.field === "amount"
-                              ? "number"
-                              : "text";
+                            ? "number"
+                            : "text";
 
                         return (
                           <div
@@ -781,7 +859,10 @@ export default function CaseDetailPage() {
                                 updateFilter(filter.id, {
                                   field: value as any,
                                   operator: nextOperator as any,
-                                  value: "",
+                                  value:
+                                    value === "entity" || value === "account"
+                                      ? []
+                                      : "",
                                   valueTo: undefined,
                                 });
                               }}
@@ -791,7 +872,10 @@ export default function CaseDetailPage() {
                               </SelectTrigger>
                               <SelectContent>
                                 {filterFieldOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
+                                  <SelectItem
+                                    key={option.value}
+                                    value={option.value}
+                                  >
                                     {option.label}
                                   </SelectItem>
                                 ))}
@@ -803,7 +887,24 @@ export default function CaseDetailPage() {
                               onValueChange={(value) =>
                                 updateFilter(filter.id, {
                                   operator: value as any,
-                                  valueTo: value === "between" ? filter.valueTo : undefined,
+                                  value:
+                                    (filter.field === "entity" ||
+                                      filter.field === "account") &&
+                                    value === "is"
+                                      ? Array.isArray(filter.value)
+                                        ? filter.value
+                                        : filter.value
+                                        ? [filter.value]
+                                        : []
+                                      : (filter.field === "entity" ||
+                                            filter.field === "account") &&
+                                        value !== "is"
+                                      ? ""
+                                      : filter.value,
+                                  valueTo:
+                                    value === "between"
+                                      ? filter.valueTo
+                                      : undefined,
                                 })
                               }
                             >
@@ -812,16 +913,115 @@ export default function CaseDetailPage() {
                               </SelectTrigger>
                               <SelectContent>
                                 {operatorOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
+                                  <SelectItem
+                                    key={option.value}
+                                    value={option.value}
+                                  >
                                     {option.label}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
 
-                            {showSelectValue ? (
+                            {showMultiSelect ? (
+                              <div
+                                className="relative"
+                                data-multi-select-id={filter.id}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOpenMultiSelectId((current) =>
+                                      current === filter.id ? null : filter.id
+                                    )
+                                  }
+                                  className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-left text-sm shadow-xs transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                                >
+                                  <span className="truncate text-gray-700">
+                                    {filterValues.length === 0
+                                      ? `Select ${filter.field}`
+                                      : filterValues.length === 1
+                                      ? filterValues[0]
+                                      : `${filterValues.length} selected`}
+                                  </span>
+                                  <span className="text-gray-400">▾</span>
+                                </button>
+                                {openMultiSelectId === filter.id && (
+                                  <div className="absolute z-20 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-md">
+                                    <div className="max-h-56 overflow-auto p-2">
+                                      {valueSelectOptions.length === 0 ? (
+                                        <div className="px-2 py-2 text-xs text-gray-500">
+                                          No options available.
+                                        </div>
+                                      ) : (
+                                        valueSelectOptions.map((option) => {
+                                          const isChecked =
+                                            filterValues.includes(
+                                              option.value
+                                            );
+                                          return (
+                                            <label
+                                              key={option.value}
+                                              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                                            >
+                                              <Checkbox
+                                                checked={isChecked}
+                                                onCheckedChange={(checked) => {
+                                                  const nextValues = checked
+                                                    ? [
+                                                        ...new Set([
+                                                          ...filterValues,
+                                                          option.value,
+                                                        ]),
+                                                      ]
+                                                    : filterValues.filter(
+                                                        (value) =>
+                                                          value !==
+                                                          option.value
+                                                      );
+                                                  updateFilter(filter.id, {
+                                                    value: nextValues,
+                                                  });
+                                                }}
+                                              />
+                                              <span className="truncate">
+                                                {option.label}
+                                              </span>
+                                            </label>
+                                          );
+                                        })
+                                      )}
+                                    </div>
+                                    <div className="flex items-center justify-between border-t px-3 py-2 text-xs">
+                                      <button
+                                        type="button"
+                                        className="text-gray-500 hover:text-gray-700"
+                                        onClick={() =>
+                                          updateFilter(filter.id, {
+                                            value: [],
+                                          })
+                                        }
+                                      >
+                                        Clear
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="text-blue-600 hover:text-blue-700"
+                                        onClick={() =>
+                                          setOpenMultiSelectId(null)
+                                        }
+                                      >
+                                        Done
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ) : showSelectValue ? (
                               <Select
-                                value={filter.value}
+                                value={Array.isArray(filter.value)
+                                  ? filter.value[0] || ""
+                                  : filter.value}
                                 onValueChange={(value) =>
                                   updateFilter(filter.id, { value })
                                 }
@@ -831,7 +1031,10 @@ export default function CaseDetailPage() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   {valueSelectOptions.map((option) => (
-                                    <SelectItem key={option.value} value={option.value}>
+                                    <SelectItem
+                                      key={option.value}
+                                      value={option.value}
+                                    >
                                       {option.label}
                                     </SelectItem>
                                   ))}
@@ -840,7 +1043,11 @@ export default function CaseDetailPage() {
                             ) : (
                               <Input
                                 type={inputType}
-                                value={filter.value}
+                                value={
+                                  Array.isArray(filter.value)
+                                    ? filter.value[0] || ""
+                                    : filter.value
+                                }
                                 placeholder="Value"
                                 onChange={(event) =>
                                   updateFilter(filter.id, {
@@ -981,7 +1188,6 @@ export default function CaseDetailPage() {
           <EfficientCounterpartyMerge caseId={caseData.id} />
         )}
       </main>
-
     </div>
   );
 }

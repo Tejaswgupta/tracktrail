@@ -1,6 +1,5 @@
-# Default Docker Compose configuration for TrackTrail Backend
-# This uses the development configuration by default
-# For production, use: docker-compose -f docker-compose.prod.yml up
+# Development Docker Compose configuration for TrackTrail Backend
+# This file is optimized for local development with hot-reload
 
 services:
   backend:

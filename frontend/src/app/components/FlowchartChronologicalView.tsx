@@ -92,8 +92,6 @@ interface FlowchartChronologicalViewProps {
   chainTimeWindowMs: number;
 }
 
-const MAX_SEQUENTIAL_RUNS_TO_DISPLAY = 12;
-
 // Converter functions from backend format to frontend format
 function convertBackendEvent(event: BackendFlowEvent): FlowEvent {
   return {
@@ -266,12 +264,6 @@ export default function FlowchartChronologicalView({
     () => events.slice(0, safeTimelineLimit),
     [events, safeTimelineLimit]
   );
-  const sequentialRuns = useMemo(
-    () => deriveSequentialRuns(visibleEvents, chainTimeWindowMs),
-    [visibleEvents, chainTimeWindowMs]
-  );
-  const displayedRuns = sequentialRuns.slice(0, MAX_SEQUENTIAL_RUNS_TO_DISPLAY);
-  const runsCapped = sequentialRuns.length > displayedRuns.length;
   const showingAllEvents = visibleEvents.length === events.length;
   const nextHigherLimit = TIMELINE_EVENT_LIMIT_OPTIONS.find(
     (option) => option > safeTimelineLimit
@@ -354,6 +346,50 @@ export default function FlowchartChronologicalView({
 
   return (
     <div className="space-y-10">
+      <section className="space-y-4">
+        <div>
+          <h5 className="text-sm font-semibold text-gray-900">
+            Potential hub intermediaries
+          </h5>
+          <p className="text-xs text-gray-500">
+            Nodes that repeatedly pass funds onwards within the{" "}
+            {timeWindowLabel} window. Use these to spot conduits worth deeper
+            diligence.
+          </p>
+        </div>
+        {displayedHubCandidates.length === 0 ? (
+          <div className="rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-600">
+            No recurring intermediaries detected in the current chain selection.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {displayedHubCandidates.map((candidate) => (
+              <div
+                key={candidate.nodeId}
+                className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-gray-800">
+                    {candidate.label}
+                  </span>
+                  {hubHighlightSet.has(candidate.nodeId) ? (
+                    <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                      Flagged hub
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-gray-600">
+                  <span>Chains: {candidate.chainCount}</span>
+                  <span>Pass-through hits: {candidate.passThroughCount}</span>
+                  <span>Inbound sources: {candidate.inboundConnections}</span>
+                  <span>Outbound targets: {candidate.outboundConnections}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="space-y-4">
         <div>
           <h5 className="text-sm font-semibold text-gray-900">
@@ -490,50 +526,6 @@ export default function FlowchartChronologicalView({
       <section className="space-y-4">
         <div>
           <h5 className="text-sm font-semibold text-gray-900">
-            Potential hub intermediaries
-          </h5>
-          <p className="text-xs text-gray-500">
-            Nodes that repeatedly pass funds onwards within the{" "}
-            {timeWindowLabel} window. Use these to spot conduits worth deeper
-            diligence.
-          </p>
-        </div>
-        {displayedHubCandidates.length === 0 ? (
-          <div className="rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-600">
-            No recurring intermediaries detected in the current chain selection.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {displayedHubCandidates.map((candidate) => (
-              <div
-                key={candidate.nodeId}
-                className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-gray-800">
-                    {candidate.label}
-                  </span>
-                  {hubHighlightSet.has(candidate.nodeId) ? (
-                    <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                      Flagged hub
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-gray-600">
-                  <span>Chains: {candidate.chainCount}</span>
-                  <span>Pass-through hits: {candidate.passThroughCount}</span>
-                  <span>Inbound sources: {candidate.inboundConnections}</span>
-                  <span>Outbound targets: {candidate.outboundConnections}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <h5 className="text-sm font-semibold text-gray-900">
             Branching hotspots
           </h5>
           <p className="text-xs text-gray-500">
@@ -580,204 +572,6 @@ export default function FlowchartChronologicalView({
             ))}
           </div>
         )}
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <h5 className="text-sm font-semibold text-gray-900">
-            Sequential flow runs
-          </h5>
-          <p className="text-xs text-gray-500">
-            We stitch together consecutive transactions where the recipient
-            immediately becomes the next sender within the {timeWindowLabel}
-            tolerance. This surfaces direct money hops like A {" -> "} B{" "}
-            {" -> "}
-            C.
-          </p>
-          {runsCapped ? (
-            <p className="mt-1 text-xs text-amber-600">
-              Showing the first {MAX_SEQUENTIAL_RUNS_TO_DISPLAY} runs from the
-              loaded timeline slice.
-            </p>
-          ) : null}
-        </div>
-        {displayedRuns.length === 0 ? (
-          <div className="rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-600">
-            No back-to-back flows detected in this slice. Increase the event
-            limit or relax filters to expose longer runs.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {displayedRuns.map((run, index) => {
-              const nodeSequence = buildNodeSequence(run);
-
-              return (
-                <div
-                  key={`${run.signature}-${index}`}
-                  className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-sm font-medium text-gray-800">
-                      {nodeSequence.join(" -> ")}
-                    </div>
-                    <div className="text-sm font-semibold text-gray-900">
-                      {formatCurrency(run.totalAmount)}
-                    </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                    <span>Steps: {run.events.length}</span>
-                    <span>|</span>
-                    <span>
-                      Window: {formatDateTime(run.startDate)}
-                      {" -> "}
-                      {formatDateTime(run.endDate)}
-                    </span>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {run.events.map((event, stepIndex) => {
-                      const eventBadges = buildEventBadges(
-                        event,
-                        branchMeta,
-                        hubHighlightSet
-                      );
-
-                      return (
-                        <div
-                          key={event.id}
-                          className="rounded border border-gray-100 bg-gray-50 px-3 py-2"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex flex-col">
-                              <span className="text-xs text-gray-500">
-                                {formatDateTime(event.txDate)}
-                              </span>
-                              <span className="text-sm font-medium text-gray-800">
-                                {stepIndex + 1}. {event.sourceLabel}
-                                {" -> "}
-                                {event.targetLabel}
-                              </span>
-                            </div>
-                            <div className="text-sm font-semibold text-gray-900">
-                              {formatCurrency(event.amount)}
-                            </div>
-                          </div>
-                          {eventBadges.length > 0 ? (
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium">
-                              {eventBadges.map((badge) => (
-                                <span
-                                  key={badge.key}
-                                  className={`inline-flex items-center rounded px-2 py-0.5 ${badge.className}`}
-                                >
-                                  {badge.label}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <h5 className="text-sm font-semibold text-gray-900">
-            Transaction timeline
-          </h5>
-          <p className="text-xs text-gray-500">
-            Every transaction that passed the filters is listed in chronological
-            order. Hover to inspect amounts and participants quickly—badges flag
-            hubs and branching behaviour.
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-            <span className="text-gray-600">
-              Showing {visibleEvents.length.toLocaleString()} of{" "}
-              {events.length.toLocaleString()} transactions
-            </span>
-            {!showingAllEvents && nextHigherLimit ? (
-              <button
-                type="button"
-                className="rounded border border-blue-200 px-2 py-1 font-medium text-blue-600 hover:border-blue-300 hover:text-blue-700"
-                onClick={() => onTimelineEventLimitChange(nextHigherLimit)}
-              >
-                Load up to {nextHigherLimit.toLocaleString()}
-              </button>
-            ) : null}
-            {!showingAllEvents && !nextHigherLimit ? (
-              <button
-                type="button"
-                className="rounded border border-blue-200 px-2 py-1 font-medium text-blue-600 hover:border-blue-300 hover:text-blue-700"
-                onClick={() => onTimelineEventLimitChange(events.length)}
-              >
-                Show all
-              </button>
-            ) : null}
-            {showingAllEvents &&
-            events.length > TIMELINE_EVENT_LIMIT_OPTIONS[0] ? (
-              <span className="rounded bg-emerald-100 px-2 py-1 font-medium text-emerald-700">
-                All events loaded
-              </span>
-            ) : null}
-          </div>
-        </div>
-        <div className="relative pl-4">
-          <div
-            className="absolute left-1 top-2 bottom-4 w-px bg-gray-200"
-            aria-hidden="true"
-          ></div>
-          <div className="space-y-4">
-            {visibleEvents.map((event) => {
-              const badges = buildEventBadges(
-                event,
-                branchMeta,
-                hubHighlightSet
-              );
-
-              return (
-                <div key={event.id} className="relative pl-6">
-                  <span
-                    className="absolute left-0 top-1.5 block h-2 w-2 rounded-full bg-blue-500"
-                    aria-hidden="true"
-                  ></span>
-                  <div className="rounded-lg border border-gray-100 bg-white px-4 py-2 shadow-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="text-xs text-gray-500">
-                          {formatDateTime(event.txDate)}
-                        </p>
-                        <p className="text-sm font-medium text-gray-800">
-                          {event.sourceLabel}
-                          {" -> "}
-                          {event.targetLabel}
-                        </p>
-                      </div>
-                      <div className="text-sm font-semibold text-gray-900">
-                        {formatCurrency(event.amount)}
-                      </div>
-                    </div>
-                    {badges.length > 0 ? (
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium">
-                        {badges.map((badge) => (
-                          <span
-                            key={badge.key}
-                            className={`inline-flex items-center rounded px-2 py-0.5 ${badge.className}`}
-                          >
-                            {badge.label}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
       </section>
     </div>
   );
@@ -925,98 +719,4 @@ function parseDate(value?: string) {
   }
 
   return date;
-}
-
-function deriveSequentialRuns(
-  events: FlowEvent[],
-  maxGapMs: number
-): FlowChain[] {
-  if (events.length === 0) {
-    return [];
-  }
-
-  const runs: FlowChain[] = [];
-  let buffer: FlowEvent[] = [];
-
-  const flushBuffer = () => {
-    if (buffer.length >= 2) {
-      runs.push(createChain(buffer));
-    }
-    buffer = [];
-  };
-
-  events.forEach((event) => {
-    if (buffer.length === 0) {
-      buffer.push(event);
-      return;
-    }
-
-    const last = buffer[buffer.length - 1];
-    const continuesChain = canChainEvents(last, event, maxGapMs);
-
-    if (continuesChain) {
-      buffer.push(event);
-      return;
-    }
-
-    flushBuffer();
-    buffer.push(event);
-  });
-
-  flushBuffer();
-
-  return runs;
-}
-
-function canChainEvents(
-  previous: FlowEvent,
-  next_event: FlowEvent,
-  maxGapMs: number
-): boolean {
-  if (previous.targetId !== next_event.sourceId) {
-    return false;
-  }
-
-  if (previous.timestamp !== null && next_event.timestamp !== null) {
-    if (next_event.timestamp < previous.timestamp) {
-      return false;
-    }
-
-    if (
-      Number.isFinite(maxGapMs) &&
-      maxGapMs >= 0 &&
-      next_event.timestamp - previous.timestamp > maxGapMs
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function createChain(events: FlowEvent[]): FlowChain {
-  const start = events[0];
-  const end = events[events.length - 1];
-  const totalAmount = events.reduce((sum, event) => sum + event.amount, 0);
-  const signature = buildSignature(events);
-
-  return {
-    id: signature,
-    events,
-    startDate: start.txDate,
-    endDate: end.txDate,
-    totalAmount,
-    signature,
-  };
-}
-
-function buildSignature(events: FlowEvent[]): string {
-  const first = events[0];
-  const last = events[events.length - 1];
-  const nodeSequence = [
-    first.sourceId,
-    ...events.map((event) => event.targetId),
-  ].join("->");
-
-  return `${nodeSequence}|${first.txDate}|${last.txDate}`;
 }

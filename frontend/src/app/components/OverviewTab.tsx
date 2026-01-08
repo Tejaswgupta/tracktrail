@@ -5,7 +5,7 @@ import {
   entitiesService,
   transactionsService,
 } from "@/services/database";
-import type { Entity, Transaction } from "@/types/database";
+import type { EntityWithAccounts, Transaction } from "@/types/database";
 import { useEffect, useMemo, useState } from "react";
 // Import Recharts components
 import {
@@ -27,6 +27,8 @@ import CreateEntityModal from "./CreateEntityModal";
 import DetailedOverviewTab from "./DetailedOverviewTab";
 import EditableCounterpartyName from "./EditableCounterpartyName";
 import EditableTransactionType from "./EditableTransactionType";
+import SearchablePopover from "./SearchablePopover";
+import UploadStatementModalWizard from "./UploadStatementModalWizard";
 
 interface CounterpartyStats {
   name: string;
@@ -81,7 +83,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   const [sortBy, setSortBy] =
     useState<NumericCounterpartyStatsKeys>("totalVolume");
   const [showTopN, setShowTopN] = useState(10);
-  const [entities, setEntities] = useState<Entity[]>([]);
+  const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<
     "summary" | "detailed" | "types"
@@ -99,7 +101,36 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   const [isCreateAccountModalOpen, setIsCreateAccountModalOpen] =
     useState(false);
   const [accountEntityId, setAccountEntityId] = useState<string>("");
+  const [accountId, setAccountId] = useState<string>("");
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const TRANSACTIONS_PER_PAGE = 1000;
+
+  const entityOptions = useMemo(
+    () =>
+      entities.map((entity) => ({
+        value: entity.entity_id,
+        label: entity.entity_name,
+        subLabel: `ID: ${entity.entity_id}`,
+        searchValue: `${entity.entity_name} ${entity.entity_id}`,
+      })),
+    [entities]
+  );
+
+  const accountOptions = useMemo(() => {
+    const selectedEntity = entities.find(
+      (entity) => entity.entity_id === accountEntityId
+    );
+    return (
+      selectedEntity?.accounts?.map((account) => ({
+        value: account.account_id,
+        label: `${account.bank_name || "Bank"} (${account.account_number})`,
+        subLabel: `ID: ${account.account_id}`,
+        searchValue: `${account.bank_name || "Bank"} ${
+          account.account_number
+        } ${account.account_id}`,
+      })) || []
+    );
+  }, [entities, accountEntityId]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -117,6 +148,17 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
     fetchData();
   }, [caseId, refreshTrigger]);
+
+  useEffect(() => {
+    if (!accountEntityId) {
+      setAccountId("");
+      return;
+    }
+
+    const entity = entities.find((item) => item.entity_id === accountEntityId);
+    const firstAccount = entity?.accounts?.[0];
+    setAccountId(firstAccount?.account_id || "");
+  }, [accountEntityId, entities]);
 
   const handleEntityCreated = () => {
     setRefreshTrigger((prev) => prev + 1);
@@ -870,20 +912,28 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600">
             <span>Account for</span>
-            <select
+            <SearchablePopover
               value={accountEntityId}
-              onChange={(event) => setAccountEntityId(event.target.value)}
-              className="bg-transparent text-xs font-semibold text-gray-900 focus:outline-none"
-            >
-              <option value="" disabled>
-                Select entity
-              </option>
-              {entities.map((entity) => (
-                <option key={entity.entity_id} value={entity.entity_id}>
-                  {entity.entity_name}
-                </option>
-              ))}
-            </select>
+              items={entityOptions}
+              placeholder="Select entity"
+              searchPlaceholder="Search entities..."
+              emptyText="No entities found"
+              onChange={setAccountEntityId}
+              buttonClassName="bg-transparent focus:outline-none"
+            />
+          </div>
+          <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600">
+            <span>Account</span>
+            <SearchablePopover
+              value={accountId}
+              items={accountOptions}
+              placeholder="Select account"
+              searchPlaceholder="Search accounts..."
+              emptyText="No accounts found"
+              disabled={!accountEntityId}
+              onChange={setAccountId}
+              buttonClassName="bg-transparent focus:outline-none"
+            />
           </div>
           <button
             onClick={() => setIsCreateEntityModalOpen(true)}
@@ -898,6 +948,13 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           >
             + New Account
           </button>
+          <button
+            onClick={() => setIsUploadModalOpen(true)}
+            disabled={!accountId}
+            className="inline-flex items-center rounded-md border border-dashed border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Upload Statement
+          </button>
         </div>
         <div className="text-xs text-gray-500">
           {accountEntityId
@@ -906,6 +963,11 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                   ?.entity_name || "selected entity"
               }`
             : "Select an entity above to add an account."}
+          {accountId && (
+            <span className="ml-2">
+              Uploading will attach statements to the selected account.
+            </span>
+          )}
         </div>
       </div>
       {/* Subtabs */}
@@ -1560,6 +1622,17 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           entityId={accountEntityId}
           onClose={() => setIsCreateAccountModalOpen(false)}
           onAccountCreated={handleAccountCreated}
+        />
+      )}
+
+      {isUploadModalOpen && accountId && (
+        <UploadStatementModalWizard
+          accountId={accountId}
+          onClose={() => setIsUploadModalOpen(false)}
+          onUploadComplete={() => {
+            setIsUploadModalOpen(false);
+            setRefreshTrigger((prev) => prev + 1);
+          }}
         />
       )}
     </div>

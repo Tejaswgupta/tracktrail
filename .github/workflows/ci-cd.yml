@@ -1,0 +1,32 @@
+name: CD (Build on Server)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Build & Deploy on VM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Remote Build
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            # Navigate to project directory
+            cd ~/votum_fastapi || exit 1
+
+            # Pull latest changes
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Build and start services (detached)
+            # This uses the VM's own Docker engine and disk space
+            sudo docker compose -f docker-compose.prod.yml up -d --build
+
+            # Optional: Prune unused images to save space
+            sudo docker image prune -f
