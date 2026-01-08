@@ -218,15 +218,15 @@ class FlowchartChainAnalyzer:
             
             entity_id = row.get("entity_id", "")
             counterparty_raw = row.get("counterparty_merged")
-            counterparty = (counterparty_raw.strip() if counterparty_raw else "") or "Unknown"
+            print(row)
+            counterparty = (counterparty_raw.strip() if counterparty_raw is not None else row.get('description')) 
             direction = row.get("direction", "")
             amount = float(row.get("amount", 0))
             
             entity_label = entity_lookup.get(entity_id, f"Entity {entity_id}")
             
             # Check if counterparty matches an entity
-            normalized_cp = (counterparty.strip().replace("  ", " ").lower() 
-                           if counterparty != "Unknown" else "")
+            normalized_cp = (counterparty.strip().replace("  ", " ").lower())
             counterparty_entity_id = normalized_entities.get(normalized_cp) if normalized_cp else None
             
             if direction == "DR":

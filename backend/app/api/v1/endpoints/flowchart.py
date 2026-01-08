@@ -100,7 +100,7 @@ async def analyze_flowchart_chains(
             
             # Build transaction query with filters
             tx_query = client.table("transactions").select(
-                "transaction_id, tx_date, amount, direction, entity_id, counterparty_merged"
+                "transaction_id, tx_date, amount, direction, entity_id, counterparty_merged, description"
             ).in_("entity_id", entity_ids)
             
             # Add date filters

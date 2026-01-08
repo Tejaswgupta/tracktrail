@@ -291,7 +291,6 @@ export default function FlowchartChronologicalView({
     });
   };
 
-  
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center rounded-lg border border-gray-200 bg-white">
@@ -364,8 +363,7 @@ export default function FlowchartChronologicalView({
             Chains show how funds hop between counterparties over time. We
             surface the top sequences ordered by total value moved and number of
             steps, enforcing a maximum gap of {timeWindowLabel} between linked
-            transactions. Analysis is performed server-side for optimal
-            performance.
+            transactions.
           </p>
         </div>
         {chains.length === 0 ? (
