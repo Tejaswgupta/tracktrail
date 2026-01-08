@@ -22,6 +22,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import CreateAccountModal from "./CreateAccountModal";
+import CreateEntityModal from "./CreateEntityModal";
 import DetailedOverviewTab from "./DetailedOverviewTab";
 import EditableCounterpartyName from "./EditableCounterpartyName";
 import EditableTransactionType from "./EditableTransactionType";
@@ -92,6 +94,11 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     current: number;
     total: number;
   } | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [isCreateEntityModalOpen, setIsCreateEntityModalOpen] = useState(false);
+  const [isCreateAccountModalOpen, setIsCreateAccountModalOpen] =
+    useState(false);
+  const [accountEntityId, setAccountEntityId] = useState<string>("");
   const TRANSACTIONS_PER_PAGE = 1000;
 
   useEffect(() => {
@@ -100,6 +107,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         const caseEntities = await entitiesService.getByCaseId(caseId);
         console.log(caseEntities);
         setEntities(caseEntities);
+        setAccountEntityId((prev) => prev || caseEntities[0]?.entity_id || "");
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {
@@ -108,7 +116,17 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     };
 
     fetchData();
-  }, [selectedEntityId, caseId]);
+  }, [caseId, refreshTrigger]);
+
+  const handleEntityCreated = () => {
+    setRefreshTrigger((prev) => prev + 1);
+    setIsCreateEntityModalOpen(false);
+  };
+
+  const handleAccountCreated = () => {
+    setRefreshTrigger((prev) => prev + 1);
+    setIsCreateAccountModalOpen(false);
+  };
 
   // Fetch transactions with pagination
   useEffect(() => {
@@ -840,6 +858,56 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">
+            Case Overview
+          </h2>
+          <p className="text-xs text-gray-500">
+            Create new entities or attach accounts without leaving the overview.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600">
+            <span>Account for</span>
+            <select
+              value={accountEntityId}
+              onChange={(event) => setAccountEntityId(event.target.value)}
+              className="bg-transparent text-xs font-semibold text-gray-900 focus:outline-none"
+            >
+              <option value="" disabled>
+                Select entity
+              </option>
+              {entities.map((entity) => (
+                <option key={entity.entity_id} value={entity.entity_id}>
+                  {entity.entity_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={() => setIsCreateEntityModalOpen(true)}
+            className="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
+          >
+            + New Entity
+          </button>
+          <button
+            onClick={() => setIsCreateAccountModalOpen(true)}
+            disabled={!accountEntityId}
+            className="inline-flex items-center rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            + New Account
+          </button>
+        </div>
+        <div className="text-xs text-gray-500">
+          {accountEntityId
+            ? `Account will be added to ${
+                entities.find((entity) => entity.entity_id === accountEntityId)
+                  ?.entity_name || "selected entity"
+              }`
+            : "Select an entity above to add an account."}
+        </div>
+      </div>
       {/* Subtabs */}
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
@@ -1478,6 +1546,21 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         </div>
       ) : (
         <DetailedOverviewTab caseId={caseId} />
+      )}
+      {isCreateEntityModalOpen && (
+        <CreateEntityModal
+          caseId={caseId}
+          onClose={() => setIsCreateEntityModalOpen(false)}
+          onEntityCreated={handleEntityCreated}
+        />
+      )}
+
+      {isCreateAccountModalOpen && accountEntityId && (
+        <CreateAccountModal
+          entityId={accountEntityId}
+          onClose={() => setIsCreateAccountModalOpen(false)}
+          onAccountCreated={handleAccountCreated}
+        />
       )}
     </div>
   );

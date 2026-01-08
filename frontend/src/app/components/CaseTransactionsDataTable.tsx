@@ -1,14 +1,5 @@
 "use client";
 
-import {
-  ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
-import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,6 +11,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import { useMemo, useState } from "react";
 import EditableCounterpartyName from "./EditableCounterpartyName";
 
 export type CaseTransactionRow = {
@@ -28,7 +28,6 @@ export type CaseTransactionRow = {
   accountLabel: string;
   dateLabel: string;
   description: string;
-  refId: string;
   amountLabel: string;
   amountValue: number;
   counterparty: string;
@@ -44,9 +43,7 @@ export default function CaseTransactionsDataTable({
   data,
 }: CaseTransactionsDataTableProps) {
   const [rowSelection, setRowSelection] = useState({});
-  const [sorting, setSorting] = useState<
-    { id: string; desc: boolean }[]
-  >([]);
+  const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
 
   const columns = useMemo<ColumnDef<CaseTransactionRow>[]>(
     () => [
@@ -81,7 +78,7 @@ export default function CaseTransactionsDataTable({
         cell: ({ row }) => (
           <div>
             <div className="font-medium text-gray-900">
-              🏢 {row.original.entityName}
+              {row.original.entityName}
             </div>
             <div className="text-xs text-gray-500">
               {row.original.accountLabel}
@@ -98,13 +95,12 @@ export default function CaseTransactionsDataTable({
       },
       {
         accessorKey: "description",
-        header: "Description / Ref ID",
+        header: "Description",
         cell: ({ row }) => (
           <div>
             <div className="font-medium text-gray-900">
               {row.original.description}
             </div>
-            <div className="text-xs text-gray-500">{row.original.refId}</div>
           </div>
         ),
       },
@@ -132,7 +128,9 @@ export default function CaseTransactionsDataTable({
         header: "Status",
         cell: ({ row }) => (
           <Badge
-            variant={row.original.status === "Failed" ? "destructive" : "secondary"}
+            variant={
+              row.original.status === "Failed" ? "destructive" : "secondary"
+            }
             className={
               row.original.status === "Failed"
                 ? "bg-red-100 text-red-700 border-red-200"
@@ -171,7 +169,10 @@ export default function CaseTransactionsDataTable({
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id} className="px-4 py-3 text-xs uppercase tracking-wider text-gray-500">
+                    <TableHead
+                      key={header.id}
+                      className="px-4 py-3 text-xs uppercase tracking-wider text-gray-500"
+                    >
                       {header.isPlaceholder
                         ? null
                         : flexRender(
@@ -203,7 +204,10 @@ export default function CaseTransactionsDataTable({
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={columns.length} className="h-24 text-center text-sm text-gray-500">
+                  <TableCell
+                    colSpan={columns.length}
+                    className="h-24 text-center text-sm text-gray-500"
+                  >
                     No results found.
                   </TableCell>
                 </TableRow>
