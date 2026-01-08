@@ -389,6 +389,56 @@ export default function FlowchartChronologicalView({
           </div>
         )}
       </section>
+      <section className="space-y-4">
+        <div>
+          <h5 className="text-sm font-semibold text-gray-900">
+            Branching hotspots
+          </h5>
+          <p className="text-xs text-gray-500">
+            Where funds split to multiple recipients or converge from several
+            senders within the same {timeWindowLabel} gap.
+          </p>
+        </div>
+        {displayedBranchNodes.length === 0 ? (
+          <div className="rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-600">
+            No significant branching detected across the analysed sequences.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {displayedBranchNodes.map((node) => (
+              <div
+                key={node.nodeId}
+                className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-gray-800">
+                    {node.label}
+                  </span>
+                  {hubHighlightSet.has(node.nodeId) ? (
+                    <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                      Hub overlap
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-3 space-y-1 text-xs text-gray-600">
+                  {node.splitPaths > 0 ? (
+                    <p>
+                      Splits to {node.splitPaths} counterparties across{" "}
+                      {node.splitEvents} hand-offs.
+                    </p>
+                  ) : null}
+                  {node.mergePaths > 0 ? (
+                    <p>
+                      Converges from {node.mergePaths} sources across{" "}
+                      {node.mergeEvents} receipts.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="space-y-4">
         <div>
@@ -519,57 +569,6 @@ export default function FlowchartChronologicalView({
                 </div>
               );
             })}
-          </div>
-        )}
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <h5 className="text-sm font-semibold text-gray-900">
-            Branching hotspots
-          </h5>
-          <p className="text-xs text-gray-500">
-            Where funds split to multiple recipients or converge from several
-            senders within the same {timeWindowLabel} gap.
-          </p>
-        </div>
-        {displayedBranchNodes.length === 0 ? (
-          <div className="rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-600">
-            No significant branching detected across the analysed sequences.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {displayedBranchNodes.map((node) => (
-              <div
-                key={node.nodeId}
-                className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-gray-800">
-                    {node.label}
-                  </span>
-                  {hubHighlightSet.has(node.nodeId) ? (
-                    <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                      Hub overlap
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-3 space-y-1 text-xs text-gray-600">
-                  {node.splitPaths > 0 ? (
-                    <p>
-                      Splits to {node.splitPaths} counterparties across{" "}
-                      {node.splitEvents} hand-offs.
-                    </p>
-                  ) : null}
-                  {node.mergePaths > 0 ? (
-                    <p>
-                      Converges from {node.mergePaths} sources across{" "}
-                      {node.mergeEvents} receipts.
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            ))}
           </div>
         )}
       </section>
