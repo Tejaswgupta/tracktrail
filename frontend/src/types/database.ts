@@ -21,12 +21,7 @@ export enum EntityType {
   Company = "Company",
   Partnership = "Partnership",
   Trust = "Trust",
-  LLP = "LLP",
-  Proprietorship = "Proprietorship",
-  HUF = "HUF",
-  ForeignEntity = "Foreign_Entity",
-  Unknown = "Unknown",
-}
+  }
 
 export interface Entity {
   entity_id: string;
@@ -112,7 +107,7 @@ export interface BankStatement {
   uploaded_by: string;
 }
 
-export interface CaseEntity {
+interface CaseEntity {
   case_entity_id: string;
   case_id: string;
   entity_id: string;
@@ -138,7 +133,7 @@ export interface CaseTransaction {
   flagged_by: string;
 }
 
-export interface CaseNote {
+interface CaseNote {
   note_id: string;
   case_id: string;
   note_type: "Observation" | "Action" | "Evidence" | "Interview" | "Analysis";
@@ -149,7 +144,7 @@ export interface CaseNote {
 }
 
 // View types
-export interface CaseOverview {
+interface CaseOverview {
   case_id: string;
   case_number: string;
   case_name: string;

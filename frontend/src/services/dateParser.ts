@@ -13,7 +13,7 @@ function isISODate(dateString: string): boolean {
   );
 }
 
-export function tryParseDate(dateString: string) {
+function tryParseDate(dateString: string) {
   // First try to parse as a standard ISO date
   if (isISODate(dateString)) {
     return {

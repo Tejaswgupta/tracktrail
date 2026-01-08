@@ -705,6 +705,3 @@ export class AMLDataTransformer {
     return "low";
   }
 }
-
-// Export default instance for convenience
-export const amlDataTransformer = AMLDataTransformer;

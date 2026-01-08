@@ -42,16 +42,6 @@ export interface MuleAnalysisResult {
   };
 }
 
-export interface MuleAnalysisParameters {
-  minCollectionTransactions: number;
-  minDisbursementAmountRatio: number;
-  maxCollectionPeriodDays: number;
-  velocityThreshold: number;
-  periodicityTolerance: number;
-  sensitivityMultiplier: number;
-  patternSensitivity: 'low' | 'medium' | 'high';
-}
-
 // Backend API response structure (for reference)
 export interface BackendMulePattern {
   pattern_type: string;
@@ -64,7 +54,7 @@ export interface BackendMulePattern {
   total_outflow?: number;
 }
 
-export interface BackendMuleResponse {
+interface BackendMuleResponse {
   alerts_count: number;
   mule_patterns: BackendMulePattern[];
   summary: {

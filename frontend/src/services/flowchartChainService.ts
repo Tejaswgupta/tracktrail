@@ -116,4 +116,4 @@ class FlowchartChainService {
 export const flowchartChainService = new FlowchartChainService();
 
 // Export class for custom instances
-export { FlowchartChainService };
+;

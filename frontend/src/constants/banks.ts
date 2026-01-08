@@ -27,7 +27,7 @@ export const BANK_PRESETS = {
 } as const;
 
 // Bank name to preset mapping
-export const BANK_NAME_TO_PRESET: Record<string, string> = {
+const BANK_NAME_TO_PRESET: Record<string, string> = {
   "Axis Bank": "axis",
   "Bank of Baroda": "bank_of_baroda",
   "Canara Bank": "canara",
@@ -70,7 +70,7 @@ export function getAvailableBankPresets(): Record<string, string> {
 }
 
 // Helper function to map bank name to bank preset
-export function getBankPresetFromBankName(bankName: string): string {
+function getBankPresetFromBankName(bankName: string): string {
   // Find matching preset by exact match first, then partial match
   const exactMatch = Object.keys(BANK_NAME_TO_PRESET).find(
     (bank) => bank.toLowerCase() === bankName.toLowerCase()

@@ -20,7 +20,7 @@ export interface AMLAlert {
   detectedAt: Date;
 }
 
-export interface AMLAnalysisResult {
+interface AMLAnalysisResult {
   alerts: AMLAlert[];
   summary: {
     totalAlerts: number;
@@ -31,7 +31,7 @@ export interface AMLAnalysisResult {
 }
 
 // Configuration interfaces for each detection type
-export interface SmurfingConfig {
+interface SmurfingConfig {
   maxTransactionAmount: number;
   minTransactionCount: number;
   maxTimeSpanDays: number;
@@ -56,7 +56,7 @@ export interface RapidMovementConfig {
   minAmount?: number;
 }
 
-export interface TransferPatternConfig {
+interface TransferPatternConfig {
   maxCircularTimeSpan: number;
   minLayeringDepth: number;
   minConcentrationRatio: number;
@@ -64,7 +64,7 @@ export interface TransferPatternConfig {
   minCircularAmount: number;
 }
 
-export interface CommonCounterpartyConfig {
+interface CommonCounterpartyConfig {
   minEntityCount: number;
   minTotalAmount: number;
   suspiciousKeywords: string[];
@@ -78,7 +78,7 @@ export interface AMLDetectionConfig {
 }
 
 // Individual detection result interfaces
-export interface SmurfingResult {
+interface SmurfingResult {
   alerts: AMLAlert[];
   patterns: Array<{
     entity: string;
@@ -130,7 +130,7 @@ export interface RapidMovementResult {
   };
 }
 
-export interface TransferPatternResult {
+interface TransferPatternResult {
   alerts: AMLAlert[];
   patterns: Array<{
     pattern: "circular" | "layering" | "concentration" | "dispersion";
@@ -146,7 +146,7 @@ export interface TransferPatternResult {
   };
 }
 
-export interface CommonCounterpartyResult {
+interface CommonCounterpartyResult {
   alerts: AMLAlert[];
   patterns: Array<{
     counterparty: string;

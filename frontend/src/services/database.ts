@@ -10,7 +10,7 @@ import type {
 } from "@/types/database";
 import { createClient } from "@/utils/supabase/client";
 
-export const supabase = createClient();
+const supabase = createClient();
 
 // Simple in-memory cache with expiration
 class SimpleCache<T> {
@@ -219,7 +219,7 @@ export const caseTransactionsService = {
   },
 };
 
-export const caseNotesService = {
+const caseNotesService = {
   async getNotes(caseId: string) {
     const { data, error } = await supabase
       .from("case_notes")
@@ -1393,7 +1393,7 @@ export const counterpartyService = {
 };
 
 // Entity Mapping Operations
-export const entityMappingService = {
+const entityMappingService = {
   async getCaseStats(caseId: string) {
     const { data, error } = await supabase.rpc(
       "get_case_entity_mapping_stats",
@@ -1440,7 +1440,7 @@ export const entityMappingService = {
 };
 
 // Debug and Diagnostics
-export const diagnosticsService = {
+const diagnosticsService = {
   async checkStatementTransactionConsistency(accountId: string) {
     const { data, error } = await supabase.rpc(
       "check_statement_transaction_consistency",
@@ -1503,7 +1503,7 @@ export const diagnosticsService = {
 };
 
 // Search and Analytics
-export const searchService = {
+const searchService = {
   async findEntitiesByPAN(pan: string): Promise<Entity[]> {
     const { data, error } = await supabase
       .from("entities")

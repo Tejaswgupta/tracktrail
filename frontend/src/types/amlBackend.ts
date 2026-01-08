@@ -335,7 +335,7 @@ export type AMLAnalysisResult =
   | TimeTrendsResult
   | TransferPatternResult;
 
-export type AMLAnalysisResponse = BackendAnalysisResponse<AMLAnalysisResult>;
+type AMLAnalysisResponse = BackendAnalysisResponse<AMLAnalysisResult>;
 
 // Error types
 export type AMLErrorCode =

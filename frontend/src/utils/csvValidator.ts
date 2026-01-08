@@ -28,7 +28,7 @@ export interface ColumnMapping {
 /**
  * Parse CSV file and return headers and preview data
  */
-export async function parseCSVFile(file: File): Promise<{
+async function parseCSVFile(file: File): Promise<{
   headers: string[];
   data: Record<string, string>[];
 }> {

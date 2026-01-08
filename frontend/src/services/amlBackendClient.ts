@@ -60,7 +60,7 @@ class AMLBackendError extends Error implements AMLError {
   }
 }
 
-export class AMLBackendClient {
+class AMLBackendClient {
   private config: AMLBackendClientConfig;
 
   constructor(config?: Partial<AMLBackendClientConfig>) {
