@@ -18,7 +18,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             # Navigate to project directory
-            cd ~/votum_fastapi || exit 1
+            cd ~/tracktrail || exit 1
 
             # Pull latest changes
             git fetch origin main
