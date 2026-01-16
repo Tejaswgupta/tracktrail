@@ -1,6 +1,11 @@
 "use client";
 
-import { counterpartyService } from "@/services/database";
+import {
+  counterpartyService,
+  entitiesService,
+  transactionsService,
+} from "@/services/database";
+import type { EntityWithAccounts, Transaction } from "@/types/database";
 import { useEffect, useMemo, useState } from "react";
 
 interface EfficientCounterpartyMergeProps {
@@ -66,6 +71,13 @@ export default function EfficientCounterpartyMerge({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [counterparties, setCounterparties] = useState<CounterpartyEntry[]>([]);
+  const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
+  const [caseTransactions, setCaseTransactions] = useState<Transaction[] | null>(null);
+  const [selectedCounterparty, setSelectedCounterparty] = useState<string | null>(null);
+  const [selectedCounterpartyTransactions, setSelectedCounterpartyTransactions] =
+    useState<Transaction[]>([]);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [breakdownError, setBreakdownError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedByGroup, setSelectedByGroup] = useState<Record<string, string[]>>({});
   const [targetByGroup, setTargetByGroup] = useState<Record<string, string>>({});
@@ -95,8 +107,12 @@ export default function EfficientCounterpartyMerge({
       try {
         setLoading(true);
         setError(null);
-        const data = await counterpartyService.getCounterpartiesByCase(caseId);
-        setCounterparties(data);
+        const [counterpartyData, entityData] = await Promise.all([
+          counterpartyService.getCounterpartiesByCase(caseId),
+          entitiesService.getByCaseId(caseId),
+        ]);
+        setCounterparties(counterpartyData);
+        setEntities(entityData);
       } catch (err) {
         console.error("Error loading counterparties:", err);
         setError(
@@ -111,6 +127,28 @@ export default function EfficientCounterpartyMerge({
 
     load();
   }, [caseId]);
+
+  const entityNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    entities.forEach((entity) => {
+      map.set(entity.entity_id, entity.entity_name);
+    });
+    return map;
+  }, [entities]);
+
+  const accountLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    entities.forEach((entity) => {
+      entity.accounts?.forEach((account) => {
+        const bankName = account.bank_name || "Bank";
+        map.set(
+          account.account_id,
+          `${bankName} (${account.account_number})`
+        );
+      });
+    });
+    return map;
+  }, [entities]);
 
   useEffect(() => {
     setSelectedByGroup((prev) => {
@@ -217,6 +255,10 @@ export default function EfficientCounterpartyMerge({
         await counterpartyService.getCounterpartiesByCase(caseId).then((data) => {
           setCounterparties(data);
         });
+        setCaseTransactions(null);
+        setSelectedCounterparty(null);
+        setSelectedCounterpartyTransactions([]);
+        setBreakdownError(null);
       }
     } catch (err) {
       console.error("Error merging counterparties:", err);
@@ -227,6 +269,77 @@ export default function EfficientCounterpartyMerge({
       }));
     } finally {
       setSavingGroups((prev) => ({ ...prev, [group.key]: false }));
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("en-IN", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const handleToggleBreakdown = async (name: string) => {
+    if (selectedCounterparty === name) {
+      setSelectedCounterparty(null);
+      setSelectedCounterpartyTransactions([]);
+      setBreakdownError(null);
+      return;
+    }
+
+    setSelectedCounterparty(name);
+    setBreakdownError(null);
+    setBreakdownLoading(true);
+
+    try {
+      let transactions = caseTransactions;
+      if (!transactions) {
+        transactions = await transactionsService.getCaseTransactionsForAnalysis(
+          caseId,
+          [
+            "transaction_id",
+            "tx_date",
+            "description",
+            "amount",
+            "direction",
+            "counterparty_merged",
+            "entity_id",
+            "account_id",
+          ]
+        );
+        setCaseTransactions(transactions);
+      }
+
+      const normalizedName = name.trim();
+      const filtered = transactions.filter(
+        (tx) => (tx.counterparty_merged || "").trim() === normalizedName
+      );
+
+      filtered.sort(
+        (a, b) => new Date(b.tx_date).getTime() - new Date(a.tx_date).getTime()
+      );
+
+      setSelectedCounterpartyTransactions(filtered);
+    } catch (err) {
+      console.error("Error loading counterparty transactions:", err);
+      setBreakdownError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load counterparty transactions."
+      );
+      setSelectedCounterpartyTransactions([]);
+    } finally {
+      setBreakdownLoading(false);
     }
   };
 
@@ -443,7 +556,15 @@ export default function EfficientCounterpartyMerge({
                                   {member.name}
                                 </div>
                                 <div className="text-xs text-gray-500">
-                                  {member.count} transactions
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleToggleBreakdown(member.name)
+                                    }
+                                    className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                                  >
+                                    {member.count} transactions
+                                  </button>
                                 </div>
                               </div>
                             </div>
@@ -493,6 +614,112 @@ export default function EfficientCounterpartyMerge({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {selectedCounterparty && (
+        <div className="rounded-lg border border-gray-200 bg-white shadow">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-6 py-4">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-900">
+                Transactions for {selectedCounterparty}
+              </h4>
+              <p className="text-xs text-gray-500">
+                {selectedCounterpartyTransactions.length.toLocaleString()} transactions
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCounterparty(null);
+                setSelectedCounterpartyTransactions([]);
+                setBreakdownError(null);
+              }}
+              className="text-xs font-medium text-blue-600 hover:text-blue-800"
+            >
+              Clear
+            </button>
+          </div>
+
+          {breakdownLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+              <span className="ml-2 text-sm text-gray-600">
+                Loading transactions...
+              </span>
+            </div>
+          ) : breakdownError ? (
+            <div className="px-6 py-6 text-sm text-red-600">
+              {breakdownError}
+            </div>
+          ) : selectedCounterpartyTransactions.length === 0 ? (
+            <div className="px-6 py-8 text-center text-sm text-gray-500">
+              No transactions found for this counterparty.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Date
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Description
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Source
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Amount
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Direction
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {selectedCounterpartyTransactions.map((tx) => {
+                    const entityName =
+                      entityNameMap.get(tx.entity_id) || tx.entity_id;
+                    const accountLabel =
+                      accountLabelMap.get(tx.account_id) || tx.account_id;
+
+                    return (
+                      <tr key={tx.transaction_id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {formatDate(tx.tx_date)}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          {tx.description || "No description"}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          <div className="font-medium text-gray-900">
+                            {entityName}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {accountLabel}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-right text-sm font-medium text-gray-900">
+                          {formatCurrency(tx.amount)}
+                        </td>
+                        <td
+                          className={`px-6 py-4 text-sm font-medium ${
+                            tx.direction === "CR"
+                              ? "text-green-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          {tx.direction === "CR" ? "Credit" : "Debit"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
