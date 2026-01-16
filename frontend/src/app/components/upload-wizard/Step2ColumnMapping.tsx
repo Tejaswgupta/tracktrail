@@ -1,13 +1,22 @@
 "use client";
 
-import type { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
-import { useState } from "react";
+import {
+  buildSuggestedColumnMapping,
+  isColumnMappingValid,
+  type ColumnMapping,
+  type CSVValidationResult,
+} from "@/utils/csvValidator";
+import { useEffect, useState } from "react";
 
 interface Step2ColumnMappingProps {
   validationResult: CSVValidationResult | null;
   columnMapping: ColumnMapping | null;
   onMappingComplete: (mapping: ColumnMapping, deletedRows: number[]) => void;
   disabled?: boolean;
+  fileName?: string;
+  fileIndex?: number;
+  fileCount?: number;
+  ctaLabel?: string;
 }
 
 export default function Step2ColumnMapping({
@@ -15,23 +24,39 @@ export default function Step2ColumnMapping({
   columnMapping,
   onMappingComplete,
   disabled = false,
+  fileName,
+  fileIndex,
+  fileCount,
+  ctaLabel,
 }: Step2ColumnMappingProps) {
-  const [mapping, setMapping] = useState<ColumnMapping>(() => {
+  const getInitialMapping = () => {
     if (columnMapping) {
       return { ...columnMapping };
     }
-    const suggested = validationResult?.suggestedMapping;
-    return {
-      DATE: suggested?.DATE || "",
-      DESCRIPTION: suggested?.DESCRIPTION || "",
-      DEBIT: suggested?.DEBIT || "",
-      CREDIT: suggested?.CREDIT || "",
-      AMOUNT: suggested?.AMOUNT || "",
-      DIRECTION: suggested?.DIRECTION || "",
-    };
-  });
+    const init = buildSuggestedColumnMapping(validationResult);
+    if (!init.AMOUNT && !init.DEBIT && !init.CREDIT && validationResult) {
+      init.DEBIT =
+        validationResult.headers.find(
+          (h) =>
+            h.toLowerCase().includes("debit") || h.toLowerCase().includes("dr")
+        ) || "";
+      init.CREDIT =
+        validationResult.headers.find(
+          (h) =>
+            h.toLowerCase().includes("credit") || h.toLowerCase().includes("cr")
+        ) || "";
+    }
+    return init;
+  };
+
+  const [mapping, setMapping] = useState<ColumnMapping>(getInitialMapping);
 
   const [deletedRows, setDeletedRows] = useState<number[]>([]);
+
+  useEffect(() => {
+    setMapping(getInitialMapping());
+    setDeletedRows([]);
+  }, [validationResult, columnMapping]);
 
   const handleMappingChange = (
     requiredColumn: keyof ColumnMapping,
@@ -52,13 +77,7 @@ export default function Step2ColumnMapping({
   };
 
   const handleSubmit = () => {
-    const hasDate = !!mapping.DATE;
-    const hasDescription = !!mapping.DESCRIPTION;
-    const hasDebitCredit =
-      !!mapping.DEBIT && !!mapping.CREDIT && !mapping.AMOUNT;
-    const hasAmount = !!mapping.AMOUNT && !mapping.DEBIT && !mapping.CREDIT;
-
-    if (!hasDate || !hasDescription || (!hasDebitCredit && !hasAmount)) {
+    if (!isColumnMappingValid(mapping)) {
       alert(
         "Please map all required columns: DATE, DESCRIPTION, and either (DEBIT + CREDIT) or AMOUNT"
       );
@@ -76,7 +95,7 @@ export default function Step2ColumnMapping({
   if (!validationResult) {
     return (
       <div className="text-center py-8">
-        <p className="text-sm text-gray-500">No data available for mapping</p>
+        <p className="text-sm text-gray-500">Processing file for mapping...</p>
       </div>
     );
   }
@@ -90,8 +109,13 @@ export default function Step2ColumnMapping({
           Map Columns & Clean Data
         </h3>
         <p className="text-sm text-gray-600">
-          Map columns to required fields and remove unwanted rows
+          Map columns for this file to required fields and remove unwanted rows
         </p>
+        {fileName && fileIndex !== undefined && fileCount !== undefined && (
+          <p className="text-xs text-gray-500 mt-2">
+            File {fileIndex + 1} of {fileCount}: {fileName}
+          </p>
+        )}
       </div>
 
       {/* Column Mapping Form */}
@@ -366,7 +390,7 @@ export default function Step2ColumnMapping({
           disabled={disabled}
           className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
         >
-          Continue
+          {ctaLabel || "Continue"}
         </button>
       </div>
     </div>

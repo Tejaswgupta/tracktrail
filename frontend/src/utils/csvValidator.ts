@@ -25,6 +25,34 @@ export interface ColumnMapping {
   DIRECTION?: string;
 }
 
+export function buildSuggestedColumnMapping(
+  validationResult?: CSVValidationResult | null
+): ColumnMapping {
+  const suggested = validationResult?.suggestedMapping || {};
+
+  return {
+    DATE: suggested.DATE || "",
+    DESCRIPTION: suggested.DESCRIPTION || "",
+    DEBIT: suggested.DEBIT || "",
+    CREDIT: suggested.CREDIT || "",
+    AMOUNT: suggested.AMOUNT || "",
+    DIRECTION: suggested.DIRECTION || "",
+  };
+}
+
+export function isColumnMappingValid(
+  mapping?: ColumnMapping | null
+): boolean {
+  if (!mapping) return false;
+  const hasDate = !!mapping.DATE;
+  const hasDescription = !!mapping.DESCRIPTION;
+  const hasDebitCredit =
+    !!mapping.DEBIT && !!mapping.CREDIT && !mapping.AMOUNT;
+  const hasAmount = !!mapping.AMOUNT && !mapping.DEBIT && !mapping.CREDIT;
+
+  return hasDate && hasDescription && (hasDebitCredit || hasAmount);
+}
+
 /**
  * Parse CSV file and return headers and preview data
  */

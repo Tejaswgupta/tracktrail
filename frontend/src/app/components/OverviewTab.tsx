@@ -57,6 +57,8 @@ type NumericCounterpartyStatsKeys =
   | "daysActive"
   | "frequency";
 
+type ChartType = "bar" | "pie";
+
 interface TransactionTypeStats {
   type: string;
   count: number;
@@ -83,6 +85,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   const [sortBy, setSortBy] =
     useState<NumericCounterpartyStatsKeys>("totalVolume");
   const [showTopN, setShowTopN] = useState(10);
+  const [chartType, setChartType] = useState<ChartType>("bar");
   const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<
@@ -92,6 +95,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     TransactionTypeStats[]
   >([]);
   const [transactionTypesLoading, setTransactionTypesLoading] = useState(false);
+  const [selectedCounterparty, setSelectedCounterparty] = useState<string | null>(
+    null
+  );
   const [loadingProgress, setLoadingProgress] = useState<{
     current: number;
     total: number;
@@ -104,6 +110,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   const [accountId, setAccountId] = useState<string>("");
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const TRANSACTIONS_PER_PAGE = 1000;
+  const CREATE_ENTITY_VALUE = "__create_entity__";
+  const CREATE_ACCOUNT_VALUE = "__create_account__";
 
   const entityOptions = useMemo(
     () =>
@@ -115,6 +123,12 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
       })),
     [entities]
   );
+
+  const entityCreateOption = {
+    value: CREATE_ENTITY_VALUE,
+    label: "+ Add New Entity",
+    subLabel: "Create a new entity for this case",
+  };
 
   const accountOptions = useMemo(() => {
     const selectedEntity = entities.find(
@@ -132,6 +146,12 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     );
   }, [entities, accountEntityId]);
 
+  const accountCreateOption = {
+    value: CREATE_ACCOUNT_VALUE,
+    label: "+ Add New Account",
+    subLabel: "Add a bank account for this entity",
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -139,6 +159,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         console.log(caseEntities);
         setEntities(caseEntities);
         setAccountEntityId((prev) => prev || caseEntities[0]?.entity_id || "");
+        // Set default selected entity to the first entity if not already set
+        setSelectedEntityId((prev) => prev || caseEntities[0]?.entity_id || null);
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {
@@ -559,6 +581,27 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     OTHER: "#6B7280",
   };
 
+  // Color palettes for counterparty charts
+  const COUNTERPARTY_COLORS = [
+    "#3B82F6",
+    "#8B5CF6",
+    "#EC4899",
+    "#F43F5E",
+    "#F97316",
+    "#F59E0B",
+    "#EAB308",
+    "#84CC16",
+    "#10B981",
+    "#06B6D4",
+    "#06B6D4",
+    "#0EA5E9",
+    "#6366F1",
+  ];
+
+  const getCounterpartyColor = (index: number) => {
+    return COUNTERPARTY_COLORS[index % COUNTERPARTY_COLORS.length];
+  };
+
   // Extract transaction type from description
   const extractTransactionType = (
     description: string,
@@ -725,6 +768,55 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
       day: "numeric",
     });
   };
+
+  const getTransactionCounterpartyLabel = (tx: Transaction) =>
+    tx.counterparty_merged || tx.description || "Unknown";
+
+  const entityNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    entities.forEach((entity) => {
+      map.set(entity.entity_id, entity.entity_name);
+    });
+    return map;
+  }, [entities]);
+
+  const accountLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    entities.forEach((entity) => {
+      entity.accounts?.forEach((account) => {
+        const bankName = account.bank_name || "Bank";
+        map.set(
+          account.account_id,
+          `${bankName} (${account.account_number})`
+        );
+      });
+    });
+    return map;
+  }, [entities]);
+
+  const selectedCounterpartyTransactions = useMemo(() => {
+    if (!selectedCounterparty) return [];
+
+    return [...transactions]
+      .filter(
+        (tx) => getTransactionCounterpartyLabel(tx) === selectedCounterparty
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.tx_date).getTime() - new Date(a.tx_date).getTime()
+      );
+  }, [transactions, selectedCounterparty]);
+
+  useEffect(() => {
+    if (!selectedCounterparty) return;
+
+    const stillExists = sortedCounterparties.some(
+      (cp) => cp.name === selectedCounterparty
+    );
+    if (!stillExists) {
+      setSelectedCounterparty(null);
+    }
+  }, [sortedCounterparties, selectedCounterparty]);
 
   // Function to handle saving updated transaction type names
   const handleSaveTransactionType = async (
@@ -900,74 +992,70 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-base font-semibold text-gray-900">
             Case Overview
           </h2>
           <p className="text-xs text-gray-500">
-            Create new entities or attach accounts without leaving the overview.
+            Manage entities and bank statements.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600">
-            <span>Account for</span>
-            <SearchablePopover
-              value={accountEntityId}
-              items={entityOptions}
-              placeholder="Select entity"
-              searchPlaceholder="Search entities..."
-              emptyText="No entities found"
-              onChange={setAccountEntityId}
-              buttonClassName="bg-transparent focus:outline-none"
-            />
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-[180px] flex-col gap-1">
+            <span className="text-[11px] font-medium text-gray-500">Entity</span>
+            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+              <SearchablePopover
+                value={accountEntityId}
+                items={entityOptions}
+                placeholder="Select entity"
+                searchPlaceholder="Search entities..."
+                emptyText="No entities found."
+                emptyAction={entityCreateOption}
+                footerItems={[entityCreateOption]}
+                onChange={(value) => {
+                  if (value === CREATE_ENTITY_VALUE) {
+                    setIsCreateEntityModalOpen(true);
+                    return;
+                  }
+                  setAccountEntityId(value);
+                }}
+                buttonClassName="bg-transparent focus:outline-none"
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600">
-            <span>Account</span>
-            <SearchablePopover
-              value={accountId}
-              items={accountOptions}
-              placeholder="Select account"
-              searchPlaceholder="Search accounts..."
-              emptyText="No accounts found"
-              disabled={!accountEntityId}
-              onChange={setAccountId}
-              buttonClassName="bg-transparent focus:outline-none"
-            />
+          <div className="flex min-w-[200px] flex-col gap-1">
+            <span className="text-[11px] font-medium text-gray-500">Account</span>
+            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+              <SearchablePopover
+                value={accountId}
+                items={accountOptions}
+                placeholder="Select account"
+                searchPlaceholder="Search accounts..."
+                emptyText={
+                  accountEntityId ? "No accounts found." : "Select an entity first."
+                }
+                emptyAction={accountEntityId ? accountCreateOption : undefined}
+                footerItems={accountEntityId ? [accountCreateOption] : []}
+                disabled={!accountEntityId}
+                onChange={(value) => {
+                  if (value === CREATE_ACCOUNT_VALUE) {
+                    setIsCreateAccountModalOpen(true);
+                    return;
+                  }
+                  setAccountId(value);
+                }}
+                buttonClassName="bg-transparent focus:outline-none"
+              />
+            </div>
           </div>
-          <button
-            onClick={() => setIsCreateEntityModalOpen(true)}
-            className="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
-          >
-            + New Entity
-          </button>
-          <button
-            onClick={() => setIsCreateAccountModalOpen(true)}
-            disabled={!accountEntityId}
-            className="inline-flex items-center rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            + New Account
-          </button>
           <button
             onClick={() => setIsUploadModalOpen(true)}
             disabled={!accountId}
-            className="inline-flex items-center rounded-md border border-dashed border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Upload Statement
           </button>
-        </div>
-        <div className="text-xs text-gray-500">
-          {accountEntityId
-            ? `Account will be added to ${
-                entities.find((entity) => entity.entity_id === accountEntityId)
-                  ?.entity_name || "selected entity"
-              }`
-            : "Select an entity above to add an account."}
-          {accountId && (
-            <span className="ml-2">
-              Uploading will attach statements to the selected account.
-            </span>
-          )}
         </div>
       </div>
       {/* Subtabs */}
@@ -1078,8 +1166,28 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
             {sortedCounterparties.length > 0 ? (
               <>
+                {/* Chart Type Selector */}
+                <div className="mb-6">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-700">
+                      Chart Type:
+                    </span>
+                    <select
+                      value={chartType}
+                      onChange={(e) =>
+                        setChartType(e.target.value as ChartType)
+                      }
+                      className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+                    >
+                      <option value="bar">Bar Chart</option>
+                      <option value="pie">Pie Chart (Distribution)</option>
+                    </select>
+                  </div>
+                </div>
+
                 {/* Bar Chart */}
-                <div className="mb-10 h-100">
+                {chartType === "bar" && (
+                  <div className="mb-10 h-100">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={sortedCounterparties}
@@ -1146,6 +1254,53 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+                )}
+
+                {/* Pie Chart */}
+                {chartType === "pie" && (
+                  <div className="mb-10 h-100">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={sortedCounterparties.map((entry) => ({
+                            name: entry.name,
+                            value: Number(entry[sortBy]),
+                          }))}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={90}
+                          labelLine={false}
+                          label={({ name, percent }) =>
+                            `${name} ${((percent as number) * 100).toFixed(0)}%`
+                          }
+                        >
+                          {sortedCounterparties.map((_, index) => (
+                            <PieCell
+                              key={`cell-${index}`}
+                              fill={getCounterpartyColor(index)}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value) => [
+                            sortBy === "totalVolume" ||
+                            sortBy === "netFlow" ||
+                            sortBy === "avgTransactionSize" ||
+                            sortBy === "maxTransactionSize"
+                              ? formatCurrency(Number(value))
+                              : sortBy === "frequency"
+                              ? `${Number(value).toFixed(2)}/day`
+                              : Number(value).toLocaleString(),
+                            sortBy,
+                          ]}
+                        />
+                        <RechartsLegend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
 
                 {/* Detailed Stats Table */}
                 <div className="overflow-x-auto">
@@ -1203,7 +1358,17 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                             />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {cp.transactionCount.toLocaleString()}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedCounterparty((current) =>
+                                  current === cp.name ? null : cp.name
+                                )
+                              }
+                              className="font-medium text-blue-600 hover:text-blue-800"
+                            >
+                              {cp.transactionCount.toLocaleString()}
+                            </button>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">
                             {formatCurrency(cp.totalDebit)}
@@ -1246,6 +1411,105 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                     </tbody>
                   </table>
                 </div>
+
+                {selectedCounterparty && (
+                  <div className="mt-6 rounded-lg border border-gray-200 bg-white">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-6 py-4">
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-900">
+                          Transactions for {selectedCounterparty}
+                        </h4>
+                        <p className="text-xs text-gray-500">
+                          {selectedCounterpartyTransactions.length.toLocaleString()}{" "}
+                          transactions
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCounterparty(null)}
+                        className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                      >
+                        Clear
+                      </button>
+                    </div>
+
+                    {selectedCounterpartyTransactions.length === 0 ? (
+                      <div className="px-6 py-8 text-center text-sm text-gray-500">
+                        No transactions found for this counterparty.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Date
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Description
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Source
+                              </th>
+                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Amount
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Direction
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 bg-white">
+                            {selectedCounterpartyTransactions.map((tx) => {
+                              const entityName =
+                                entityNameMap.get(tx.entity_id) ||
+                                tx.entity_id;
+                              const accountLabel =
+                                accountLabelMap.get(tx.account_id) ||
+                                tx.account_id;
+
+                              return (
+                                <tr
+                                  key={tx.transaction_id}
+                                  className="hover:bg-gray-50"
+                                >
+                                  <td className="px-6 py-4 text-sm text-gray-900">
+                                    {formatDate(tx.tx_date)}
+                                  </td>
+                                  <td className="px-6 py-4 text-sm text-gray-700">
+                                    {tx.description || "No description"}
+                                  </td>
+                                  <td className="px-6 py-4 text-sm text-gray-700">
+                                    <div className="font-medium text-gray-900">
+                                      {entityName}
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      {accountLabel}
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-4 text-right text-sm font-medium text-gray-900">
+                                    {formatCurrency(tx.amount)}
+                                  </td>
+                                  <td
+                                    className={`px-6 py-4 text-sm font-medium ${
+                                      tx.direction === "CR"
+                                        ? "text-green-600"
+                                        : "text-red-600"
+                                    }`}
+                                  >
+                                    {tx.direction === "CR"
+                                      ? "Credit"
+                                      : "Debit"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <div className="text-center py-8 text-gray-500">

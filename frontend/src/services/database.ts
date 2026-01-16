@@ -84,6 +84,34 @@ export interface AMLMetadata {
 // Cases
 export const casesService = {
   async getAll(): Promise<CaseWithStats[]> {
+    // Get the current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+    if (userError) {
+      console.error("Error getting user:", userError);
+      // Fall back to showing all cases if there's an error
+      const { data, error } = await supabase
+        .from("case_overview")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    }
+
+    // If we have a user, filter by created_by
+    if (user?.id) {
+      const { data, error } = await supabase
+        .from("case_overview")
+        .select("*")
+        .eq("created_by", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    }
+
+    // Fall back to showing all cases if no user (shouldn't happen with proper auth)
     const { data, error } = await supabase
       .from("case_overview")
       .select("*")

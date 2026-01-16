@@ -185,7 +185,8 @@ SELECT
     COUNT(DISTINCT bs.statement_id) as statement_count,
     c.opened_date,
     c.closed_date,
-    c.created_at
+    c.created_at,
+    c.created_by
 FROM cases c
 LEFT JOIN case_entities ce ON c.case_id = ce.case_id
 LEFT JOIN accounts a ON ce.entity_id = a.entity_id
@@ -465,7 +466,8 @@ SELECT
     AVG(ers.risk_score) as avg_entity_risk_score,
     c.opened_date,
     c.closed_date,
-    c.created_at
+    c.created_at,
+    c.created_by
 FROM cases c
 LEFT JOIN case_entities ce ON c.case_id = ce.case_id
 LEFT JOIN accounts a ON ce.entity_id = a.entity_id

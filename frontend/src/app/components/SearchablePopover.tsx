@@ -15,6 +15,8 @@ interface SearchablePopoverProps {
   placeholder: string;
   searchPlaceholder?: string;
   emptyText?: string;
+  emptyAction?: SearchableItem;
+  footerItems?: SearchableItem[];
   disabled?: boolean;
   onChange: (value: string) => void;
   buttonClassName?: string;
@@ -26,6 +28,8 @@ export default function SearchablePopover({
   placeholder,
   searchPlaceholder = "Search...",
   emptyText = "No options found",
+  emptyAction,
+  footerItems = [],
   disabled = false,
   onChange,
   buttonClassName = "",
@@ -121,27 +125,64 @@ export default function SearchablePopover({
             className="max-h-64 overflow-auto py-1 text-xs"
           >
             {filteredItems.length === 0 ? (
-              <div className="px-3 py-2 text-gray-400">{emptyText}</div>
+              <div className="px-3 py-2 text-gray-400">
+                {emptyText}
+                {emptyAction && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(emptyAction)}
+                    className="mt-2 flex w-full flex-col items-start rounded-md px-2 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50"
+                  >
+                    {emptyAction.label}
+                    {emptyAction.subLabel && (
+                      <span className="text-[11px] text-blue-500">
+                        {emptyAction.subLabel}
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
             ) : (
-              filteredItems.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => handleSelect(item)}
-                  className={`flex w-full flex-col items-start px-3 py-2 text-left hover:bg-gray-50 ${
-                    item.value === value ? "bg-blue-50" : ""
-                  }`}
-                >
-                  <span className="font-medium text-gray-900">
-                    {item.label}
-                  </span>
-                  {item.subLabel && (
-                    <span className="text-[11px] text-gray-500">
-                      {item.subLabel}
+              <>
+                {filteredItems.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => handleSelect(item)}
+                    className={`flex w-full flex-col items-start px-3 py-2 text-left hover:bg-gray-50 ${
+                      item.value === value ? "bg-blue-50" : ""
+                    }`}
+                  >
+                    <span className="font-medium text-gray-900">
+                      {item.label}
                     </span>
-                  )}
-                </button>
-              ))
+                    {item.subLabel && (
+                      <span className="text-[11px] text-gray-500">
+                        {item.subLabel}
+                      </span>
+                    )}
+                  </button>
+                ))}
+                {footerItems.length > 0 && (
+                  <div className="border-t border-gray-100">
+                    {footerItems.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => handleSelect(item)}
+                        className="flex w-full flex-col items-start px-3 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50"
+                      >
+                        {item.label}
+                        {item.subLabel && (
+                          <span className="text-[11px] text-blue-500">
+                            {item.subLabel}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

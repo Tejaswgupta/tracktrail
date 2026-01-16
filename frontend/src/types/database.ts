@@ -158,6 +158,7 @@ interface CaseOverview {
   opened_date: string;
   closed_date?: string;
   created_at: string;
+  created_by: string;
 }
 
 // Extended types with relations

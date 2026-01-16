@@ -1,22 +1,23 @@
 "use client";
 
 interface Step1FileUploadProps {
-  file: File | null;
-  onFileSelect: (file: File | null) => void;
+  files: File[];
+  onFileSelect: (files: File[]) => void;
   disabled?: boolean;
   isProcessing?: boolean;
 }
 
 export default function Step1FileUpload({
-  file,
+  files,
   onFileSelect,
   disabled = false,
   isProcessing = false,
 }: Step1FileUploadProps) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    onFileSelect(selectedFile || null);
+    const selectedFiles = Array.from(e.target.files ?? []);
+    onFileSelect(selectedFiles);
   };
+  const primaryFile = files[0];
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
@@ -128,38 +129,41 @@ export default function Step1FileUpload({
     <div className="space-y-6">
       <div className="text-center">
         <h3 className="text-lg font-medium text-gray-900 mb-2">
-          Select Bank Statement File
+          Select Bank Statement Files
         </h3>
         <p className="text-sm text-gray-600">
-          Choose a file to upload. Supported formats: CSV, PDF, Excel
+          Choose one or more files to upload. Supported formats: CSV, PDF, Excel
         </p>
       </div>
 
-      {file ? (
+      {files.length > 0 ? (
         <div className="space-y-4">
-          {(() => {
-            const fileTypeInfo = getFileTypeInfo(file.name);
+          {files.map((fileItem, index) => {
+            const fileTypeInfo = getFileTypeInfo(fileItem.name);
             return (
               <div
+                key={`${fileItem.name}-${fileItem.size}-${index}`}
                 className={`p-6 border-2 rounded-lg ${fileTypeInfo.bgColor} ${fileTypeInfo.borderColor}`}
               >
                 <div className="flex items-start space-x-4">
                   <div className="flex-shrink-0">
-                    {getFileIcon(file.name)}
+                    {getFileIcon(fileItem.name)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-gray-900 truncate">
-                          {file.name}
+                          {fileItem.name}
                         </p>
                         <p className={`text-xs ${fileTypeInfo.color} mt-1`}>
-                          {fileTypeInfo.type} • {formatFileSize(file.size)}
+                          {fileTypeInfo.type} • {formatFileSize(fileItem.size)}
                         </p>
                       </div>
                       <button
                         type="button"
-                        onClick={() => onFileSelect(null)}
+                        onClick={() =>
+                          onFileSelect(files.filter((_, i) => i !== index))
+                        }
                         disabled={disabled || isProcessing}
                         className="ml-4 text-gray-400 hover:text-red-500 disabled:opacity-50"
                       >
@@ -182,13 +186,14 @@ export default function Step1FileUpload({
                 </div>
               </div>
             );
-          })()}
+          })}
 
           {/* Processing indicator for PDF and Excel */}
           {isProcessing && (
-            file.type === "application/pdf" ||
-            file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-            file.type === "application/vnd.ms-excel"
+            primaryFile?.type === "application/pdf" ||
+            primaryFile?.type ===
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+            primaryFile?.type === "application/vnd.ms-excel"
           ) && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center space-x-3">
@@ -214,7 +219,7 @@ export default function Step1FileUpload({
                 </svg>
                 <div>
                   <p className="text-sm font-medium text-blue-900">
-                    Processing {file.type === "application/pdf" ? "PDF" : "Excel"}...
+                    Processing {primaryFile?.type === "application/pdf" ? "PDF" : "Excel"}...
                   </p>
                   <p className="text-xs text-blue-700">
                     Extracting transactions from your file. This may take a moment.
@@ -239,12 +244,22 @@ export default function Step1FileUpload({
               </svg>
               <div className="ml-3">
                 <p className="text-sm text-blue-800">
-                  File selected successfully! Click "Next" to continue with
-                  column mapping.
+                  {files.length > 1
+                    ? "Files selected successfully!"
+                    : "File selected successfully!"}{" "}
+                  Click "Next" to continue with column mapping.
                 </p>
               </div>
             </div>
           </div>
+
+          {files.length > 1 && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <p className="text-xs text-gray-600">
+                Column mapping will be reviewed separately for each file.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="mt-1 flex justify-center px-6 pt-8 pb-8 border-2 border-gray-300 border-dashed rounded-lg hover:border-blue-400 transition-colors">
@@ -267,13 +282,14 @@ export default function Step1FileUpload({
                 htmlFor="file-upload"
                 className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500"
               >
-                <span>Upload a file</span>
+                <span>Upload files</span>
                 <input
                   id="file-upload"
                   name="file-upload"
                   type="file"
                   className="sr-only"
                   accept=".pdf,.csv,.xlsx,.xls"
+                  multiple
                   onChange={handleFileChange}
                   disabled={disabled}
                 />

@@ -1,13 +1,22 @@
 "use client";
 
-import type { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
-import { useState } from "react";
+import {
+  buildSuggestedColumnMapping,
+  isColumnMappingValid,
+  type ColumnMapping,
+  type CSVValidationResult,
+} from "@/utils/csvValidator";
+import { useEffect, useState } from "react";
 
 interface CSVColumnMapperProps {
   validationResult: CSVValidationResult;
   onMappingComplete: (mapping: ColumnMapping) => void;
   onCancel: () => void;
   initialMapping?: ColumnMapping;
+  fileName?: string;
+  fileIndex?: number;
+  fileCount?: number;
+  ctaLabel?: string;
 }
 
 export default function CSVColumnMapper({
@@ -15,9 +24,12 @@ export default function CSVColumnMapper({
   onMappingComplete,
   onCancel,
   initialMapping,
+  fileName,
+  fileIndex,
+  fileCount,
+  ctaLabel,
 }: CSVColumnMapperProps) {
-  const [mapping, setMapping] = useState<ColumnMapping>(() => {
-    // If an initial mapping is provided (e.g., user previously selected or auto-applied), prefer it
+  const getInitialMapping = () => {
     if (initialMapping) {
       return {
         DATE: initialMapping.DATE || "",
@@ -29,25 +41,8 @@ export default function CSVColumnMapper({
       };
     }
 
-    // Otherwise initialize with suggested mapping if available
-    const suggested = validationResult.suggestedMapping;
-    const init: ColumnMapping = {
-      DATE: suggested?.DATE || "",
-      DESCRIPTION: suggested?.DESCRIPTION || "",
-      DEBIT: "",
-      CREDIT: "",
-      AMOUNT: "",
-      DIRECTION: suggested?.DIRECTION || "",
-    };
-
-    // Prefer single amount column if available, otherwise use debit/credit
-    if (suggested?.AMOUNT) {
-      init.AMOUNT = suggested.AMOUNT;
-    } else if (suggested?.DEBIT || suggested?.CREDIT) {
-      init.DEBIT = suggested?.DEBIT || "";
-      init.CREDIT = suggested?.CREDIT || "";
-    } else {
-      // Default to debit/credit format if no suggestions
+    const init = buildSuggestedColumnMapping(validationResult);
+    if (!init.AMOUNT && !init.DEBIT && !init.CREDIT) {
       init.DEBIT =
         validationResult.headers.find(
           (h) =>
@@ -59,9 +54,14 @@ export default function CSVColumnMapper({
             h.toLowerCase().includes("credit") || h.toLowerCase().includes("cr")
         ) || "";
     }
-
     return init;
-  });
+  };
+
+  const [mapping, setMapping] = useState<ColumnMapping>(getInitialMapping);
+
+  useEffect(() => {
+    setMapping(getInitialMapping());
+  }, [validationResult, initialMapping]);
 
   const handleMappingChange = (
     requiredColumn: keyof ColumnMapping,
@@ -74,14 +74,7 @@ export default function CSVColumnMapper({
   };
 
   const handleSubmit = () => {
-    // Validate that we have minimum required mappings
-    const hasDate = !!mapping.DATE;
-    const hasDescription = !!mapping.DESCRIPTION;
-    const hasDebitCredit =
-      !!mapping.DEBIT && !!mapping.CREDIT && !mapping.AMOUNT;
-    const hasAmount = !!mapping.AMOUNT && !mapping.DEBIT && !mapping.CREDIT;
-
-    if (!hasDate || !hasDescription || (!hasDebitCredit && !hasAmount)) {
+    if (!isColumnMappingValid(mapping)) {
       alert(
         "Please map all required columns: DATE, DESCRIPTION, and either (DEBIT + CREDIT) or AMOUNT"
       );
@@ -103,8 +96,13 @@ export default function CSVColumnMapper({
           Map Columns
         </h3>
         <p className="text-sm text-gray-600">
-          Review or map columns to the required fields. You can choose between a single Amount column or separate Debit/Credit columns.
+          Review or map columns for this file. You can choose between a single Amount column or separate Debit/Credit columns.
         </p>
+        {fileName && fileIndex !== undefined && fileCount !== undefined && (
+          <p className="text-xs text-gray-500 mt-2">
+            File {fileIndex + 1} of {fileCount}: {fileName}
+          </p>
+        )}
       </div>
 
       {/* Column Mapping Form */}
@@ -395,7 +393,7 @@ export default function CSVColumnMapper({
           onClick={handleSubmit}
           className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
         >
-          Continue with Mapping
+          {ctaLabel || "Continue with Mapping"}
         </button>
       </div>
     </div>

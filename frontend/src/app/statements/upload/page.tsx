@@ -2,7 +2,12 @@
 
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
 import { transactionExtractorService, type ExtractionResult, type ExtractedTransaction } from "@/services/transactionExtractor";
-import { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
+import {
+  buildSuggestedColumnMapping,
+  isColumnMappingValid,
+  type ColumnMapping,
+  type CSVValidationResult,
+} from "@/utils/csvValidator";
 import { type BankPreset } from "@/constants/banks";
 import { useState } from "react";
 import BankSelector from "@/app/components/BankSelector";
@@ -15,7 +20,7 @@ export default function UploadStatementPage() {
   const router = useRouter();
   const [accountId, setAccountId] = useState<string>("");
   const [entityId, setEntityId] = useState<string>("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [statementPeriodFrom, setStatementPeriodFrom] = useState("");
   const [statementPeriodTo, setStatementPeriodTo] = useState("");
   const [selectedBank, setSelectedBank] = useState<BankPreset>("generic");
@@ -27,17 +32,26 @@ export default function UploadStatementPage() {
 
   // CSV validation states
   const [showColumnMapper, setShowColumnMapper] = useState(false);
-  const [csvValidation, setCsvValidation] =
-    useState<CSVValidationResult | null>(null);
-  const [columnMapping, setColumnMapping] = useState<ColumnMapping | null>(
-    null
+  const [fileValidations, setFileValidations] = useState<
+    (CSVValidationResult | null)[]
+  >([]);
+  const [fileMappings, setFileMappings] = useState<(ColumnMapping | null)[]>(
+    []
   );
+  const [mappingIndex, setMappingIndex] = useState(0);
 
   // Extraction results
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
   
   // Manual entry state
   const [showManualEntry, setShowManualEntry] = useState(false);
+  const primaryFile = files[0] ?? null;
+  const primaryValidation = fileValidations[0] ?? null;
+  const primaryMapping = fileMappings[0] ?? null;
+  const allMappingsValid =
+    files.length > 0 &&
+    fileMappings.length === files.length &&
+    fileMappings.every((mapping) => isColumnMappingValid(mapping));
 
   const handleBankChange = (bankPreset: BankPreset) => {
     setSelectedBank(bankPreset);
@@ -45,98 +59,59 @@ export default function UploadStatementPage() {
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      setError(null);
-      setCsvValidation(null);
-      setColumnMapping(null);
-      setShowColumnMapper(false);
-      setExtractionResult(null);
-      setShowManualEntry(false);
+    const selectedFiles = Array.from(e.target.files ?? []);
+    if (!selectedFiles.length) {
+      setFiles([]);
+      setFileValidations([]);
+      setFileMappings([]);
+      setMappingIndex(0);
+      return;
+    }
+    setFiles(selectedFiles);
+    setError(null);
+    setFileValidations(Array(selectedFiles.length).fill(null));
+    setFileMappings(Array(selectedFiles.length).fill(null));
+    setMappingIndex(0);
+    setShowColumnMapper(true);
+    setExtractionResult(null);
+    setShowManualEntry(false);
 
-      // If it's a CSV file, validate it immediately
-      if (selectedFile.type === "text/csv") {
-        try {
-          console.log("Validating CSV file:", selectedFile.name);
-          const validation = await fileUploadService.validateCSV(selectedFile);
-          console.log("CSV validation result:", validation);
-          setCsvValidation(validation);
-
-          if (!validation.isValid) {
-            console.log("CSV validation failed, showing column mapper");
-            setShowColumnMapper(true);
-          } else {
-            console.log("CSV validation passed");
-            // Automatically use the suggested mapping if available
-            if (validation.suggestedMapping) {
-              console.log(
-                "Using suggested mapping:",
-                validation.suggestedMapping
-              );
-
-              // Validate that the suggested mapping has all required properties
-              const mapping = validation.suggestedMapping;
-              if (
-                mapping.DATE &&
-                mapping.DESCRIPTION &&
-                ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
-              ) {
-                setColumnMapping({
-                  DATE: mapping.DATE,
-                  DESCRIPTION: mapping.DESCRIPTION,
-                  DEBIT: mapping.DEBIT,
-                  CREDIT: mapping.CREDIT,
-                  AMOUNT: mapping.AMOUNT,
-                  DIRECTION: mapping.DIRECTION,
-                });
-              }
-            }
-          }
-        } catch (error) {
-          console.error("CSV validation error:", error);
-          setError(
-            error instanceof Error ? error.message : "Failed to validate CSV"
-          );
+    for (let index = 0; index < selectedFiles.length; index += 1) {
+      const file = selectedFiles[index];
+      try {
+        let validation: CSVValidationResult | null = null;
+        if (file.type === "text/csv") {
+          console.log("Validating CSV file:", file.name);
+          validation = await fileUploadService.validateCSV(file);
+        } else if (
+          file.type ===
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+          file.type === "application/vnd.ms-excel"
+        ) {
+          console.log("Validating Excel file:", file.name);
+          validation = await fileUploadService.validateExcel(file);
+        } else if (file.type === "application/pdf") {
+          console.log("Previewing PDF columns:", file.name);
+          validation = await transactionExtractorService.previewPDFColumns(file);
         }
-      } else if (selectedFile.type === "application/pdf") {
-        // For PDFs, run a preview to get headers and suggested mapping
-        try {
-          console.log("Previewing PDF columns:", selectedFile.name);
-          const validation = await transactionExtractorService.previewPDFColumns(
-            selectedFile
-          );
-          console.log("PDF preview validation result:", validation);
-          setCsvValidation(validation);
 
-          if (!validation.isValid) {
-            console.log("PDF column detection incomplete, showing column mapper");
-            setShowColumnMapper(true);
-          } else if (validation.suggestedMapping) {
-            const mapping = validation.suggestedMapping;
-            if (
-              mapping.DATE &&
-              mapping.DESCRIPTION &&
-              ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
-            ) {
-              setColumnMapping({
-                DATE: mapping.DATE,
-                DESCRIPTION: mapping.DESCRIPTION,
-                DEBIT: mapping.DEBIT,
-                CREDIT: mapping.CREDIT,
-                AMOUNT: mapping.AMOUNT,
-                DIRECTION: mapping.DIRECTION,
-              });
-            }
+        setFileValidations((prev) => {
+          const next = [...prev];
+          next[index] = validation;
+          return next;
+        });
+        setFileMappings((prev) => {
+          const next = [...prev];
+          if (validation) {
+            next[index] = buildSuggestedColumnMapping(validation);
           }
-        } catch (error) {
-          console.error("PDF preview error:", error);
-          setError(
-            error instanceof Error
-              ? error.message
-              : "Failed to preview PDF columns"
-          );
-        }
+          return next;
+        });
+      } catch (error) {
+        console.error("File validation error:", error);
+        setError(
+          error instanceof Error ? error.message : "Failed to validate file"
+        );
       }
     }
   };
@@ -144,8 +119,8 @@ export default function UploadStatementPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!file) {
-      setError("Please select a file to upload");
+    if (!files.length) {
+      setError("Please select at least one file to upload");
       return;
     }
 
@@ -164,14 +139,22 @@ export default function UploadStatementPage() {
       return;
     }
 
-    // For CSV/PDF files, check if column mapping is required when validation failed
     if (
-      (file.type === "text/csv" || file.type === "application/pdf") &&
-      csvValidation &&
-      !csvValidation.isValid &&
-      !columnMapping
+      files.some((file, index) => {
+        const mapping = fileMappings[index];
+        if (
+          file.type === "text/csv" ||
+          file.type === "application/pdf" ||
+          file.type ===
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+          file.type === "application/vnd.ms-excel"
+        ) {
+          return !isColumnMappingValid(mapping);
+        }
+        return false;
+      })
     ) {
-      setError("Please map the columns before uploading");
+      setError("Please map columns for all files before uploading");
       return;
     }
 
@@ -180,15 +163,27 @@ export default function UploadStatementPage() {
     setUploadProgress(null);
 
     try {
-      await fileUploadService.uploadStatement({
-        accountId,
-        file,
-        statementPeriodFrom: statementPeriodFrom || undefined,
-        statementPeriodTo: statementPeriodTo || undefined,
-        columnMapping: columnMapping || undefined,
-        bankPreset: selectedBank,
-        onProgress: setUploadProgress,
-      });
+      for (let i = 0; i < files.length; i += 1) {
+        const currentFile = files[i];
+        const mapping = fileMappings[i] || undefined;
+        await fileUploadService.uploadStatement({
+          accountId,
+          file: currentFile,
+          statementPeriodFrom: statementPeriodFrom || undefined,
+          statementPeriodTo: statementPeriodTo || undefined,
+          columnMapping: mapping,
+          bankPreset: selectedBank,
+          onProgress: (progress) => {
+            const baseProgress = i / files.length;
+            const currentProgress = progress.percentage / 100 / files.length;
+            const percentage = Math.min(
+              100,
+              Math.round((baseProgress + currentProgress) * 100)
+            );
+            setUploadProgress({ ...progress, percentage });
+          },
+        });
+      }
 
       // After successful upload, we should fetch the extraction result separately
       // For now, we'll just show a success message
@@ -204,16 +199,26 @@ export default function UploadStatementPage() {
   };
 
   const handleColumnMappingComplete = (mapping: ColumnMapping) => {
-    setColumnMapping(mapping);
-    setShowColumnMapper(false);
-    setError(null);
+    setFileMappings((prev) => {
+      const next = [...prev];
+      next[mappingIndex] = mapping;
+      return next;
+    });
+
+    if (mappingIndex < files.length - 1) {
+      setMappingIndex(mappingIndex + 1);
+    } else {
+      setShowColumnMapper(false);
+      setError(null);
+    }
   };
 
   const handleColumnMappingCancel = () => {
     setShowColumnMapper(false);
-    setFile(null);
-    setCsvValidation(null);
-    setColumnMapping(null);
+    setFiles([]);
+    setFileValidations([]);
+    setFileMappings([]);
+    setMappingIndex(0);
   };
 
   const handleManualTransactionsAdded = (transactions: ExtractedTransaction[]) => {
@@ -327,15 +332,31 @@ export default function UploadStatementPage() {
             </button>
           </div>
 
-          {showColumnMapper && csvValidation ? (
-            <div className="mb-8">
-              <CSVColumnMapper
-                validationResult={csvValidation}
-                onMappingComplete={handleColumnMappingComplete}
-                onCancel={handleColumnMappingCancel}
-                initialMapping={columnMapping || undefined}
-              />
-            </div>
+          {showColumnMapper ? (
+            fileValidations[mappingIndex] ? (
+              <div className="mb-8">
+                <CSVColumnMapper
+                  validationResult={
+                    fileValidations[mappingIndex] as CSVValidationResult
+                  }
+                  onMappingComplete={handleColumnMappingComplete}
+                  onCancel={handleColumnMappingCancel}
+                  initialMapping={fileMappings[mappingIndex] || undefined}
+                  fileName={files[mappingIndex]?.name}
+                  fileIndex={mappingIndex}
+                  fileCount={files.length}
+                  ctaLabel={
+                    mappingIndex < files.length - 1
+                      ? "Save & Next File"
+                      : "Continue"
+                  }
+                />
+              </div>
+            ) : (
+              <div className="mb-8 rounded-md bg-gray-50 p-6 text-center text-sm text-gray-600">
+                Processing file for column mapping...
+              </div>
+            )
           ) : showManualEntry ? (
             <ManualTransactionEntry
               accountId={accountId}
@@ -379,27 +400,34 @@ export default function UploadStatementPage() {
               {/* File Upload */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Bank Statement File *
+                  Bank Statement Files *
                 </label>
                 <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-gray-400 transition-colors">
                   <div className="space-y-1 text-center">
-                    {file ? (
-                      <div className="flex flex-col items-center">
-                        {getFileIcon(file.name)}
-                        <div className="mt-2">
-                          <p className="text-sm font-medium text-gray-900">
-                            {file.name}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {formatFileSize(file.size)}
-                          </p>
+                    {files.length ? (
+                      <div className="flex flex-col items-center space-y-2">
+                        {getFileIcon(files[0].name)}
+                        <div className="mt-2 w-full space-y-1">
+                          {files.map((fileItem, index) => (
+                            <div
+                              key={`${fileItem.name}-${fileItem.size}-${index}`}
+                              className="flex items-center justify-between text-xs text-gray-600"
+                            >
+                              <span className="truncate pr-2">
+                                {fileItem.name}
+                              </span>
+                              <span className="whitespace-nowrap">
+                                {formatFileSize(fileItem.size)}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                         <button
                           type="button"
-                          onClick={() => setFile(null)}
+                          onClick={() => setFiles([])}
                           className="mt-2 text-xs text-red-600 hover:text-red-800"
                         >
-                          Remove file
+                          Remove files
                         </button>
                       </div>
                     ) : (
@@ -422,13 +450,14 @@ export default function UploadStatementPage() {
                             htmlFor="file-upload"
                             className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500"
                           >
-                            <span>Upload a file</span>
+                            <span>Upload files</span>
                             <input
                               id="file-upload"
                               name="file-upload"
                               type="file"
                               className="sr-only"
                               accept=".pdf,.csv,.xlsx,.xls"
+                              multiple
                               onChange={handleFileChange}
                               disabled={isUploading}
                             />
@@ -436,7 +465,7 @@ export default function UploadStatementPage() {
                           <p className="pl-1">or drag and drop</p>
                         </div>
                         <p className="text-xs text-gray-500">
-                          PDF, CSV, Excel files up to 50MB
+                          PDF, CSV, Excel files up to 50MB each
                         </p>
                       </>
                     )}
@@ -537,7 +566,13 @@ export default function UploadStatementPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!file || !accountId || !entityId || isUploading}
+                  disabled={
+                    !files.length ||
+                    !accountId ||
+                    !entityId ||
+                    isUploading ||
+                    !allMappingsValid
+                  }
                   className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isUploading ? (
@@ -564,7 +599,7 @@ export default function UploadStatementPage() {
                       Uploading...
                     </>
                   ) : (
-                    "Upload Statement"
+                    "Upload Statements"
                   )}
                 </button>
               </div>
@@ -572,9 +607,7 @@ export default function UploadStatementPage() {
           )}
 
           {/* Validation Success Message for CSV/PDF */}
-          {(file?.type === "text/csv" || file?.type === "application/pdf") &&
-            csvValidation?.isValid &&
-            !showColumnMapper && (
+          {allMappingsValid && !showColumnMapper && (
               <div className="rounded-md bg-green-50 p-4 mb-6">
                 <div className="flex items-start justify-between">
                   <div className="flex">
@@ -591,16 +624,19 @@ export default function UploadStatementPage() {
                     </svg>
                     <div className="ml-3">
                       <p className="text-sm text-green-800">
-                        File format validated successfully! All required columns found.
+                        All files mapped successfully! Ready to upload.
                       </p>
                       <p className="text-xs text-green-700 mt-1">
-                        A column mapping was auto-applied. You can adjust it if needed.
+                        Auto-filled using canonical headers. You can adjust any file if needed.
                       </p>
                     </div>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowColumnMapper(true)}
+                    onClick={() => {
+                      setMappingIndex(0);
+                      setShowColumnMapper(true);
+                    }}
                     className="ml-4 inline-flex items-center px-3 py-1.5 border border-green-300 rounded-md text-xs font-medium text-green-800 bg-white hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
                   >
                     Change mapping
@@ -609,38 +645,14 @@ export default function UploadStatementPage() {
               </div>
             )}
 
-          {/* Column Mapping Success Message */}
-          {columnMapping && (
-            <div className="rounded-md bg-blue-50 p-4 mb-6">
-              <div className="flex">
-                <svg
-                  className="h-5 w-5 text-blue-400"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <div className="ml-3">
-                  <p className="text-sm text-blue-800">
-                    Column mapping configured successfully! Ready to upload.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Preview Data */}
-          {file && !showManualEntry && (
+          {primaryFile && !showManualEntry && (
             <div className="mt-8">
               <PreviewDataDisplay 
-                file={file}
+                file={primaryFile}
                 bankPreset={selectedBank}
-                columnMapping={columnMapping}
-                csvValidation={csvValidation}
+                columnMapping={primaryMapping}
+                csvValidation={primaryValidation}
               />
             </div>
           )}

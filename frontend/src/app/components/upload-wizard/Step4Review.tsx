@@ -1,11 +1,11 @@
 "use client";
 
 import { BANK_PRESETS, type BankPreset } from "@/constants/banks";
-import type { ColumnMapping } from "@/utils/csvValidator";
+import { isColumnMappingValid, type ColumnMapping } from "@/utils/csvValidator";
 
 interface Step4ReviewProps {
-  file: File | null;
-  columnMapping: ColumnMapping | null;
+  files: File[];
+  fileMappings: (ColumnMapping | null)[];
   selectedBank: BankPreset;
   statementPeriodFrom?: string;
   statementPeriodTo?: string;
@@ -13,8 +13,8 @@ interface Step4ReviewProps {
 }
 
 export default function Step4Review({
-  file,
-  columnMapping,
+  files,
+  fileMappings,
   selectedBank,
   statementPeriodFrom,
   statementPeriodTo,
@@ -42,6 +42,14 @@ export default function Step4Review({
         return "Document";
     }
   };
+  const fileTypes = Array.from(
+    new Set(files.map((file) => getFileType(file.name)))
+  );
+  const fileTypeLabel = fileTypes.length > 1 ? "Mixed Types" : fileTypes[0];
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  const mappedCount = fileMappings.filter((mapping) =>
+    isColumnMappingValid(mapping)
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -69,25 +77,38 @@ export default function Step4Review({
               </button>
             )}
           </div>
-          {file ? (
+          {files.length ? (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Filename:</span>
-                <span className="font-medium text-gray-900 truncate ml-2">
-                  {file.name}
+                <span className="text-gray-600">Files:</span>
+                <span className="font-medium text-gray-900">
+                  {files.length}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Type:</span>
                 <span className="font-medium text-gray-900">
-                  {getFileType(file.name)}
+                  {fileTypeLabel}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Size:</span>
                 <span className="font-medium text-gray-900">
-                  {formatFileSize(file.size)}
+                  {formatFileSize(totalSize)}
                 </span>
+              </div>
+              <div className="pt-2 space-y-1">
+                {files.map((fileItem) => (
+                  <div
+                    key={`${fileItem.name}-${fileItem.size}`}
+                    className="flex justify-between text-xs text-gray-600"
+                  >
+                    <span className="truncate pr-2">{fileItem.name}</span>
+                    <span className="whitespace-nowrap">
+                      {formatFileSize(fileItem.size)}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           ) : (
@@ -109,53 +130,29 @@ export default function Step4Review({
               </button>
             )}
           </div>
-          {columnMapping ? (
+          {fileMappings.length ? (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Date:</span>
+                <span className="text-gray-600">Mapped:</span>
                 <span className="font-medium text-gray-900">
-                  {columnMapping.DATE || "-"}
+                  {mappedCount} of {files.length}
                 </span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Description:</span>
-                <span className="font-medium text-gray-900">
-                  {columnMapping.DESCRIPTION || "-"}
-                </span>
+              <div className="pt-2 space-y-1">
+                {files.map((fileItem, index) => (
+                  <div
+                    key={`${fileItem.name}-${fileItem.size}`}
+                    className="flex justify-between text-xs text-gray-600"
+                  >
+                    <span className="truncate pr-2">{fileItem.name}</span>
+                    <span>
+                      {isColumnMappingValid(fileMappings[index])
+                        ? "Mapped"
+                        : "Needs mapping"}
+                    </span>
+                  </div>
+                ))}
               </div>
-              {columnMapping.AMOUNT ? (
-                <>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Amount:</span>
-                    <span className="font-medium text-gray-900">
-                      {columnMapping.AMOUNT}
-                    </span>
-                  </div>
-                  {columnMapping.DIRECTION && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Direction:</span>
-                      <span className="font-medium text-gray-900">
-                        {columnMapping.DIRECTION}
-                      </span>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Debit:</span>
-                    <span className="font-medium text-gray-900">
-                      {columnMapping.DEBIT || "-"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Credit:</span>
-                    <span className="font-medium text-gray-900">
-                      {columnMapping.CREDIT || "-"}
-                    </span>
-                  </div>
-                </>
-              )}
             </div>
           ) : (
             <p className="text-sm text-gray-500">No column mapping configured</p>

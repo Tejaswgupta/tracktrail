@@ -7,7 +7,12 @@ import {
 import { accountsService } from "@/services/database";
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
 import { transactionExtractorService } from "@/services/transactionExtractor";
-import { ColumnMapping, CSVValidationResult } from "@/utils/csvValidator";
+import {
+  buildSuggestedColumnMapping,
+  isColumnMappingValid,
+  type ColumnMapping,
+  type CSVValidationResult,
+} from "@/utils/csvValidator";
 import { useEffect, useState } from "react";
 import ProgressStepper from "./upload-wizard/ProgressStepper";
 import Step1FileUpload from "./upload-wizard/Step1FileUpload";
@@ -22,7 +27,7 @@ interface UploadStatementModalWizardProps {
 }
 
 const STEPS = [
-  { id: 1, name: "File", description: "Select file" },
+  { id: 1, name: "File", description: "Select files" },
   { id: 2, name: "Columns", description: "Map columns" },
   { id: 3, name: "Bank", description: "Choose bank" },
   { id: 4, name: "Review", description: "Review & submit" },
@@ -34,7 +39,7 @@ export default function UploadStatementModalWizard({
   onUploadComplete,
 }: UploadStatementModalWizardProps) {
   const [currentStep, setCurrentStep] = useState(1);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [statementPeriodFrom, setStatementPeriodFrom] = useState("");
   const [statementPeriodTo, setStatementPeriodTo] = useState("");
   const [selectedBank, setSelectedBank] = useState<BankPreset>("generic");
@@ -45,13 +50,17 @@ export default function UploadStatementModalWizard({
   const [error, setError] = useState<string | null>(null);
   const [isLoadingAccount, setIsLoadingAccount] = useState(false);
 
-  const [csvValidation, setCsvValidation] =
-    useState<CSVValidationResult | null>(null);
-  const [columnMapping, setColumnMapping] = useState<ColumnMapping | null>(
-    null
+  const [fileValidations, setFileValidations] = useState<
+    (CSVValidationResult | null)[]
+  >([]);
+  const [fileMappings, setFileMappings] = useState<(ColumnMapping | null)[]>(
+    []
   );
+  const [mappingIndex, setMappingIndex] = useState(0);
   const [deletedRows, setDeletedRows] = useState<number[]>([]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const primaryFile = files[0] ?? null;
+  const primaryMapping = fileMappings[0] ?? null;
 
   useEffect(() => {
     const fetchAccountAndInferBank = async () => {
@@ -76,130 +85,73 @@ export default function UploadStatementModalWizard({
     fetchAccountAndInferBank();
   }, [accountId]);
 
-  const handleFileSelect = async (selectedFile: File | null) => {
-    setFile(selectedFile);
+  const handleFileSelect = async (selectedFiles: File[]) => {
+    setFiles(selectedFiles);
     setError(null);
-    setCsvValidation(null);
-    setColumnMapping(null);
+    setFileValidations(Array(selectedFiles.length).fill(null));
+    setFileMappings(Array(selectedFiles.length).fill(null));
+    setMappingIndex(0);
     setIsProcessingFile(false);
 
-    if (!selectedFile) return;
+    if (!selectedFiles.length) return;
 
-    if (selectedFile.type === "text/csv") {
-      setIsProcessingFile(true);
-      try {
-        const validation = await fileUploadService.validateCSV(selectedFile);
-        setCsvValidation(validation);
-
-        if (validation.isValid && validation.suggestedMapping) {
-          const mapping = validation.suggestedMapping;
-          if (
-            mapping.DATE &&
-            mapping.DESCRIPTION &&
-            ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
-          ) {
-            setColumnMapping({
-              DATE: mapping.DATE,
-              DESCRIPTION: mapping.DESCRIPTION,
-              DEBIT: mapping.DEBIT,
-              CREDIT: mapping.CREDIT,
-              AMOUNT: mapping.AMOUNT,
-              DIRECTION: mapping.DIRECTION,
-            });
-          }
-        }
-      } catch (error) {
-        console.error("CSV validation error:", error);
-        setError(
-          error instanceof Error ? error.message : "Failed to validate CSV"
-        );
-      } finally {
-        setIsProcessingFile(false);
-      }
-    } else if (
-      selectedFile.type ===
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-      selectedFile.type === "application/vnd.ms-excel"
-    ) {
-      setIsProcessingFile(true);
-      try {
-        const validation = await fileUploadService.validateExcel(selectedFile);
-        setCsvValidation(validation);
-
-        if (validation.isValid && validation.suggestedMapping) {
-          const mapping = validation.suggestedMapping;
-          if (
-            mapping.DATE &&
-            mapping.DESCRIPTION &&
-            ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
-          ) {
-            setColumnMapping({
-              DATE: mapping.DATE,
-              DESCRIPTION: mapping.DESCRIPTION,
-              DEBIT: mapping.DEBIT,
-              CREDIT: mapping.CREDIT,
-              AMOUNT: mapping.AMOUNT,
-              DIRECTION: mapping.DIRECTION,
-            });
-          }
-        }
-      } catch (error) {
-        console.error("Excel validation error:", error);
-        setError(
-          error instanceof Error ? error.message : "Failed to validate Excel"
-        );
-      } finally {
-        setIsProcessingFile(false);
-      }
-    } else if (selectedFile.type === "application/pdf") {
-      setIsProcessingFile(false);
-    }
-  };
-
-  const handleProcessPDF = async (file: File) => {
     setIsProcessingFile(true);
-    setError(null);
+    const validations: (CSVValidationResult | null)[] = Array(
+      selectedFiles.length
+    ).fill(null);
+    const mappings: (ColumnMapping | null)[] = Array(selectedFiles.length).fill(
+      null
+    );
 
-    try {
-      const validation = await transactionExtractorService.previewPDFColumns(
-        file
-      );
-      setCsvValidation(validation);
+    for (let index = 0; index < selectedFiles.length; index += 1) {
+      const file = selectedFiles[index];
+      try {
+        let validation: CSVValidationResult | null = null;
 
-      if (validation.isValid && validation.suggestedMapping) {
-        const mapping = validation.suggestedMapping;
-        if (
-          mapping.DATE &&
-          mapping.DESCRIPTION &&
-          ((mapping.DEBIT && mapping.CREDIT) || mapping.AMOUNT)
+        if (file.type === "text/csv") {
+          validation = await fileUploadService.validateCSV(file);
+        } else if (
+          file.type ===
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+          file.type === "application/vnd.ms-excel"
         ) {
-          setColumnMapping({
-            DATE: mapping.DATE,
-            DESCRIPTION: mapping.DESCRIPTION,
-            DEBIT: mapping.DEBIT,
-            CREDIT: mapping.CREDIT,
-            AMOUNT: mapping.AMOUNT,
-            DIRECTION: mapping.DIRECTION,
-          });
+          validation = await fileUploadService.validateExcel(file);
+        } else if (file.type === "application/pdf") {
+          validation = await transactionExtractorService.previewPDFColumns(file);
         }
+
+        validations[index] = validation;
+        if (validation) {
+          mappings[index] = buildSuggestedColumnMapping(validation);
+        }
+        setFileValidations([...validations]);
+        setFileMappings([...mappings]);
+      } catch (error) {
+        console.error("File validation error:", error);
+        setError(
+          error instanceof Error ? error.message : "Failed to validate file"
+        );
       }
-    } catch (error) {
-      console.error("PDF processing error:", error);
-      setError(
-        error instanceof Error ? error.message : "Failed to process PDF"
-      );
-    } finally {
-      setIsProcessingFile(false);
     }
+    setIsProcessingFile(false);
   };
 
   const handleColumnMappingComplete = (
     mapping: ColumnMapping,
     rowsToDelete: number[]
   ) => {
-    setColumnMapping(mapping);
+    setFileMappings((prev) => {
+      const next = [...prev];
+      next[mappingIndex] = mapping;
+      return next;
+    });
     setDeletedRows(rowsToDelete);
-    setCurrentStep(3);
+
+    if (mappingIndex < files.length - 1) {
+      setMappingIndex(mappingIndex + 1);
+    } else {
+      setCurrentStep(3);
+    }
   };
 
   const handleBankChange = (bankPreset: BankPreset) => {
@@ -207,8 +159,8 @@ export default function UploadStatementModalWizard({
   };
 
   const handleSubmit = async () => {
-    if (!file) {
-      setError("Please select a file to upload");
+    if (!files.length) {
+      setError("Please select at least one file to upload");
       return;
     }
 
@@ -218,12 +170,24 @@ export default function UploadStatementModalWizard({
     }
 
     if (
-      (file.type === "text/csv" || file.type === "application/pdf") &&
-      csvValidation &&
-      !csvValidation.isValid &&
-      !columnMapping
+      files.some((file, index) => {
+        const validation = fileValidations[index];
+        const mapping = fileMappings[index];
+        if (!validation) return true;
+        if (
+          (file.type === "text/csv" ||
+            file.type === "application/pdf" ||
+            file.type ===
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+            file.type === "application/vnd.ms-excel") &&
+          !isColumnMappingValid(mapping)
+        ) {
+          return true;
+        }
+        return false;
+      })
     ) {
-      setError("Please map the columns before uploading");
+      setError("Please map columns for all files before uploading");
       return;
     }
 
@@ -232,15 +196,27 @@ export default function UploadStatementModalWizard({
     setUploadProgress(null);
 
     try {
-      await fileUploadService.uploadStatement({
-        accountId,
-        file,
-        statementPeriodFrom: statementPeriodFrom || undefined,
-        statementPeriodTo: statementPeriodTo || undefined,
-        columnMapping: columnMapping || undefined,
-        bankPreset: selectedBank,
-        onProgress: setUploadProgress,
-      });
+      for (let i = 0; i < files.length; i += 1) {
+        const currentFile = files[i];
+        const mapping = fileMappings[i] || undefined;
+        await fileUploadService.uploadStatement({
+          accountId,
+          file: currentFile,
+          statementPeriodFrom: statementPeriodFrom || undefined,
+          statementPeriodTo: statementPeriodTo || undefined,
+          columnMapping: mapping,
+          bankPreset: selectedBank,
+          onProgress: (progress) => {
+            const baseProgress = i / files.length;
+            const currentProgress = progress.percentage / 100 / files.length;
+            const percentage = Math.min(
+              100,
+              Math.round((baseProgress + currentProgress) * 100)
+            );
+            setUploadProgress({ ...progress, percentage });
+          },
+        });
+      }
 
       onUploadComplete();
       onClose();
@@ -256,13 +232,14 @@ export default function UploadStatementModalWizard({
   const canGoNext = () => {
     switch (currentStep) {
       case 1:
-        return !!file && !isProcessingFile;
+        return (
+          files.length > 0 &&
+          !isProcessingFile &&
+          fileValidations.length === files.length &&
+          fileValidations.every((validation) => validation !== null)
+        );
       case 2:
-        // For PDFs, we need column mapping after processing
-        if (file && file.type === "application/pdf") {
-          return !!columnMapping;
-        }
-        return !!columnMapping;
+        return fileMappings.every((mapping) => isColumnMappingValid(mapping));
       case 3:
         return !!selectedBank;
       case 4:
@@ -275,20 +252,23 @@ export default function UploadStatementModalWizard({
   const handleNext = async () => {
     if (currentStep < 4) {
       // If we have a PDF file and moving from step 1, process it first
-      if (currentStep === 1 && file && file.type === "application/pdf") {
-        await handleProcessPDF(file);
-      }
       setCurrentStep(currentStep + 1);
     }
   };
 
   const handleBack = () => {
     if (currentStep > 1) {
+      if (currentStep === 3) {
+        setMappingIndex(0);
+      }
       setCurrentStep(currentStep - 1);
     }
   };
 
   const handleEdit = (step: number) => {
+    if (step === 2) {
+      setMappingIndex(0);
+    }
     setCurrentStep(step);
   };
 
@@ -329,7 +309,7 @@ export default function UploadStatementModalWizard({
         <div className="min-h-[400px]">
           {currentStep === 1 && (
             <Step1FileUpload
-              file={file}
+              files={files}
               onFileSelect={handleFileSelect}
               disabled={isUploading}
               isProcessing={isProcessingFile}
@@ -338,17 +318,23 @@ export default function UploadStatementModalWizard({
 
           {currentStep === 2 && (
             <Step2ColumnMapping
-              validationResult={csvValidation}
-              columnMapping={columnMapping}
+              validationResult={fileValidations[mappingIndex] || null}
+              columnMapping={fileMappings[mappingIndex] || null}
               onMappingComplete={handleColumnMappingComplete}
               disabled={isUploading}
+              fileName={files[mappingIndex]?.name}
+              fileIndex={mappingIndex}
+              fileCount={files.length}
+              ctaLabel={
+                mappingIndex < files.length - 1 ? "Save & Next File" : "Continue"
+              }
             />
           )}
 
           {currentStep === 3 && (
             <Step3BankSelection
-              file={file}
-              columnMapping={columnMapping}
+              file={primaryFile}
+              columnMapping={primaryMapping}
               selectedBank={selectedBank}
               onBankChange={handleBankChange}
               disabled={isUploading}
@@ -357,8 +343,8 @@ export default function UploadStatementModalWizard({
 
           {currentStep === 4 && (
             <Step4Review
-              file={file}
-              columnMapping={columnMapping}
+              files={files}
+              fileMappings={fileMappings}
               selectedBank={selectedBank}
               statementPeriodFrom={statementPeriodFrom}
               statementPeriodTo={statementPeriodTo}
