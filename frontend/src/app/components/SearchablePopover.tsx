@@ -2,6 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
+
 export type SearchableItem = {
   value: string;
   label: string;
@@ -37,22 +47,11 @@ export default function SearchablePopover({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedItem = useMemo(
     () => items.find((item) => item.value === value),
     [items, value]
   );
-
-  const filteredItems = useMemo(() => {
-    if (!query.trim()) return items;
-    const normalized = query.toLowerCase();
-    return items.filter((item) => {
-      const haystack =
-        item.searchValue || `${item.label} ${item.subLabel || ""}`;
-      return haystack.toLowerCase().includes(normalized);
-    });
-  }, [items, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -70,7 +69,8 @@ export default function SearchablePopover({
 
   useEffect(() => {
     if (open) {
-      inputRef.current?.focus();
+      const input = containerRef.current?.querySelector("input");
+      input?.focus();
     }
   }, [open]);
 
@@ -111,27 +111,25 @@ export default function SearchablePopover({
 
       {open && (
         <div className="absolute left-0 top-full z-20 mt-2 w-64 rounded-lg border border-gray-200 bg-white shadow-lg">
-          <div className="border-b border-gray-100 p-2">
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={searchPlaceholder}
-              className="w-full rounded-md border border-gray-200 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-          <div
-            role="listbox"
-            className="max-h-64 overflow-auto py-1 text-xs"
+          <Command
+            className="rounded-lg border-none"
+            shouldFilter
+            loop
           >
-            {filteredItems.length === 0 ? (
-              <div className="px-3 py-2 text-gray-400">
-                {emptyText}
+            <CommandInput
+              value={query}
+              onValueChange={setQuery}
+              placeholder={searchPlaceholder}
+              className="text-xs"
+            />
+            <CommandList className="text-xs">
+              <CommandEmpty>
+                <div className="px-3 text-sm text-gray-400">{emptyText}</div>
                 {emptyAction && (
                   <button
                     type="button"
                     onClick={() => handleSelect(emptyAction)}
-                    className="mt-2 flex w-full flex-col items-start rounded-md px-2 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50"
+                    className="mt-2 flex w-full flex-col items-start rounded-md px-3 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50"
                   >
                     {emptyAction.label}
                     {emptyAction.subLabel && (
@@ -141,15 +139,17 @@ export default function SearchablePopover({
                     )}
                   </button>
                 )}
-              </div>
-            ) : (
-              <>
-                {filteredItems.map((item) => (
-                  <button
+              </CommandEmpty>
+              <CommandGroup>
+                {items.map((item) => (
+                  <CommandItem
                     key={item.value}
-                    type="button"
-                    onClick={() => handleSelect(item)}
-                    className={`flex w-full flex-col items-start px-3 py-2 text-left hover:bg-gray-50 ${
+                    value={item.label}
+                    keywords={[item.searchValue, item.subLabel].filter(
+                      (keyword): keyword is string => Boolean(keyword)
+                    )}
+                    onSelect={() => handleSelect(item)}
+                    className={`flex flex-col items-start text-left ${
                       item.value === value ? "bg-blue-50" : ""
                     }`}
                   >
@@ -161,16 +161,22 @@ export default function SearchablePopover({
                         {item.subLabel}
                       </span>
                     )}
-                  </button>
+                  </CommandItem>
                 ))}
-                {footerItems.length > 0 && (
-                  <div className="border-t border-gray-100">
+              </CommandGroup>
+              {footerItems.length > 0 && (
+                <>
+                  <CommandSeparator />
+                  <CommandGroup>
                     {footerItems.map((item) => (
-                      <button
+                      <CommandItem
                         key={item.value}
-                        type="button"
-                        onClick={() => handleSelect(item)}
-                        className="flex w-full flex-col items-start px-3 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50"
+                        value={item.label}
+                        keywords={[item.searchValue, item.subLabel].filter(
+                          (keyword): keyword is string => Boolean(keyword)
+                        )}
+                        onSelect={() => handleSelect(item)}
+                        className="flex flex-col items-start text-left text-blue-600"
                       >
                         {item.label}
                         {item.subLabel && (
@@ -178,13 +184,13 @@ export default function SearchablePopover({
                             {item.subLabel}
                           </span>
                         )}
-                      </button>
+                      </CommandItem>
                     ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+                  </CommandGroup>
+                </>
+              )}
+            </CommandList>
+          </Command>
         </div>
       )}
     </div>

@@ -4,7 +4,8 @@ import {
   inferBankPresetFromBankName,
   type BankPreset,
 } from "@/constants/banks";
-import { accountsService } from "@/services/database";
+import { accountsService, entitiesService } from "@/services/database";
+import type { EntityWithAccounts } from "@/types/database";
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
 import { transactionExtractorService } from "@/services/transactionExtractor";
 import {
@@ -13,7 +14,10 @@ import {
   type ColumnMapping,
   type CSVValidationResult,
 } from "@/utils/csvValidator";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import CreateAccountModal from "./CreateAccountModal";
+import CreateEntityModal from "./CreateEntityModal";
+import SearchablePopover from "./SearchablePopover";
 import ProgressStepper from "./upload-wizard/ProgressStepper";
 import Step1FileUpload from "./upload-wizard/Step1FileUpload";
 import Step2ColumnMapping from "./upload-wizard/Step2ColumnMapping";
@@ -21,24 +25,31 @@ import Step3BankSelection from "./upload-wizard/Step3BankSelection";
 import Step4Review from "./upload-wizard/Step4Review";
 
 interface UploadStatementModalWizardProps {
-  accountId: string;
+  caseId: string;
   onClose: () => void;
   onUploadComplete: () => void;
 }
 
 const STEPS = [
-  { id: 1, name: "File", description: "Select files" },
-  { id: 2, name: "Columns", description: "Map columns" },
-  { id: 3, name: "Bank", description: "Choose bank" },
-  { id: 4, name: "Review", description: "Review & submit" },
+  { id: 1, name: "Account", description: "Choose entity & account" },
+  { id: 2, name: "File", description: "Select files" },
+  { id: 3, name: "Columns", description: "Map columns" },
+  { id: 4, name: "Bank", description: "Choose bank" },
+  { id: 5, name: "Review", description: "Review & submit" },
 ];
 
 export default function UploadStatementModalWizard({
-  accountId,
+  caseId,
   onClose,
   onUploadComplete,
 }: UploadStatementModalWizardProps) {
   const [currentStep, setCurrentStep] = useState(1);
+  const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
+  const [accountEntityId, setAccountEntityId] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [isCreateEntityModalOpen, setIsCreateEntityModalOpen] = useState(false);
+  const [isCreateAccountModalOpen, setIsCreateAccountModalOpen] =
+    useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [statementPeriodFrom, setStatementPeriodFrom] = useState("");
   const [statementPeriodTo, setStatementPeriodTo] = useState("");
@@ -59,8 +70,52 @@ export default function UploadStatementModalWizard({
   const [mappingIndex, setMappingIndex] = useState(0);
   const [deletedRows, setDeletedRows] = useState<number[]>([]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [isLoadingEntities, setIsLoadingEntities] = useState(true);
+  const [refreshEntitiesTrigger, setRefreshEntitiesTrigger] = useState(0);
   const primaryFile = files[0] ?? null;
   const primaryMapping = fileMappings[0] ?? null;
+
+  useEffect(() => {
+    let isActive = true;
+    const fetchEntities = async () => {
+      setIsLoadingEntities(true);
+      try {
+        const caseEntities = await entitiesService.getByCaseId(caseId);
+        if (!isActive) return;
+        setEntities(caseEntities);
+        setAccountEntityId(
+          (prev) => prev || caseEntities[0]?.entity_id || ""
+        );
+      } catch (error) {
+        console.error("Error fetching entities:", error);
+      } finally {
+        if (isActive) {
+          setIsLoadingEntities(false);
+        }
+      }
+    };
+
+    fetchEntities();
+    return () => {
+      isActive = false;
+    };
+  }, [caseId, refreshEntitiesTrigger]);
+
+  useEffect(() => {
+    if (!accountEntityId) {
+      setAccountId("");
+      return;
+    }
+
+    const entity = entities.find((item) => item.entity_id === accountEntityId);
+    const matchingAccount = entity?.accounts?.find(
+      (account) => account.account_id === accountId
+    );
+    if (matchingAccount) return;
+
+    const firstAccount = entity?.accounts?.[0];
+    setAccountId(firstAccount?.account_id || "");
+  }, [accountEntityId, entities, accountId]);
 
   useEffect(() => {
     const fetchAccountAndInferBank = async () => {
@@ -84,6 +139,48 @@ export default function UploadStatementModalWizard({
 
     fetchAccountAndInferBank();
   }, [accountId]);
+
+  const CREATE_ENTITY_VALUE = "__create_entity__";
+  const CREATE_ACCOUNT_VALUE = "__create_account__";
+
+  const entityOptions = useMemo(
+    () =>
+      entities.map((entity) => ({
+        value: entity.entity_id,
+        label: entity.entity_name,
+        subLabel: `ID: ${entity.entity_id}`,
+        searchValue: `${entity.entity_name} ${entity.entity_id}`,
+      })),
+    [entities],
+  );
+
+  const accountOptions = useMemo(() => {
+    const selectedEntity = entities.find(
+      (entity) => entity.entity_id === accountEntityId,
+    );
+    return (
+      selectedEntity?.accounts?.map((account) => ({
+        value: account.account_id,
+        label: `${account.bank_name || "Bank"} (${account.account_number})`,
+        subLabel: `ID: ${account.account_id}`,
+        searchValue: `${account.bank_name || "Bank"} ${
+          account.account_number
+        } ${account.account_id}`,
+      })) || []
+    );
+  }, [entities, accountEntityId]);
+
+  const entityCreateOption = {
+    value: CREATE_ENTITY_VALUE,
+    label: "+ Add New Entity",
+    subLabel: "Create a new entity for this case",
+  };
+
+  const accountCreateOption = {
+    value: CREATE_ACCOUNT_VALUE,
+    label: "+ Add New Account",
+    subLabel: "Add a bank account for this entity",
+  };
 
   const handleFileSelect = async (selectedFiles: File[]) => {
     setFiles(selectedFiles);
@@ -150,7 +247,7 @@ export default function UploadStatementModalWizard({
     if (mappingIndex < files.length - 1) {
       setMappingIndex(mappingIndex + 1);
     } else {
-      setCurrentStep(3);
+      setCurrentStep(4);
     }
   };
 
@@ -159,6 +256,11 @@ export default function UploadStatementModalWizard({
   };
 
   const handleSubmit = async () => {
+    if (!accountId) {
+      setError("Please select an account to upload the statement to");
+      return;
+    }
+
     if (!files.length) {
       setError("Please select at least one file to upload");
       return;
@@ -232,17 +334,19 @@ export default function UploadStatementModalWizard({
   const canGoNext = () => {
     switch (currentStep) {
       case 1:
+        return !isLoadingEntities && !!accountEntityId && !!accountId;
+      case 2:
         return (
           files.length > 0 &&
           !isProcessingFile &&
           fileValidations.length === files.length &&
           fileValidations.every((validation) => validation !== null)
         );
-      case 2:
-        return fileMappings.every((mapping) => isColumnMappingValid(mapping));
       case 3:
-        return !!selectedBank;
+        return fileMappings.every((mapping) => isColumnMappingValid(mapping));
       case 4:
+        return !!selectedBank;
+      case 5:
         return true;
       default:
         return false;
@@ -250,7 +354,7 @@ export default function UploadStatementModalWizard({
   };
 
   const handleNext = async () => {
-    if (currentStep < 4) {
+    if (currentStep < 5) {
       // If we have a PDF file and moving from step 1, process it first
       setCurrentStep(currentStep + 1);
     }
@@ -258,7 +362,7 @@ export default function UploadStatementModalWizard({
 
   const handleBack = () => {
     if (currentStep > 1) {
-      if (currentStep === 3) {
+      if (currentStep === 4) {
         setMappingIndex(0);
       }
       setCurrentStep(currentStep - 1);
@@ -266,7 +370,7 @@ export default function UploadStatementModalWizard({
   };
 
   const handleEdit = (step: number) => {
-    if (step === 2) {
+    if (step === 3) {
       setMappingIndex(0);
     }
     setCurrentStep(step);
@@ -308,6 +412,75 @@ export default function UploadStatementModalWizard({
         {/* Step Content */}
         <div className="min-h-[400px]">
           {currentStep === 1 && (
+            <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-medium text-gray-500">
+                    Entity
+                  </span>
+                  <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                    <SearchablePopover
+                      value={accountEntityId}
+                      items={entityOptions}
+                      placeholder={
+                        isLoadingEntities ? "Loading entities..." : "Select entity"
+                      }
+                      searchPlaceholder="Search entities..."
+                      emptyText="No entities found."
+                      emptyAction={entityCreateOption}
+                      footerItems={[entityCreateOption]}
+                      disabled={isLoadingEntities}
+                      onChange={(value) => {
+                        if (value === CREATE_ENTITY_VALUE) {
+                          setIsCreateEntityModalOpen(true);
+                          return;
+                        }
+                        setAccountEntityId(value);
+                      }}
+                      buttonClassName="bg-transparent focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-medium text-gray-500">
+                    Account
+                  </span>
+                  <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                    <SearchablePopover
+                      value={accountId}
+                      items={accountOptions}
+                      placeholder="Select account"
+                      searchPlaceholder="Search accounts..."
+                      emptyText={
+                        accountEntityId
+                          ? "No accounts found."
+                          : "Select an entity first."
+                      }
+                      emptyAction={
+                        accountEntityId ? accountCreateOption : undefined
+                      }
+                      footerItems={accountEntityId ? [accountCreateOption] : []}
+                      disabled={!accountEntityId}
+                      onChange={(value) => {
+                        if (value === CREATE_ACCOUNT_VALUE) {
+                          setIsCreateAccountModalOpen(true);
+                          return;
+                        }
+                        setAccountId(value);
+                      }}
+                      buttonClassName="bg-transparent focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                Select the entity first, then choose the account you want to
+                upload statements for.
+              </p>
+            </div>
+          )}
+
+          {currentStep === 2 && (
             <Step1FileUpload
               files={files}
               onFileSelect={handleFileSelect}
@@ -316,7 +489,7 @@ export default function UploadStatementModalWizard({
             />
           )}
 
-          {currentStep === 2 && (
+          {currentStep === 3 && (
             <Step2ColumnMapping
               validationResult={fileValidations[mappingIndex] || null}
               columnMapping={fileMappings[mappingIndex] || null}
@@ -331,7 +504,7 @@ export default function UploadStatementModalWizard({
             />
           )}
 
-          {currentStep === 3 && (
+          {currentStep === 4 && (
             <Step3BankSelection
               file={primaryFile}
               columnMapping={primaryMapping}
@@ -341,7 +514,7 @@ export default function UploadStatementModalWizard({
             />
           )}
 
-          {currentStep === 4 && (
+          {currentStep === 5 && (
             <Step4Review
               files={files}
               fileMappings={fileMappings}
@@ -354,7 +527,7 @@ export default function UploadStatementModalWizard({
         </div>
 
         {/* Statement Period (Optional) - Shown on Review Step */}
-        {currentStep === 4 && (
+        {currentStep === 5 && (
           <div className="mt-6 grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
             <div>
               <label
@@ -450,7 +623,7 @@ export default function UploadStatementModalWizard({
               Cancel
             </button>
 
-            {currentStep < 4 ? (
+            {currentStep < 5 ? (
               <button
                 type="button"
                 onClick={handleNext}
@@ -497,6 +670,28 @@ export default function UploadStatementModalWizard({
           </div>
         </div>
       </div>
+
+      {isCreateEntityModalOpen && (
+        <CreateEntityModal
+          caseId={caseId}
+          onClose={() => setIsCreateEntityModalOpen(false)}
+          onEntityCreated={() => {
+            setIsCreateEntityModalOpen(false);
+            setRefreshEntitiesTrigger((prev) => prev + 1);
+          }}
+        />
+      )}
+
+      {isCreateAccountModalOpen && accountEntityId && (
+        <CreateAccountModal
+          entityId={accountEntityId}
+          onClose={() => setIsCreateAccountModalOpen(false)}
+          onAccountCreated={() => {
+            setIsCreateAccountModalOpen(false);
+            setRefreshEntitiesTrigger((prev) => prev + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

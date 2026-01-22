@@ -70,7 +70,7 @@ export default function Step4Review({
             {onEdit && (
               <button
                 type="button"
-                onClick={() => onEdit(1)}
+                onClick={() => onEdit(2)}
                 className="text-xs text-blue-600 hover:text-blue-800"
               >
                 Edit
@@ -123,7 +123,7 @@ export default function Step4Review({
             {onEdit && (
               <button
                 type="button"
-                onClick={() => onEdit(2)}
+                onClick={() => onEdit(3)}
                 className="text-xs text-blue-600 hover:text-blue-800"
               >
                 Edit
@@ -166,7 +166,7 @@ export default function Step4Review({
             {onEdit && (
               <button
                 type="button"
-                onClick={() => onEdit(3)}
+                onClick={() => onEdit(4)}
                 className="text-xs text-blue-600 hover:text-blue-800"
               >
                 Edit

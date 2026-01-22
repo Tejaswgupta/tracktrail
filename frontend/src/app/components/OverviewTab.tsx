@@ -9,6 +9,13 @@ import type { EntityWithAccounts, Transaction } from "@/types/database";
 import { useEffect, useMemo, useState } from "react";
 // Import Recharts components
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -22,12 +29,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import CreateAccountModal from "./CreateAccountModal";
-import CreateEntityModal from "./CreateEntityModal";
 import DetailedOverviewTab from "./DetailedOverviewTab";
 import EditableCounterpartyName from "./EditableCounterpartyName";
 import EditableTransactionType from "./EditableTransactionType";
-import SearchablePopover from "./SearchablePopover";
 import UploadStatementModalWizard from "./UploadStatementModalWizard";
 
 interface CounterpartyStats {
@@ -85,7 +89,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   const [sortBy, setSortBy] =
     useState<NumericCounterpartyStatsKeys>("totalVolume");
   const [showTopN, setShowTopN] = useState(10);
-  const [chartType, setChartType] = useState<ChartType>("bar");
+
   const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<
@@ -95,62 +99,17 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     TransactionTypeStats[]
   >([]);
   const [transactionTypesLoading, setTransactionTypesLoading] = useState(false);
-  const [selectedCounterparty, setSelectedCounterparty] = useState<string | null>(
-    null
-  );
+  const [selectedCounterparty, setSelectedCounterparty] = useState<
+    string | null
+  >(null);
   const [loadingProgress, setLoadingProgress] = useState<{
     current: number;
     total: number;
   } | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isCreateEntityModalOpen, setIsCreateEntityModalOpen] = useState(false);
-  const [isCreateAccountModalOpen, setIsCreateAccountModalOpen] =
-    useState(false);
-  const [accountEntityId, setAccountEntityId] = useState<string>("");
-  const [accountId, setAccountId] = useState<string>("");
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const TRANSACTIONS_PER_PAGE = 1000;
-  const CREATE_ENTITY_VALUE = "__create_entity__";
-  const CREATE_ACCOUNT_VALUE = "__create_account__";
-
-  const entityOptions = useMemo(
-    () =>
-      entities.map((entity) => ({
-        value: entity.entity_id,
-        label: entity.entity_name,
-        subLabel: `ID: ${entity.entity_id}`,
-        searchValue: `${entity.entity_name} ${entity.entity_id}`,
-      })),
-    [entities]
-  );
-
-  const entityCreateOption = {
-    value: CREATE_ENTITY_VALUE,
-    label: "+ Add New Entity",
-    subLabel: "Create a new entity for this case",
-  };
-
-  const accountOptions = useMemo(() => {
-    const selectedEntity = entities.find(
-      (entity) => entity.entity_id === accountEntityId
-    );
-    return (
-      selectedEntity?.accounts?.map((account) => ({
-        value: account.account_id,
-        label: `${account.bank_name || "Bank"} (${account.account_number})`,
-        subLabel: `ID: ${account.account_id}`,
-        searchValue: `${account.bank_name || "Bank"} ${
-          account.account_number
-        } ${account.account_id}`,
-      })) || []
-    );
-  }, [entities, accountEntityId]);
-
-  const accountCreateOption = {
-    value: CREATE_ACCOUNT_VALUE,
-    label: "+ Add New Account",
-    subLabel: "Add a bank account for this entity",
-  };
+  const ALL_ENTITIES_VALUE = "__all_entities__";
 
   useEffect(() => {
     const fetchData = async () => {
@@ -158,9 +117,10 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         const caseEntities = await entitiesService.getByCaseId(caseId);
         console.log(caseEntities);
         setEntities(caseEntities);
-        setAccountEntityId((prev) => prev || caseEntities[0]?.entity_id || "");
         // Set default selected entity to the first entity if not already set
-        setSelectedEntityId((prev) => prev || caseEntities[0]?.entity_id || null);
+        setSelectedEntityId(
+          (prev) => prev || caseEntities[0]?.entity_id || null,
+        );
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {
@@ -170,27 +130,6 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
     fetchData();
   }, [caseId, refreshTrigger]);
-
-  useEffect(() => {
-    if (!accountEntityId) {
-      setAccountId("");
-      return;
-    }
-
-    const entity = entities.find((item) => item.entity_id === accountEntityId);
-    const firstAccount = entity?.accounts?.[0];
-    setAccountId(firstAccount?.account_id || "");
-  }, [accountEntityId, entities]);
-
-  const handleEntityCreated = () => {
-    setRefreshTrigger((prev) => prev + 1);
-    setIsCreateEntityModalOpen(false);
-  };
-
-  const handleAccountCreated = () => {
-    setRefreshTrigger((prev) => prev + 1);
-    setIsCreateAccountModalOpen(false);
-  };
 
   // Fetch transactions with pagination
   useEffect(() => {
@@ -273,9 +212,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
         if (selectedEntityId) {
           // For specific entity, calculate stats client-side from transactions
-          const entityTransactions = await transactionsService.getByEntityId(
-            selectedEntityId
-          );
+          const entityTransactions =
+            await transactionsService.getByEntityId(selectedEntityId);
 
           // Group transactions by counterparty
           const counterpartyMap = new Map<
@@ -331,7 +269,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
           // Transform to our CounterpartyStats format
           const transformedStats: CounterpartyStats[] = Array.from(
-            counterpartyMap.entries()
+            counterpartyMap.entries(),
           ).map(([name, data]) => {
             const daysActive =
               data.firstDate && data.lastDate
@@ -339,8 +277,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                     1,
                     Math.ceil(
                       (data.lastDate.getTime() - data.firstDate.getTime()) /
-                        (1000 * 60 * 60 * 24)
-                    ) + 1
+                        (1000 * 60 * 60 * 24),
+                    ) + 1,
                   )
                 : 1;
 
@@ -375,11 +313,11 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           try {
             stats =
               await counterpartyService.getCaseCounterpartyStatsWithDetails(
-                caseId
+                caseId,
               );
           } catch (error) {
             console.warn(
-              "Detailed counterparty stats not available, using basic stats"
+              "Detailed counterparty stats not available, using basic stats",
             );
             const basicStats =
               await counterpartyService.getCaseCounterpartyStats(caseId);
@@ -406,8 +344,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
               Math.ceil(
                 (new Date(stat.last_seen).getTime() -
                   new Date(stat.first_seen).getTime()) /
-                  (1000 * 60 * 60 * 24)
-              ) + 1
+                  (1000 * 60 * 60 * 24),
+              ) + 1,
             );
 
             return {
@@ -451,7 +389,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           // Fetch transactions for the entire case
           data = await transactionsService.getCaseTransactionsForAnalysis(
             caseId,
-            ["transaction_id", "amount", "direction", "description"]
+            ["transaction_id", "amount", "direction", "description"],
           );
         }
 
@@ -506,7 +444,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
         // Transform to TransactionTypeStats format
         const typeStats: TransactionTypeStats[] = Array.from(
-          typeMap.entries()
+          typeMap.entries(),
         ).map(([type, data]) => ({
           type,
           count: data.transactions.length,
@@ -605,7 +543,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   // Extract transaction type from description
   const extractTransactionType = (
     description: string,
-    remarks?: string
+    remarks?: string,
   ): string => {
     if (!description && !remarks) return "OTHER";
 
@@ -671,7 +609,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
       // we'll use a proportional split based on typical patterns
       const totalTransactions = transactionTypeStats.reduce(
         (sum, type) => sum + type.count,
-        0
+        0,
       );
       const estimatedCashTransactions = Math.floor(totalTransactions * 0.15); // 15% estimate for cash
       const estimatedBankTransactions =
@@ -679,11 +617,11 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
       const totalDebits = transactionTypeStats.reduce(
         (sum, type) => sum + type.totalDebits,
-        0
+        0,
       );
       const totalCredits = transactionTypeStats.reduce(
         (sum, type) => sum + type.totalCredits,
-        0
+        0,
       );
 
       const cashRatio = estimatedCashTransactions / totalTransactions;
@@ -707,10 +645,10 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
     // For other tabs, use transactions data
     const cashTransactions = transactions.filter(
-      (t) => categorizeTransaction(t.description || "") === "cash"
+      (t) => categorizeTransaction(t.description || "") === "cash",
     );
     const bankTransactions = transactions.filter(
-      (t) => categorizeTransaction(t.description || "") === "bank"
+      (t) => categorizeTransaction(t.description || "") === "bank",
     );
 
     return {
@@ -718,30 +656,30 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         count: cashTransactions.length,
         debits: cashTransactions.reduce(
           (sum, t) => (t.direction === "DR" ? sum + t.amount : sum),
-          0
+          0,
         ),
         credits: cashTransactions.reduce(
           (sum, t) => (t.direction === "CR" ? sum + t.amount : sum),
-          0
+          0,
         ),
         netFlow: cashTransactions.reduce(
           (sum, t) => (t.direction === "CR" ? sum + t.amount : sum - t.amount),
-          0
+          0,
         ),
       },
       bank: {
         count: bankTransactions.length,
         debits: bankTransactions.reduce(
           (sum, t) => (t.direction === "DR" ? sum + t.amount : sum),
-          0
+          0,
         ),
         credits: bankTransactions.reduce(
           (sum, t) => (t.direction === "CR" ? sum + t.amount : sum),
-          0
+          0,
         ),
         netFlow: bankTransactions.reduce(
           (sum, t) => (t.direction === "CR" ? sum + t.amount : sum - t.amount),
-          0
+          0,
         ),
       },
     };
@@ -785,10 +723,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     entities.forEach((entity) => {
       entity.accounts?.forEach((account) => {
         const bankName = account.bank_name || "Bank";
-        map.set(
-          account.account_id,
-          `${bankName} (${account.account_number})`
-        );
+        map.set(account.account_id, `${bankName} (${account.account_number})`);
       });
     });
     return map;
@@ -799,11 +734,10 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
     return [...transactions]
       .filter(
-        (tx) => getTransactionCounterpartyLabel(tx) === selectedCounterparty
+        (tx) => getTransactionCounterpartyLabel(tx) === selectedCounterparty,
       )
       .sort(
-        (a, b) =>
-          new Date(b.tx_date).getTime() - new Date(a.tx_date).getTime()
+        (a, b) => new Date(b.tx_date).getTime() - new Date(a.tx_date).getTime(),
       );
   }, [transactions, selectedCounterparty]);
 
@@ -811,7 +745,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     if (!selectedCounterparty) return;
 
     const stillExists = sortedCounterparties.some(
-      (cp) => cp.name === selectedCounterparty
+      (cp) => cp.name === selectedCounterparty,
     );
     if (!stillExists) {
       setSelectedCounterparty(null);
@@ -821,7 +755,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   // Function to handle saving updated transaction type names
   const handleSaveTransactionType = async (
     oldType: string,
-    newType: string
+    newType: string,
   ) => {
     try {
       // Update all transactions with the old type to the new type
@@ -832,7 +766,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
       setTransactionTypeStats((prevStats) => {
         // Check if there's already a type with the new name
         const existingIndex = prevStats.findIndex(
-          (type) => type.type === newType
+          (type) => type.type === newType,
         );
         const oldIndex = prevStats.findIndex((type) => type.type === oldType);
 
@@ -868,13 +802,13 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         } else {
           // Normal case: just update the name
           return prevStats.map((type) =>
-            type.type === oldType ? { ...type, type: newType } : type
+            type.type === oldType ? { ...type, type: newType } : type,
           );
         }
       });
 
       console.log(
-        `Successfully renamed transaction type from "${oldType}" to "${newType}"`
+        `Successfully renamed transaction type from "${oldType}" to "${newType}"`,
       );
     } catch (error) {
       console.error("Error updating transaction type:", error);
@@ -886,14 +820,14 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
   // Function to handle saving updated counterparty names
   const handleSaveCounterpartyName = async (
     oldName: string,
-    newName: string
+    newName: string,
   ) => {
     try {
       // Update all transactions with the old counterparty name to the new name
       const result = await transactionsService.updateTransactionCounterparty(
         caseId,
         oldName,
-        newName
+        newName,
       );
 
       // Update the local state to reflect the changes
@@ -926,7 +860,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
               (existingCp.transactionCount + oldCp.transactionCount),
             maxTransactionSize: Math.max(
               existingCp.maxTransactionSize,
-              oldCp.maxTransactionSize
+              oldCp.maxTransactionSize,
             ),
             firstTransactionDate:
               existingCp.firstTransactionDate < oldCp.firstTransactionDate
@@ -949,13 +883,13 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         } else {
           // Normal case: just update the name
           return prevStats.map((cp) =>
-            cp.name === oldName ? { ...cp, name: newName } : cp
+            cp.name === oldName ? { ...cp, name: newName } : cp,
           );
         }
       });
 
       console.log(
-        `Successfully renamed counterparty from "${oldName}" to "${newName}", ${result.affectedCount} transactions updated`
+        `Successfully renamed counterparty from "${oldName}" to "${newName}", ${result.affectedCount} transactions updated`,
       );
     } catch (error) {
       console.error("Error updating counterparty name:", error);
@@ -966,25 +900,16 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 space-y-4">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        {loadingProgress && (
-          <div className="text-center space-y-2">
-            <div className="w-64 bg-gray-200 rounded-full h-2.5">
-              <div
-                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                style={{
-                  width: `${
-                    (loadingProgress.current / loadingProgress.total) * 100
-                  }%`,
-                }}
-              ></div>
-            </div>
-            <p className="text-sm text-gray-600">
-              Loading transactions: {loadingProgress.current.toLocaleString()} /{" "}
-              {loadingProgress.total.toLocaleString()}
-            </p>
-          </div>
+      <div className="flex flex-col items-center justify-center py-20">
+        {loadingProgress ? (
+          <p className="mt-4 text-sm text-gray-600">
+            Loading transactions... ({loadingProgress.current}/
+            {loadingProgress.total})
+          </p>
+        ) : (
+          <p className="mt-4 text-sm text-gray-600">
+            Loading data, please wait...
+          </p>
         )}
       </div>
     );
@@ -1002,57 +927,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <div className="flex min-w-[180px] flex-col gap-1">
-            <span className="text-[11px] font-medium text-gray-500">Entity</span>
-            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
-              <SearchablePopover
-                value={accountEntityId}
-                items={entityOptions}
-                placeholder="Select entity"
-                searchPlaceholder="Search entities..."
-                emptyText="No entities found."
-                emptyAction={entityCreateOption}
-                footerItems={[entityCreateOption]}
-                onChange={(value) => {
-                  if (value === CREATE_ENTITY_VALUE) {
-                    setIsCreateEntityModalOpen(true);
-                    return;
-                  }
-                  setAccountEntityId(value);
-                }}
-                buttonClassName="bg-transparent focus:outline-none"
-              />
-            </div>
-          </div>
-          <div className="flex min-w-[200px] flex-col gap-1">
-            <span className="text-[11px] font-medium text-gray-500">Account</span>
-            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
-              <SearchablePopover
-                value={accountId}
-                items={accountOptions}
-                placeholder="Select account"
-                searchPlaceholder="Search accounts..."
-                emptyText={
-                  accountEntityId ? "No accounts found." : "Select an entity first."
-                }
-                emptyAction={accountEntityId ? accountCreateOption : undefined}
-                footerItems={accountEntityId ? [accountCreateOption] : []}
-                disabled={!accountEntityId}
-                onChange={(value) => {
-                  if (value === CREATE_ACCOUNT_VALUE) {
-                    setIsCreateAccountModalOpen(true);
-                    return;
-                  }
-                  setAccountId(value);
-                }}
-                buttonClassName="bg-transparent focus:outline-none"
-              />
-            </div>
-          </div>
           <button
             onClick={() => setIsUploadModalOpen(true)}
-            disabled={!accountId}
-            className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
           >
             Upload Statement
           </button>
@@ -1115,20 +992,31 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
               <div className="flex flex-wrap gap-4">
                 {/* Entity Filter */}
                 <div className="flex items-center space-x-2">
-                  <select
-                    value={selectedEntityId || ""}
-                    onChange={(e) =>
-                      setSelectedEntityId(e.target.value || null)
+                  <Select
+                    value={selectedEntityId ?? ALL_ENTITIES_VALUE}
+                    onValueChange={(value) =>
+                      setSelectedEntityId(
+                        value === ALL_ENTITIES_VALUE ? null : value,
+                      )
                     }
-                    className="border border-gray-300 rounded-md px-3 py-2 text-sm"
                   >
-                    <option value="">All Entities</option>
-                    {entities.map((entity) => (
-                      <option key={entity.entity_id} value={entity.entity_id}>
-                        {entity.entity_name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="All Entities" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_ENTITIES_VALUE}>
+                        All Entities
+                      </SelectItem>
+                      {entities.map((entity) => (
+                        <SelectItem
+                          key={entity.entity_id}
+                          value={entity.entity_id}
+                        >
+                          {entity.entity_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {selectedEntityId && (
                     <button
                       onClick={() => setSelectedEntityId(null)}
@@ -1139,169 +1027,43 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                   )}
                 </div>
 
-                <select
+                <Select
                   value={sortBy}
-                  onChange={(e) =>
-                    setSortBy(e.target.value as NumericCounterpartyStatsKeys)
+                  onValueChange={(value) =>
+                    setSortBy(value as NumericCounterpartyStatsKeys)
                   }
-                  className="border border-gray-300 rounded-md px-3 py-2 text-sm"
                 >
-                  <option value="totalVolume">Total Volume</option>
-                  <option value="transactionCount">Transaction Count</option>
-                  <option value="netFlow">Net Flow</option>
-                  <option value="frequency">Frequency</option>
-                </select>
-                <select
-                  value={showTopN}
-                  onChange={(e) => setShowTopN(Number(e.target.value))}
-                  className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="totalVolume">Total Volume</SelectItem>
+                    <SelectItem value="transactionCount">
+                      Transaction Count
+                    </SelectItem>
+                    <SelectItem value="netFlow">Net Flow</SelectItem>
+                    <SelectItem value="frequency">Frequency</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={String(showTopN)}
+                  onValueChange={(value) => setShowTopN(Number(value))}
                 >
-                  <option value={5}>Top 5</option>
-                  <option value={10}>Top 10</option>
-                  <option value={20}>Top 20</option>
-                  <option value={50}>Top 50</option>
-                </select>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Top N" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">Top 5</SelectItem>
+                    <SelectItem value="10">Top 10</SelectItem>
+                    <SelectItem value="20">Top 20</SelectItem>
+                    <SelectItem value="50">Top 50</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
             {sortedCounterparties.length > 0 ? (
               <>
-                {/* Chart Type Selector */}
-                <div className="mb-6">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700">
-                      Chart Type:
-                    </span>
-                    <select
-                      value={chartType}
-                      onChange={(e) =>
-                        setChartType(e.target.value as ChartType)
-                      }
-                      className="border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    >
-                      <option value="bar">Bar Chart</option>
-                      <option value="pie">Pie Chart (Distribution)</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Bar Chart */}
-                {chartType === "bar" && (
-                  <div className="mb-10 h-100">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={sortedCounterparties}
-                      margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="name"
-                        angle={-45}
-                        textAnchor="end"
-                        height={60}
-                        tick={{ fontSize: 12 }}
-                      />
-                      <YAxis
-                        domain={[
-                          0,
-                          Math.max(
-                            ...sortedCounterparties.map((c) => c[sortBy])
-                          ) * 1.1,
-                        ]}
-                      />
-                      <Tooltip
-                        formatter={(value) => [
-                          sortBy === "totalVolume" ||
-                          sortBy === "netFlow" ||
-                          sortBy === "avgTransactionSize" ||
-                          sortBy === "maxTransactionSize"
-                            ? formatCurrency(Number(value))
-                            : sortBy === "frequency"
-                            ? `${Number(value).toFixed(2)}/day`
-                            : Number(value).toLocaleString(),
-                          sortBy,
-                        ]}
-                        labelFormatter={(value) => `${value}`}
-                      />
-                      {/* <Legend /> */}
-                      <Bar
-                        dataKey={sortBy}
-                        name={
-                          sortBy === "totalVolume"
-                            ? "Total Volume"
-                            : sortBy === "transactionCount"
-                            ? "Transaction Count"
-                            : sortBy === "netFlow"
-                            ? "Net Flow"
-                            : sortBy === "frequency"
-                            ? "Frequency (per day)"
-                            : sortBy
-                        }
-                      >
-                        {sortedCounterparties.map((entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={
-                              sortBy === "netFlow"
-                                ? entry[sortBy] >= 0
-                                  ? "#10B981"
-                                  : "#EF4444"
-                                : "#3B82F6"
-                            }
-                          />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                )}
-
-                {/* Pie Chart */}
-                {chartType === "pie" && (
-                  <div className="mb-10 h-100">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={sortedCounterparties.map((entry) => ({
-                            name: entry.name,
-                            value: Number(entry[sortBy]),
-                          }))}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={90}
-                          labelLine={false}
-                          label={({ name, percent }) =>
-                            `${name} ${((percent as number) * 100).toFixed(0)}%`
-                          }
-                        >
-                          {sortedCounterparties.map((_, index) => (
-                            <PieCell
-                              key={`cell-${index}`}
-                              fill={getCounterpartyColor(index)}
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value) => [
-                            sortBy === "totalVolume" ||
-                            sortBy === "netFlow" ||
-                            sortBy === "avgTransactionSize" ||
-                            sortBy === "maxTransactionSize"
-                              ? formatCurrency(Number(value))
-                              : sortBy === "frequency"
-                              ? `${Number(value).toFixed(2)}/day`
-                              : Number(value).toLocaleString(),
-                            sortBy,
-                          ]}
-                        />
-                        <RechartsLegend />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-
                 {/* Detailed Stats Table */}
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1362,7 +1124,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                               type="button"
                               onClick={() =>
                                 setSelectedCounterparty((current) =>
-                                  current === cp.name ? null : cp.name
+                                  current === cp.name ? null : cp.name,
                                 )
                               }
                               className="font-medium text-blue-600 hover:text-blue-800"
@@ -1462,8 +1224,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                           <tbody className="divide-y divide-gray-200 bg-white">
                             {selectedCounterpartyTransactions.map((tx) => {
                               const entityName =
-                                entityNameMap.get(tx.entity_id) ||
-                                tx.entity_id;
+                                entityNameMap.get(tx.entity_id) || tx.entity_id;
                               const accountLabel =
                                 accountLabelMap.get(tx.account_id) ||
                                 tx.account_id;
@@ -1497,9 +1258,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                                         : "text-red-600"
                                     }`}
                                   >
-                                    {tx.direction === "CR"
-                                      ? "Credit"
-                                      : "Debit"}
+                                    {tx.direction === "CR" ? "Credit" : "Debit"}
                                   </td>
                                 </tr>
                               );
@@ -1539,18 +1298,31 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                 )}
               </div>
               <div className="flex items-center space-x-2">
-                <select
-                  value={selectedEntityId || ""}
-                  onChange={(e) => setSelectedEntityId(e.target.value || null)}
-                  className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+                <Select
+                  value={selectedEntityId ?? ALL_ENTITIES_VALUE}
+                  onValueChange={(value) =>
+                    setSelectedEntityId(
+                      value === ALL_ENTITIES_VALUE ? null : value,
+                    )
+                  }
                 >
-                  <option value="">All Entities</option>
-                  {entities.map((entity) => (
-                    <option key={entity.entity_id} value={entity.entity_id}>
-                      {entity.entity_name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="All Entities" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_ENTITIES_VALUE}>
+                      All Entities
+                    </SelectItem>
+                    {entities.map((entity) => (
+                      <SelectItem
+                        key={entity.entity_id}
+                        value={entity.entity_id}
+                      >
+                        {entity.entity_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {selectedEntityId && (
                   <button
                     onClick={() => setSelectedEntityId(null)}
@@ -1628,8 +1400,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                         {formatCurrency(
                           transactionTypeStats.reduce(
                             (sum, type) => sum + type.totalAmount,
-                            0
-                          )
+                            0,
+                          ),
                         )}
                       </p>
                     </div>
@@ -1817,7 +1589,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                                 onSave={(newType) =>
                                   handleSaveTransactionType(
                                     typeStat.type,
-                                    newType
+                                    newType,
                                   )
                                 }
                                 predefinedTypes={PREDEFINED_TRANSACTION_TYPES}
@@ -1873,25 +1645,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
       ) : (
         <DetailedOverviewTab caseId={caseId} />
       )}
-      {isCreateEntityModalOpen && (
-        <CreateEntityModal
-          caseId={caseId}
-          onClose={() => setIsCreateEntityModalOpen(false)}
-          onEntityCreated={handleEntityCreated}
-        />
-      )}
-
-      {isCreateAccountModalOpen && accountEntityId && (
-        <CreateAccountModal
-          entityId={accountEntityId}
-          onClose={() => setIsCreateAccountModalOpen(false)}
-          onAccountCreated={handleAccountCreated}
-        />
-      )}
-
-      {isUploadModalOpen && accountId && (
+      {isUploadModalOpen && (
         <UploadStatementModalWizard
-          accountId={accountId}
+          caseId={caseId}
           onClose={() => setIsUploadModalOpen(false)}
           onUploadComplete={() => {
             setIsUploadModalOpen(false);
