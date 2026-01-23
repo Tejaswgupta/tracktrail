@@ -23,11 +23,7 @@ import {
   entitiesService,
   transactionsService,
 } from "@/services/database";
-import type {
-  CaseTransaction,
-  EntityWithAccounts,
-  Transaction,
-} from "@/types/database";
+import type { EntityWithAccounts, Transaction } from "@/types/database";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AppHeader from "../../components/AppHeader";
@@ -101,19 +97,33 @@ export default function CaseDetailPage() {
   const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [transactionsLoading, setTransactionsLoading] = useState(true);
-  const [transactionsProgress, setTransactionsProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
-  const [flagsByTxId, setFlagsByTxId] = useState<
-    Record<string, CaseTransaction | null>
-  >({});
+  const [transactionsTotalCount, setTransactionsTotalCount] = useState(0);
+  const [transactionsTotalAmount, setTransactionsTotalAmount] = useState(0);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize] = useState(25);
+  const [flaggedTransactionIds, setFlaggedTransactionIds] = useState<
+    string[] | null
+  >(null);
   const [filters, setFilters] = useState<CaseFilter[]>([]);
   const [openMultiSelectId, setOpenMultiSelectId] = useState<string | null>(
     null
   );
   const normalizedQuery = searchQuery.trim();
   const normalizedQueryLower = normalizedQuery.toLowerCase();
+  const activeFilters = useMemo(
+    () =>
+      filters.filter((filter) => {
+        const values = getFilterValues(filter);
+        if (values.length === 0) return false;
+        if (filter.operator === "between" && !filter.valueTo) return false;
+        return true;
+      }),
+    [filters]
+  );
+  const shouldUseServerSearch =
+    normalizedQuery.length > 0 ||
+    activeFilters.length > 0 ||
+    activeView !== "all";
   const entityMap = useMemo(() => {
     const map = new Map<string, EntityWithAccounts>();
     entities.forEach((entity) => map.set(entity.entity_id, entity));
@@ -216,270 +226,301 @@ export default function CaseDetailPage() {
   ]);
 
   useEffect(() => {
+    setPageIndex(0);
+  }, [caseId, normalizedQuery, activeView, filters]);
+
+  useEffect(() => {
     let isCancelled = false;
-    const TRANSACTIONS_PER_PAGE = 1000;
+
+    const loadFlaggedTransactions = async () => {
+      if (activeView !== "needs-review") {
+        setFlaggedTransactionIds(null);
+        return;
+      }
+      try {
+        const ids = await caseTransactionsService.getFlaggedTransactionIds(
+          caseId,
+          "Under Review"
+        );
+        if (!isCancelled) {
+          setFlaggedTransactionIds(ids);
+        }
+      } catch (error) {
+        console.error("Error fetching flagged transactions:", error);
+        if (!isCancelled) {
+          setFlaggedTransactionIds([]);
+        }
+      }
+    };
+
+    loadFlaggedTransactions();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [caseId, activeView]);
+
+  const buildServerFilters = useCallback(() => {
+    const entityFilters = activeFilters.filter(
+      (filter) => filter.field === "entity"
+    );
+    const accountFilters = activeFilters.filter(
+      (filter) => filter.field === "account"
+    );
+    const statusFilters = activeFilters.filter(
+      (filter) => filter.field === "status"
+    );
+    const directionFilters = activeFilters.filter(
+      (filter) => filter.field === "direction"
+    );
+    const descriptionFilter = activeFilters.find(
+      (filter) => filter.field === "description"
+    );
+    const counterpartyFilter = activeFilters.find(
+      (filter) => filter.field === "counterparty"
+    );
+    const dateFilter = activeFilters.find((filter) => filter.field === "date");
+    const amountFilter = activeFilters.find(
+      (filter) => filter.field === "amount"
+    );
+
+    const entityIds =
+      entityFilters.length > 0
+        ? entities
+            .filter((entity) =>
+              entityFilters.every((filter) => {
+                const values = getFilterValues(filter).map((value) =>
+                  value.toLowerCase()
+                );
+                if (values.length === 0) return true;
+                const name = entity.entity_name.toLowerCase();
+                if (filter.operator === "is") {
+                  return values.some((value) => name === value);
+                }
+                return values.some((value) => name.includes(value));
+              })
+            )
+            .map((entity) => entity.entity_id)
+        : undefined;
+
+    const accountEntries = Array.from(accountMap.entries());
+    const accountIds =
+      accountFilters.length > 0
+        ? accountEntries
+            .filter(([_, account]) =>
+              accountFilters.every((filter) => {
+                const values = getFilterValues(filter).map((value) =>
+                  value.toLowerCase()
+                );
+                if (values.length === 0) return true;
+                const label = account.accountLabel.toLowerCase();
+                if (filter.operator === "is") {
+                  return values.some((value) => label === value);
+                }
+                return values.some((value) => label.includes(value));
+              })
+            )
+            .map(([accountId]) => accountId)
+        : undefined;
+
+    const statusValues = statusFilters.flatMap((filter) =>
+      getFilterValues(filter)
+    );
+    const statusSet = new Set(statusValues);
+    let status: "Failed" | "Success" | undefined;
+    if (statusSet.size === 1) {
+      const [value] = Array.from(statusSet);
+      if (value === "Failed" || value === "Success") {
+        status = value;
+      }
+    }
+    if (activeView === "failed") {
+      status = "Failed";
+    }
+
+    const directionValues = directionFilters.flatMap((filter) =>
+      getFilterValues(filter)
+    );
+    const directionSet = new Set(directionValues);
+    let direction: "DR" | "CR" | undefined;
+    if (directionSet.size === 1) {
+      const [value] = Array.from(directionSet);
+      if (value === "DR" || value === "CR") {
+        direction = value;
+      }
+    }
+
+    const descriptionValues = descriptionFilter
+      ? getFilterValues(descriptionFilter)
+      : [];
+    const counterpartyValues = counterpartyFilter
+      ? getFilterValues(counterpartyFilter)
+      : [];
+
+    const dateValues = dateFilter ? getFilterValues(dateFilter) : [];
+    let dateFrom: string | undefined;
+    let dateTo: string | undefined;
+    if (dateFilter && dateValues[0]) {
+      if (dateFilter.operator === "before") {
+        dateTo = dateValues[0];
+      } else if (dateFilter.operator === "after") {
+        dateFrom = dateValues[0];
+      } else if (dateFilter.operator === "between") {
+        dateFrom = dateValues[0];
+        dateTo = dateFilter.valueTo || dateValues[0];
+      }
+    }
+
+    const amountValues = amountFilter ? getFilterValues(amountFilter) : [];
+    let minAmount: number | undefined;
+    let maxAmount: number | undefined;
+    if (amountFilter && amountValues[0]) {
+      const value = Number(amountValues[0]);
+      const valueTo = amountFilter.valueTo ? Number(amountFilter.valueTo) : value;
+      if (!Number.isNaN(value)) {
+        if (amountFilter.operator === "greater") {
+          minAmount = value;
+        } else if (amountFilter.operator === "less") {
+          maxAmount = value;
+        } else if (amountFilter.operator === "between") {
+          minAmount = value;
+          maxAmount = valueTo;
+        }
+      }
+    }
+
+    const searchEntityIds =
+      normalizedQueryLower.length > 0
+        ? entities
+            .filter((entity) =>
+              entity.entity_name.toLowerCase().includes(normalizedQueryLower)
+            )
+            .map((entity) => entity.entity_id)
+        : [];
+    const searchAccountIds =
+      normalizedQueryLower.length > 0
+        ? accountEntries
+            .filter(([_, account]) =>
+              account.accountLabel
+                .toLowerCase()
+                .includes(normalizedQueryLower)
+            )
+            .map(([accountId]) => accountId)
+        : [];
+
+    return {
+      query: normalizedQuery || undefined,
+      searchEntityIds: searchEntityIds.length > 0 ? searchEntityIds : undefined,
+      searchAccountIds:
+        searchAccountIds.length > 0 ? searchAccountIds : undefined,
+      entityIds,
+      accountIds,
+      transactionIds:
+        activeView === "needs-review"
+          ? flaggedTransactionIds || []
+          : undefined,
+      dateFrom,
+      dateTo,
+      minAmount,
+      maxAmount,
+      direction,
+      status,
+      description: descriptionValues.length > 0 ? descriptionValues[0] : undefined,
+      counterparty: counterpartyValues.length > 0 ? counterpartyValues[0] : undefined,
+    };
+  }, [
+    activeFilters,
+    accountMap,
+    activeView,
+    entities,
+    flaggedTransactionIds,
+    normalizedQuery,
+    normalizedQueryLower,
+  ]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadSummary = async () => {
+      if (activeView === "needs-review" && flaggedTransactionIds === null) {
+        return;
+      }
+      const serverFilters = shouldUseServerSearch ? buildServerFilters() : {};
+      if (
+        activeView === "needs-review" &&
+        flaggedTransactionIds &&
+        flaggedTransactionIds.length === 0
+      ) {
+        if (!isCancelled) {
+          setTransactionsTotalCount(0);
+          setTransactionsTotalAmount(0);
+        }
+        return;
+      }
+      try {
+        const summary = await transactionsService.getCaseTransactionsSummary(
+          caseId,
+          serverFilters || {}
+        );
+        if (!isCancelled) {
+          setTransactionsTotalCount(summary.totalCount);
+          setTransactionsTotalAmount(summary.totalAmount);
+        }
+      } catch (error) {
+        console.error("Error fetching transactions summary:", error);
+      }
+    };
+
+    loadSummary();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    caseId,
+    activeView,
+    buildServerFilters,
+    flaggedTransactionIds,
+    shouldUseServerSearch,
+  ]);
+
+  useEffect(() => {
+    let isCancelled = false;
 
     const loadTransactions = async () => {
+      if (activeView === "needs-review" && flaggedTransactionIds === null) {
+        setTransactionsLoading(true);
+        return;
+      }
+      if (
+        activeView === "needs-review" &&
+        flaggedTransactionIds &&
+        flaggedTransactionIds.length === 0
+      ) {
+        setTransactions([]);
+        setTransactionsLoading(false);
+        return;
+      }
       try {
         setTransactionsLoading(true);
-        setTransactionsProgress(null);
 
-        const activeFilters = filters.filter((filter) => {
-          const values = getFilterValues(filter);
-          if (values.length === 0) return false;
-          if (filter.operator === "between" && !filter.valueTo) return false;
-          return true;
-        });
+        const serverFilters = shouldUseServerSearch ? buildServerFilters() : {};
+        const offset = pageIndex * pageSize;
+        const limit = pageSize;
 
-        const shouldUseServerSearch =
-          normalizedQuery.length > 0 ||
-          activeFilters.length > 0 ||
-          activeView !== "all";
-
-        let flaggedTransactionIds: string[] | undefined;
-        if (activeView === "needs-review") {
-          flaggedTransactionIds =
-            await caseTransactionsService.getFlaggedTransactionIds(
-              caseId,
-              "Under Review"
-            );
-          if (flaggedTransactionIds.length === 0) {
-            if (!isCancelled) {
-              setTransactions([]);
-              setTransactionsProgress(null);
-              setTransactionsLoading(false);
-            }
-            return;
-          }
-        }
-
-        const buildServerFilters = () => {
-          const entityFilters = activeFilters.filter(
-            (filter) => filter.field === "entity"
-          );
-          const accountFilters = activeFilters.filter(
-            (filter) => filter.field === "account"
-          );
-          const statusFilters = activeFilters.filter(
-            (filter) => filter.field === "status"
-          );
-          const directionFilters = activeFilters.filter(
-            (filter) => filter.field === "direction"
-          );
-          const descriptionFilter = activeFilters.find(
-            (filter) => filter.field === "description"
-          );
-          const counterpartyFilter = activeFilters.find(
-            (filter) => filter.field === "counterparty"
-          );
-          const dateFilter = activeFilters.find(
-            (filter) => filter.field === "date"
-          );
-          const amountFilter = activeFilters.find(
-            (filter) => filter.field === "amount"
-          );
-
-          const entityIds =
-            entityFilters.length > 0
-              ? entities
-                  .filter((entity) =>
-                    entityFilters.every((filter) => {
-                      const values = getFilterValues(filter).map((value) =>
-                        value.toLowerCase()
-                      );
-                      if (values.length === 0) return true;
-                      const name = entity.entity_name.toLowerCase();
-                      if (filter.operator === "is") {
-                        return values.some((value) => name === value);
-                      }
-                      return values.some((value) => name.includes(value));
-                    })
-                  )
-                  .map((entity) => entity.entity_id)
-              : undefined;
-
-          const accountEntries = Array.from(accountMap.entries());
-          const accountIds =
-            accountFilters.length > 0
-              ? accountEntries
-                  .filter(([_, account]) =>
-                    accountFilters.every((filter) => {
-                      const values = getFilterValues(filter).map((value) =>
-                        value.toLowerCase()
-                      );
-                      if (values.length === 0) return true;
-                      const label = account.accountLabel.toLowerCase();
-                      if (filter.operator === "is") {
-                        return values.some((value) => label === value);
-                      }
-                      return values.some((value) => label.includes(value));
-                    })
-                  )
-                  .map(([accountId]) => accountId)
-              : undefined;
-
-          const statusValues = statusFilters.flatMap((filter) =>
-            getFilterValues(filter)
-          );
-          const statusSet = new Set(statusValues);
-          let status: "Failed" | "Success" | undefined;
-          if (statusSet.size === 1) {
-            const [value] = Array.from(statusSet);
-            if (value === "Failed" || value === "Success") {
-              status = value;
-            }
-          }
-          if (activeView === "failed") {
-            status = "Failed";
-          }
-
-          const directionValues = directionFilters.flatMap((filter) =>
-            getFilterValues(filter)
-          );
-          const directionSet = new Set(directionValues);
-          let direction: "DR" | "CR" | undefined;
-          if (directionSet.size === 1) {
-            const [value] = Array.from(directionSet);
-            if (value === "DR" || value === "CR") {
-              direction = value;
-            }
-          }
-
-          const descriptionValues = descriptionFilter
-            ? getFilterValues(descriptionFilter)
-            : [];
-          const counterpartyValues = counterpartyFilter
-            ? getFilterValues(counterpartyFilter)
-            : [];
-
-          const dateValues = dateFilter ? getFilterValues(dateFilter) : [];
-          let dateFrom: string | undefined;
-          let dateTo: string | undefined;
-          if (dateFilter && dateValues[0]) {
-            if (dateFilter.operator === "before") {
-              dateTo = dateValues[0];
-            } else if (dateFilter.operator === "after") {
-              dateFrom = dateValues[0];
-            } else if (dateFilter.operator === "between") {
-              dateFrom = dateValues[0];
-              dateTo = dateFilter.valueTo || dateValues[0];
-            }
-          }
-
-          const amountValues = amountFilter ? getFilterValues(amountFilter) : [];
-          let minAmount: number | undefined;
-          let maxAmount: number | undefined;
-          if (amountFilter && amountValues[0]) {
-            const value = Number(amountValues[0]);
-            const valueTo = amountFilter.valueTo
-              ? Number(amountFilter.valueTo)
-              : value;
-            if (!Number.isNaN(value)) {
-              if (amountFilter.operator === "greater") {
-                minAmount = value;
-              } else if (amountFilter.operator === "less") {
-                maxAmount = value;
-              } else if (amountFilter.operator === "between") {
-                minAmount = value;
-                maxAmount = valueTo;
-              }
-            }
-          }
-
-          const searchEntityIds =
-            normalizedQueryLower.length > 0
-              ? entities
-                  .filter((entity) =>
-                    entity.entity_name
-                      .toLowerCase()
-                      .includes(normalizedQueryLower)
-                  )
-                  .map((entity) => entity.entity_id)
-              : [];
-          const searchAccountIds =
-            normalizedQueryLower.length > 0
-              ? accountEntries
-                  .filter(([_, account]) =>
-                    account.accountLabel
-                      .toLowerCase()
-                      .includes(normalizedQueryLower)
-                  )
-                  .map(([accountId]) => accountId)
-              : [];
-
-          return {
-            query: normalizedQuery || undefined,
-            searchEntityIds:
-              searchEntityIds.length > 0 ? searchEntityIds : undefined,
-            searchAccountIds:
-              searchAccountIds.length > 0 ? searchAccountIds : undefined,
-            entityIds,
-            accountIds,
-            transactionIds: flaggedTransactionIds,
-            dateFrom,
-            dateTo,
-            minAmount,
-            maxAmount,
-            direction,
-            status,
-            description:
-              descriptionValues.length > 0 ? descriptionValues[0] : undefined,
-            counterparty:
-              counterpartyValues.length > 0 ? counterpartyValues[0] : undefined,
-          };
-        };
-
-        const serverFilters = shouldUseServerSearch
-          ? buildServerFilters()
-          : null;
-
-        const totalCount = shouldUseServerSearch
-          ? await transactionsService.searchByCaseIdCount(
-              caseId,
-              serverFilters || {}
-            )
-          : await transactionsService.getByCaseIdCount(caseId);
-
-        const allTransactions: Transaction[] = [];
-        let offset = 0;
-
-        while (!isCancelled) {
-          const page = shouldUseServerSearch
-            ? await transactionsService.searchByCaseId(caseId, {
-                ...(serverFilters || {}),
-                offset,
-                limit: TRANSACTIONS_PER_PAGE,
-              })
-            : await transactionsService.getByCaseId(caseId, {
-                offset,
-                limit: TRANSACTIONS_PER_PAGE,
-              });
-
-          allTransactions.push(...page);
-
-          if (!isCancelled && totalCount > 0) {
-            setTransactionsProgress({
-              current: allTransactions.length,
-              total: totalCount,
-            });
-          }
-
-          if (page.length < TRANSACTIONS_PER_PAGE) {
-            break;
-          }
-
-          offset += TRANSACTIONS_PER_PAGE;
-        }
+        const page = shouldUseServerSearch
+          ? await transactionsService.searchByCaseId(caseId, {
+              ...(serverFilters || {}),
+              offset,
+              limit,
+            })
+          : await transactionsService.getByCaseId(caseId, { offset, limit });
 
         if (!isCancelled) {
-          setTransactions(allTransactions);
-          setTransactionsProgress(null);
+          setTransactions(page);
         }
       } catch (error) {
         console.error("Error fetching transactions:", error);
-        if (!isCancelled) {
-          setTransactionsProgress(null);
-        }
       } finally {
         if (!isCancelled) {
           setTransactionsLoading(false);
@@ -492,32 +533,15 @@ export default function CaseDetailPage() {
     return () => {
       isCancelled = true;
     };
-  }, [caseId]);
-
-  useEffect(() => {
-    const loadFlags = async () => {
-      if (!transactions.length) {
-        setFlagsByTxId({});
-        return;
-      }
-      try {
-        const txIds = transactions.map((tx) => tx.transaction_id);
-        const flags = await caseTransactionsService.getFlagsForTransactions(
-          caseId,
-          txIds
-        );
-        const map: Record<string, CaseTransaction> = {};
-        flags.forEach((flag) => {
-          map[flag.transaction_id] = flag;
-        });
-        setFlagsByTxId(map);
-      } catch (error) {
-        console.error("Error fetching flags:", error);
-      }
-    };
-
-    loadFlags();
-  }, [caseId, transactions]);
+  }, [
+    caseId,
+    activeView,
+    buildServerFilters,
+    flaggedTransactionIds,
+    pageIndex,
+    pageSize,
+    shouldUseServerSearch,
+  ]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -613,131 +637,6 @@ export default function CaseDetailPage() {
       .filter(Boolean) as Array<{ id: string; label: string }>;
   }, [filters]);
 
-  const filteredTransactions = useMemo(() => {
-    const matchesFilters = (transaction: Transaction) => {
-      const entityName =
-        entityMap.get(transaction.entity_id)?.entity_name || "";
-      const accountLabel =
-        accountMap.get(transaction.account_id)?.accountLabel || "";
-      const counterpartyRaw = transaction.counterparty_merged;
-      const counterparty = counterpartyRaw || "Unknown";
-      const isCounterpartyMissing =
-        !counterpartyRaw || counterpartyRaw.trim() === "";
-      const status = isCounterpartyMissing ? "Failed" : "Success";
-
-      const baseMatch = normalizedQueryLower
-        ? [
-            entityName,
-            accountLabel,
-            transaction.description || "",
-            transaction.transaction_id,
-            counterparty,
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(normalizedQueryLower)
-        : true;
-
-      const viewMatch =
-        activeView === "all"
-          ? true
-          : activeView === "failed"
-          ? isCounterpartyMissing
-          : Object.keys(flagsByTxId).length === 0
-          ? true
-          : flagsByTxId[transaction.transaction_id]?.flag_type ===
-            "Under Review";
-
-      const filterMatch = filters.every((filter) => {
-        const filterValues = Array.isArray(filter.value)
-          ? filter.value.filter(Boolean)
-          : filter.value
-          ? [filter.value]
-          : [];
-        if (filterValues.length === 0) {
-          return true;
-        }
-        if (filter.operator === "between" && !filter.valueTo) {
-          return true;
-        }
-        switch (filter.field) {
-          case "entity":
-            return filter.operator === "is"
-              ? filterValues.includes(entityName)
-              : filterValues.some((value) =>
-                  entityName.toLowerCase().includes(value.toLowerCase())
-                );
-          case "account":
-            return filter.operator === "is"
-              ? filterValues.includes(accountLabel)
-              : filterValues.some((value) =>
-                  accountLabel.toLowerCase().includes(value.toLowerCase())
-                );
-          case "status":
-            return filterValues.includes(status);
-          case "direction":
-            return filterValues.includes(transaction.direction);
-          case "counterparty":
-            return filter.operator === "is"
-              ? filterValues.includes(counterparty)
-              : filterValues.some((value) =>
-                  counterparty.toLowerCase().includes(value.toLowerCase())
-                );
-          case "description":
-            return (transaction.description || "")
-              .toLowerCase()
-              .includes(filterValues[0]?.toLowerCase() || "");
-          case "date": {
-            const txDate = new Date(transaction.tx_date).getTime();
-            const from = new Date(filterValues[0] || "").getTime();
-            const to = filter.valueTo
-              ? new Date(filter.valueTo).getTime()
-              : from;
-            if (filter.operator === "before") return txDate < from;
-            if (filter.operator === "after") return txDate > from;
-            if (filter.operator === "between")
-              return txDate >= from && txDate <= to;
-            return true;
-          }
-          case "amount": {
-            const amount = transaction.amount;
-            const value = Number(filterValues[0]);
-            const valueTo = filter.valueTo ? Number(filter.valueTo) : value;
-            if (Number.isNaN(value)) return true;
-            if (filter.operator === "greater") return amount > value;
-            if (filter.operator === "less") return amount < value;
-            if (filter.operator === "between")
-              return amount >= value && amount <= valueTo;
-            return true;
-          }
-          default:
-            return true;
-        }
-      });
-
-      return baseMatch && viewMatch && filterMatch;
-    };
-
-    return transactions.filter(matchesFilters);
-  }, [
-    transactions,
-    normalizedQueryLower,
-    activeView,
-    filters,
-    entityMap,
-    accountMap,
-    flagsByTxId,
-  ]);
-
-  const filteredTotal = useMemo(
-    () =>
-      filteredTransactions.reduce(
-        (sum, transaction) => sum + transaction.amount,
-        0
-      ),
-    [filteredTransactions]
-  );
-
   const isFailedFocused =
     activeView === "failed" ||
     filters.some(
@@ -749,7 +648,7 @@ export default function CaseDetailPage() {
     );
 
   const tableRows = useMemo<CaseTransactionRow[]>(() => {
-    return filteredTransactions.map((transaction) => {
+    return transactions.map((transaction) => {
       const entity = entityMap.get(transaction.entity_id);
       const account = accountMap.get(transaction.account_id);
       const counterpartyRaw = transaction.counterparty_merged;
@@ -788,14 +687,40 @@ export default function CaseDetailPage() {
       };
     });
   }, [
-    filteredTransactions,
+    transactions,
     entityMap,
     accountMap,
-    flagsByTxId,
     caseId,
     formatDateCompact,
     formatCurrency,
   ]);
+
+  const pageCount = useMemo(
+    () => (transactionsTotalCount > 0 ? Math.ceil(transactionsTotalCount / pageSize) : 0),
+    [transactionsTotalCount, pageSize]
+  );
+
+  const handlePageChange = useCallback(
+    (nextPageIndex: number) => {
+      if (pageCount === 0) {
+        setPageIndex(0);
+        return;
+      }
+      const clamped = Math.max(0, Math.min(nextPageIndex, pageCount - 1));
+      setPageIndex(clamped);
+    },
+    [pageCount]
+  );
+
+  useEffect(() => {
+    if (pageCount === 0 && pageIndex !== 0) {
+      setPageIndex(0);
+      return;
+    }
+    if (pageCount > 0 && pageIndex >= pageCount) {
+      setPageIndex(pageCount - 1);
+    }
+  }, [pageCount, pageIndex]);
 
   const filterFieldOptions = [
     { value: "entity", label: "Entity" },
@@ -1327,9 +1252,9 @@ export default function CaseDetailPage() {
                 </div>
 
                 <div className="rounded-lg border border-gray-900 bg-gray-900 px-4 py-2 text-xs font-semibold text-white">
-                  {filteredTransactions.length.toLocaleString()} Transactions
+                  {transactionsTotalCount.toLocaleString()} Transactions
                   <span className="mx-2 text-gray-400">|</span>
-                  Total Value: {formatCurrency(filteredTotal)}
+                  Total Value: {formatCurrency(transactionsTotalAmount)}
                   <span className="mx-2 text-gray-400">|</span>
                   Risk:{" "}
                   <span className="text-amber-300">
@@ -1346,30 +1271,23 @@ export default function CaseDetailPage() {
                   <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-600">
                     <div className="flex items-center justify-between">
                       <span>Loading transactions…</span>
-                      {transactionsProgress && (
+                      {pageCount > 0 && (
                         <span>
-                          {transactionsProgress.current.toLocaleString()} /{" "}
-                          {transactionsProgress.total.toLocaleString()}
+                          Page {(pageIndex + 1).toLocaleString()} of{" "}
+                          {pageCount.toLocaleString()}
                         </span>
                       )}
                     </div>
-                    {transactionsProgress && (
-                      <div className="mt-3 h-2 w-full rounded-full bg-gray-200">
-                        <div
-                          className="h-2 rounded-full bg-blue-600"
-                          style={{
-                            width: `${
-                              (transactionsProgress.current /
-                                transactionsProgress.total) *
-                              100
-                            }%`,
-                          }}
-                        />
-                      </div>
-                    )}
                   </div>
                 ) : (
-                  <CaseTransactionsDataTable data={tableRows} />
+                  <CaseTransactionsDataTable
+                    data={tableRows}
+                    pageIndex={pageIndex}
+                    pageSize={pageSize}
+                    pageCount={pageCount}
+                    totalCount={transactionsTotalCount}
+                    onPageChange={handlePageChange}
+                  />
                 )}
               </section>
             </div>

@@ -5,8 +5,8 @@ This module provides sophisticated time-based analysis capabilities to identify
 patterns, trends, and anomalies in debit and credit transactions over time.
 """
 
-import pandas as pd
 import numpy as np
+import polars as pl
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 import plotly.graph_objects as go
@@ -42,7 +42,7 @@ class TimeBasedAnalytics:
 
     def analyze_transaction_trends(
         self,
-        df: pd.DataFrame,
+        df: pl.DataFrame,
         date_column: str = "DATE",
         debit_column: str = "DEBIT",
         credit_column: str = "CREDIT",
@@ -61,14 +61,14 @@ class TimeBasedAnalytics:
         Returns:
             Dictionary with comprehensive trend analysis results
         """
-        if df.empty:
+        if df.is_empty():
             return self._empty_analysis_result()
 
         df_clean = self._prepare_time_series_data(
             df, date_column, debit_column, credit_column
         )
 
-        if df_clean.empty:
+        if df_clean.is_empty():
             return self._empty_analysis_result()
 
         time_series = self._aggregate_by_time(df_clean, time_granularity)
@@ -90,136 +90,155 @@ class TimeBasedAnalytics:
         return results
 
     def _prepare_time_series_data(
-        self, df: pd.DataFrame, date_col: str, debit_col: str, credit_col: str
-    ) -> pd.DataFrame:
+        self, df: pl.DataFrame, date_col: str, debit_col: str, credit_col: str
+    ) -> pl.DataFrame:
         """Prepare and clean data for time series analysis"""
-        df_clean = df.copy()
+        df_clean = df.clone()
 
-        df_clean[date_col] = pd.to_datetime(df_clean[date_col], errors="coerce")
+        if date_col in df_clean.columns:
+            df_clean = df_clean.with_columns(
+                pl.col(date_col).cast(pl.Datetime, strict=False).alias(date_col)
+            )
 
         for col in [debit_col, credit_col]:
             if col in df_clean.columns:
-                df_clean[col] = pd.to_numeric(
-                    df_clean[col].astype(str).str.replace(",", "").str.replace("₹", ""),
-                    errors="coerce",
+                df_clean = df_clean.with_columns(
+                    pl.col(col)
+                    .cast(pl.Utf8)
+                    .str.replace_all(",", "")
+                    .str.replace_all("₹", "")
+                    .cast(pl.Float64, strict=False)
+                    .fill_null(0)
+                    .alias(col)
                 )
-                df_clean[col] = df_clean[col].fillna(0)
 
-        df_clean = df_clean.dropna(subset=[date_col])
+        df_clean = df_clean.filter(pl.col(date_col).is_not_null())
 
-        df_clean["net_flow"] = df_clean[credit_col] - df_clean[debit_col]
-        df_clean["total_activity"] = df_clean[debit_col] + df_clean[credit_col]
-        df_clean["hour"] = df_clean[date_col].dt.hour
-        df_clean["day_of_week"] = df_clean[date_col].dt.day_name()
-        df_clean["month"] = df_clean[date_col].dt.month
-        df_clean["quarter"] = df_clean[date_col].dt.quarter
-        df_clean["year"] = df_clean[date_col].dt.year
+        df_clean = df_clean.with_columns(
+            [
+                (pl.col(credit_col) - pl.col(debit_col)).alias("net_flow"),
+                (pl.col(debit_col) + pl.col(credit_col)).alias("total_activity"),
+                pl.col(date_col).dt.hour().alias("hour"),
+                pl.col(date_col).dt.strftime("%A").alias("day_of_week"),
+                pl.col(date_col).dt.month().alias("month"),
+                pl.col(date_col).dt.quarter().alias("quarter"),
+                pl.col(date_col).dt.year().alias("year"),
+            ]
+        )
 
-        return df_clean.sort_values(date_col)
+        return df_clean.sort(date_col)
 
-    def _aggregate_by_time(self, df: pd.DataFrame, granularity: str) -> pd.DataFrame:
+    def _aggregate_by_time(self, df: pl.DataFrame, granularity: str) -> pl.DataFrame:
         """Aggregate transaction data by specified time granularity"""
         date_col = "DATE"
 
         if granularity == "hourly":
-            df["time_key"] = df[date_col].dt.floor("H")
+            df = df.with_columns(pl.col(date_col).dt.truncate("1h").alias("time_key"))
         elif granularity == "daily":
-            df["time_key"] = df[date_col].dt.date
+            df = df.with_columns(pl.col(date_col).dt.date().alias("time_key"))
         elif granularity == "weekly":
-            df["time_key"] = df[date_col].dt.to_period("W").dt.start_time
+            df = df.with_columns(pl.col(date_col).dt.truncate("1w").alias("time_key"))
         elif granularity == "monthly":
-            df["time_key"] = df[date_col].dt.to_period("M").dt.start_time
+            df = df.with_columns(pl.col(date_col).dt.truncate("1mo").alias("time_key"))
         else:
-            df["time_key"] = df[date_col].dt.date
+            df = df.with_columns(pl.col(date_col).dt.date().alias("time_key"))
 
         agg_data = (
-            df.groupby("time_key")
+            df.group_by("time_key")
             .agg(
-                {
-                    "DEBIT": ["sum", "count", "mean", "std"],
-                    "CREDIT": ["sum", "count", "mean", "std"],
-                    "net_flow": ["sum", "mean"],
-                    "total_activity": ["sum", "mean"],
-                    "hour": lambda x: x.mode().iloc[0] if not x.empty else 12,
-                    "day_of_week": lambda x: (
-                        x.mode().iloc[0] if not x.empty else "Monday"
-                    ),
-                }
+                [
+                    pl.col("DEBIT").sum().alias("DEBIT_sum"),
+                    pl.col("DEBIT").count().alias("DEBIT_count"),
+                    pl.col("DEBIT").mean().alias("DEBIT_mean"),
+                    pl.col("DEBIT").std().alias("DEBIT_std"),
+                    pl.col("CREDIT").sum().alias("CREDIT_sum"),
+                    pl.col("CREDIT").count().alias("CREDIT_count"),
+                    pl.col("CREDIT").mean().alias("CREDIT_mean"),
+                    pl.col("CREDIT").std().alias("CREDIT_std"),
+                    pl.col("net_flow").sum().alias("net_flow_sum"),
+                    pl.col("net_flow").mean().alias("net_flow_mean"),
+                    pl.col("total_activity").sum().alias("total_activity_sum"),
+                    pl.col("total_activity").mean().alias("total_activity_mean"),
+                    pl.col("hour").mode().first().alias("hour_mode"),
+                    pl.col("day_of_week").mode().first().alias("day_of_week_mode"),
+                ]
             )
-            .reset_index()
         )
 
-        agg_data.columns = [
-            "_".join(col).strip() if col[1] else col[0] for col in agg_data.columns
-        ]
-        agg_data = agg_data.rename(columns={"time_key_": "time_key"})
-
-        agg_data["debit_credit_ratio"] = agg_data["DEBIT_sum"] / (
-            agg_data["CREDIT_sum"] + 1e-10
+        agg_data = agg_data.with_columns(
+            [
+                (pl.col("DEBIT_sum") / (pl.col("CREDIT_sum") + 1e-10)).alias(
+                    "debit_credit_ratio"
+                ),
+                (pl.col("DEBIT_count") + pl.col("CREDIT_count")).alias(
+                    "activity_intensity"
+                ),
+                (
+                    (pl.col("DEBIT_std").fill_null(0)
+                    + pl.col("CREDIT_std").fill_null(0))
+                    / 2
+                ).alias("volatility"),
+            ]
         )
-        agg_data["activity_intensity"] = (
-            agg_data["DEBIT_count"] + agg_data["CREDIT_count"]
-        )
-        agg_data["volatility"] = (
-            agg_data["DEBIT_std"].fillna(0) + agg_data["CREDIT_std"].fillna(0)
-        ) / 2
 
-        return agg_data.sort_values("time_key")
+        return agg_data.sort("time_key")
 
-    def _calculate_data_summary(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _calculate_data_summary(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Calculate summary statistics for the time series data"""
+        start = time_series.get_column("time_key").min() if len(time_series) else None
+        end = time_series.get_column("time_key").max() if len(time_series) else None
+        span_days = 0
+        if start is not None and end is not None:
+            try:
+                span_days = (end - start).days
+            except Exception:
+                span_days = 0
+
+        def _idxmax(col: str) -> Optional[Any]:
+            if len(time_series) == 0 or col not in time_series.columns:
+                return None
+            sorted_df = time_series.sort(col, descending=True)
+            return sorted_df.get_column("time_key")[0] if len(sorted_df) else None
+
         return {
             "total_periods": len(time_series),
             "date_range": {
-                "start": time_series["time_key"].min(),
-                "end": time_series["time_key"].max(),
-                "span_days": (
-                    time_series["time_key"].max() - time_series["time_key"].min()
-                ).days,
+                "start": start,
+                "end": end,
+                "span_days": span_days,
             },
-            "total_debits": float(time_series["DEBIT_sum"].sum()),
-            "total_credits": float(time_series["CREDIT_sum"].sum()),
-            "net_flow_total": float(time_series["net_flow_sum"].sum()),
-            "average_daily_debits": float(time_series["DEBIT_sum"].mean()),
-            "average_daily_credits": float(time_series["CREDIT_sum"].mean()),
-            "transaction_count": int(time_series["activity_intensity"].sum()),
-            "most_active_period": time_series.loc[
-                time_series["activity_intensity"].idxmax(), "time_key"
-            ],
-            "highest_debit_period": time_series.loc[
-                time_series["DEBIT_sum"].idxmax(), "time_key"
-            ],
-            "highest_credit_period": time_series.loc[
-                time_series["CREDIT_sum"].idxmax(), "time_key"
-            ],
+            "total_debits": float(time_series.get_column("DEBIT_sum").sum()),
+            "total_credits": float(time_series.get_column("CREDIT_sum").sum()),
+            "net_flow_total": float(time_series.get_column("net_flow_sum").sum()),
+            "average_daily_debits": float(time_series.get_column("DEBIT_sum").mean()),
+            "average_daily_credits": float(time_series.get_column("CREDIT_sum").mean()),
+            "transaction_count": int(time_series.get_column("activity_intensity").sum()),
+            "most_active_period": _idxmax("activity_intensity"),
+            "highest_debit_period": _idxmax("DEBIT_sum"),
+            "highest_credit_period": _idxmax("CREDIT_sum"),
         }
 
-    def _analyze_trends(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _analyze_trends(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Analyze trends in debit and credit patterns"""
         results = {}
 
         for metric in ["DEBIT_sum", "CREDIT_sum", "net_flow_sum", "activity_intensity"]:
             if metric in time_series.columns:
                 trend_result = self._calculate_linear_trend(
-                    time_series["time_key"], time_series[metric]
+                    time_series.get_column("time_key"), time_series.get_column(metric)
                 )
                 results[metric] = trend_result
 
         window_size = min(7, len(time_series) // 3)
         if window_size >= 2:
+            debit_vals = time_series.get_column("DEBIT_sum").to_numpy()
+            credit_vals = time_series.get_column("CREDIT_sum").to_numpy()
             results["moving_averages"] = {
-                "debit_ma": time_series["DEBIT_sum"]
-                .rolling(window=window_size)
-                .mean()
-                .tolist(),
-                "credit_ma": time_series["CREDIT_sum"]
-                .rolling(window=window_size)
-                .mean()
-                .tolist(),
-                "net_flow_ma": time_series["net_flow_sum"]
-                .rolling(window=window_size)
-                .mean()
-                .tolist(),
+                "debit_ma": self._rolling_mean(debit_vals, window_size).tolist(),
+                "credit_ma": self._rolling_mean(credit_vals, window_size).tolist(),
+                "net_flow_ma": self._rolling_mean(
+                    time_series.get_column("net_flow_sum").to_numpy(), window_size
+                ).tolist(),
             }
 
         debit_trend = results.get("DEBIT_sum", {})
@@ -243,35 +262,39 @@ class TimeBasedAnalytics:
         return results
 
     def _calculate_linear_trend(
-        self, x_values: pd.Series, y_values: pd.Series
+        self, x_values: pl.Series, y_values: pl.Series
     ) -> Dict[str, float]:
         """Calculate linear trend statistics"""
         try:
-
-            if pd.api.types.is_datetime64_any_dtype(x_values):
-                x_numeric = (x_values - x_values.min()).dt.days
-            else:
-                x_numeric = pd.to_numeric(x_values, errors="coerce")
-
-            valid_mask = ~(x_numeric.isna() | y_values.isna())
-            x_clean = x_numeric[valid_mask]
-            y_clean = y_values[valid_mask]
+            valid_mask = x_values.is_not_null() & y_values.is_not_null()
+            x_clean = x_values.filter(valid_mask).to_numpy()
+            y_clean = y_values.filter(valid_mask).to_numpy()
 
             if len(x_clean) < 2:
                 return {"slope": 0, "intercept": 0, "r_squared": 0, "p_value": 1}
 
-            slope, intercept = np.polyfit(x_clean, y_clean, 1)
+            if np.issubdtype(x_clean.dtype, np.datetime64):
+                x_numeric = (x_clean - x_clean.min()) / np.timedelta64(1, "D")
+            else:
+                x_numeric = x_clean.astype(float, copy=False)
 
-            y_pred = slope * x_clean + intercept
-            ss_res = np.sum((y_clean - y_pred) ** 2)
-            ss_tot = np.sum((y_clean - np.mean(y_clean)) ** 2)
+            y_numeric = y_clean.astype(float, copy=False)
+
+            if len(x_numeric) < 2:
+                return {"slope": 0, "intercept": 0, "r_squared": 0, "p_value": 1}
+
+            slope, intercept = np.polyfit(x_numeric, y_numeric, 1)
+
+            y_pred = slope * x_numeric + intercept
+            ss_res = np.sum((y_numeric - y_pred) ** 2)
+            ss_tot = np.sum((y_numeric - np.mean(y_numeric)) ** 2)
             r_squared = 1 - (ss_res / (ss_tot + 1e-10))
 
-            n = len(x_clean)
+            n = len(x_numeric)
             t_stat = (
                 slope
                 * np.sqrt((n - 2) / (1 - r_squared + 1e-10))
-                * np.sqrt(np.sum((x_clean - np.mean(x_clean)) ** 2))
+                * np.sqrt(np.sum((x_numeric - np.mean(x_numeric)) ** 2))
             )
             p_value = 2 * (1 - abs(t_stat) / (abs(t_stat) + n - 2))
 
@@ -289,11 +312,11 @@ class TimeBasedAnalytics:
         except Exception:
             return {"slope": 0, "intercept": 0, "r_squared": 0, "p_value": 1}
 
-    def _detect_seasonal_patterns(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _detect_seasonal_patterns(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Detect seasonal and cyclical patterns in transaction data"""
         patterns = {}
 
-        if "day_of_week_<lambda>" in time_series.columns and len(time_series) > 7:
+        if "day_of_week_mode" in time_series.columns and len(time_series) > 7:
             dow_analysis = self._analyze_day_of_week_patterns(time_series)
             patterns["day_of_week"] = dow_analysis
 
@@ -307,7 +330,7 @@ class TimeBasedAnalytics:
         return patterns
 
     def _analyze_day_of_week_patterns(
-        self, time_series: pd.DataFrame
+        self, time_series: pl.DataFrame
     ) -> Dict[str, Any]:
         """Analyze patterns by day of week"""
 
@@ -316,44 +339,74 @@ class TimeBasedAnalytics:
             "note": "Day-of-week analysis requires individual transaction timestamps",
         }
 
-    def _analyze_monthly_patterns(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _analyze_monthly_patterns(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Analyze monthly patterns in transaction data"""
         try:
-
-            time_series["month"] = pd.to_datetime(time_series["time_key"]).dt.month
-
-            monthly_stats = (
-                time_series.groupby("month")
-                .agg(
-                    {
-                        "DEBIT_sum": ["mean", "std"],
-                        "CREDIT_sum": ["mean", "std"],
-                        "activity_intensity": "mean",
-                    }
-                )
-                .round(2)
+            time_series = time_series.with_columns(
+                pl.col("time_key").cast(pl.Date).dt.month().alias("month")
             )
 
-            monthly_stats.columns = ["_".join(col) for col in monthly_stats.columns]
+            monthly_stats = (
+                time_series.group_by("month")
+                .agg(
+                    [
+                        pl.col("DEBIT_sum").mean().alias("DEBIT_sum_mean"),
+                        pl.col("DEBIT_sum").std().alias("DEBIT_sum_std"),
+                        pl.col("CREDIT_sum").mean().alias("CREDIT_sum_mean"),
+                        pl.col("CREDIT_sum").std().alias("CREDIT_sum_std"),
+                        pl.col("activity_intensity").mean().alias(
+                            "activity_intensity_mean"
+                        ),
+                    ]
+                )
+            )
 
-            peak_debit_month = monthly_stats["DEBIT_sum_mean"].idxmax()
-            peak_credit_month = monthly_stats["CREDIT_sum_mean"].idxmax()
-            peak_activity_month = monthly_stats["activity_intensity_mean"].idxmax()
+            peak_debit_month = (
+                monthly_stats.sort("DEBIT_sum_mean", descending=True)
+                .get_column("month")[0]
+                if len(monthly_stats) > 0
+                else None
+            )
+            peak_credit_month = (
+                monthly_stats.sort("CREDIT_sum_mean", descending=True)
+                .get_column("month")[0]
+                if len(monthly_stats) > 0
+                else None
+            )
+            peak_activity_month = (
+                monthly_stats.sort("activity_intensity_mean", descending=True)
+                .get_column("month")[0]
+                if len(monthly_stats) > 0
+                else None
+            )
+
+            debit_cv = (
+                float(
+                    monthly_stats.get_column("DEBIT_sum_std").mean()
+                    / (monthly_stats.get_column("DEBIT_sum_mean").mean() + 1e-10)
+                )
+                if len(monthly_stats) > 0
+                else 0
+            )
+            credit_cv = (
+                float(
+                    monthly_stats.get_column("CREDIT_sum_std").mean()
+                    / (monthly_stats.get_column("CREDIT_sum_mean").mean() + 1e-10)
+                )
+                if len(monthly_stats) > 0
+                else 0
+            )
 
             return {
-                "monthly_statistics": monthly_stats.to_dict(),
-                "peak_debit_month": int(peak_debit_month),
-                "peak_credit_month": int(peak_credit_month),
-                "peak_activity_month": int(peak_activity_month),
+                "monthly_statistics": monthly_stats.to_dicts(),
+                "peak_debit_month": int(peak_debit_month) if peak_debit_month else None,
+                "peak_credit_month": int(peak_credit_month) if peak_credit_month else None,
+                "peak_activity_month": (
+                    int(peak_activity_month) if peak_activity_month else None
+                ),
                 "seasonal_variation": {
-                    "debit_cv": float(
-                        monthly_stats["DEBIT_sum_std"].mean()
-                        / (monthly_stats["DEBIT_sum_mean"].mean() + 1e-10)
-                    ),
-                    "credit_cv": float(
-                        monthly_stats["CREDIT_sum_std"].mean()
-                        / (monthly_stats["CREDIT_sum_mean"].mean() + 1e-10)
-                    ),
+                    "debit_cv": debit_cv,
+                    "credit_cv": credit_cv,
                 },
             }
         except Exception:
@@ -362,12 +415,11 @@ class TimeBasedAnalytics:
                 "error": "Insufficient data for monthly analysis",
             }
 
-    def _detect_recurring_cycles(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _detect_recurring_cycles(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Detect recurring cycles in transaction patterns"""
         try:
-
-            debit_series = time_series["DEBIT_sum"].values
-            credit_series = time_series["CREDIT_sum"].values
+            debit_series = time_series.get_column("DEBIT_sum").to_numpy()
+            credit_series = time_series.get_column("CREDIT_sum").to_numpy()
 
             cycles_detected = []
 
@@ -414,46 +466,36 @@ class TimeBasedAnalytics:
             return 0.0
 
     def _analyze_transaction_velocity(
-        self, time_series: pd.DataFrame
+        self, time_series: pl.DataFrame
     ) -> Dict[str, Any]:
         """Analyze transaction velocity and frequency patterns"""
         velocity_metrics = {}
 
-        velocity_metrics["average_transactions_per_period"] = float(
-            time_series["activity_intensity"].mean()
-        )
-        velocity_metrics["max_transactions_per_period"] = int(
-            time_series["activity_intensity"].max()
-        )
-        velocity_metrics["velocity_volatility"] = float(
-            time_series["activity_intensity"].std()
-        )
+        activity = time_series.get_column("activity_intensity")
 
-        velocity_threshold = time_series["activity_intensity"].quantile(0.8)
-        high_velocity_periods = time_series[
-            time_series["activity_intensity"] > velocity_threshold
-        ]
+        velocity_metrics["average_transactions_per_period"] = float(activity.mean())
+        velocity_metrics["max_transactions_per_period"] = int(activity.max())
+        velocity_metrics["velocity_volatility"] = float(activity.std())
+
+        velocity_threshold = float(activity.quantile(0.8)) if len(activity) else 0
+        high_velocity_periods = time_series.filter(
+            pl.col("activity_intensity") > velocity_threshold
+        )
 
         velocity_metrics["high_velocity_periods"] = {
             "count": len(high_velocity_periods),
             "threshold": float(velocity_threshold),
-            "periods": high_velocity_periods["time_key"].tolist(),
+            "periods": high_velocity_periods.get_column("time_key").to_list(),
         }
 
-        time_series["velocity_change"] = time_series["activity_intensity"].diff()
-        velocity_metrics["average_acceleration"] = float(
-            time_series["velocity_change"].mean()
-        )
-        velocity_metrics["max_acceleration"] = float(
-            time_series["velocity_change"].max()
-        )
-        velocity_metrics["max_deceleration"] = float(
-            time_series["velocity_change"].min()
-        )
+        velocity_change = activity.diff()
+        velocity_metrics["average_acceleration"] = float(velocity_change.mean())
+        velocity_metrics["max_acceleration"] = float(velocity_change.max())
+        velocity_metrics["max_deceleration"] = float(velocity_change.min())
 
         return velocity_metrics
 
-    def _detect_time_based_anomalies(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _detect_time_based_anomalies(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Detect anomalies in time-based transaction patterns"""
         anomalies = {
             "statistical_anomalies": [],
@@ -463,18 +505,18 @@ class TimeBasedAnalytics:
 
         for metric in ["DEBIT_sum", "CREDIT_sum", "activity_intensity"]:
             if metric in time_series.columns:
-                q1 = time_series[metric].quantile(0.25)
-                q3 = time_series[metric].quantile(0.75)
+                series = time_series.get_column(metric)
+                q1 = float(series.quantile(0.25))
+                q3 = float(series.quantile(0.75))
                 iqr = q3 - q1
                 lower_bound = q1 - 1.5 * iqr
                 upper_bound = q3 + 1.5 * iqr
 
-                anomalous_periods = time_series[
-                    (time_series[metric] < lower_bound)
-                    | (time_series[metric] > upper_bound)
-                ]
+                anomalous_periods = time_series.filter(
+                    (pl.col(metric) < lower_bound) | (pl.col(metric) > upper_bound)
+                )
 
-                for _, period in anomalous_periods.iterrows():
+                for period in anomalous_periods.iter_rows(named=True):
                     anomalies["statistical_anomalies"].append(
                         {
                             "period": period["time_key"],
@@ -489,14 +531,14 @@ class TimeBasedAnalytics:
                         }
                     )
 
-        velocity_mean = time_series["activity_intensity"].mean()
-        velocity_std = time_series["activity_intensity"].std()
+        velocity_mean = float(time_series.get_column("activity_intensity").mean())
+        velocity_std = float(time_series.get_column("activity_intensity").std())
         velocity_threshold = velocity_mean + 2 * velocity_std
 
-        velocity_anomalies = time_series[
-            time_series["activity_intensity"] > velocity_threshold
-        ]
-        for _, period in velocity_anomalies.iterrows():
+        velocity_anomalies = time_series.filter(
+            pl.col("activity_intensity") > velocity_threshold
+        )
+        for period in velocity_anomalies.iter_rows(named=True):
             anomalies["velocity_anomalies"].append(
                 {
                     "period": period["time_key"],
@@ -504,8 +546,7 @@ class TimeBasedAnalytics:
                     "expected_max": float(velocity_threshold),
                     "severity": (
                         "high"
-                        if period["activity_intensity"]
-                        > velocity_mean + 3 * velocity_std
+                        if period["activity_intensity"] > velocity_mean + 3 * velocity_std
                         else "moderate"
                     ),
                 }
@@ -514,27 +555,20 @@ class TimeBasedAnalytics:
         return anomalies
 
     def _analyze_debit_credit_correlation(
-        self, time_series: pd.DataFrame
+        self, time_series: pl.DataFrame
     ) -> Dict[str, float]:
         """Analyze correlation between debit and credit patterns"""
         try:
-            correlation_matrix = time_series[
-                ["DEBIT_sum", "CREDIT_sum", "net_flow_sum", "activity_intensity"]
-            ].corr()
-
+            cols = ["DEBIT_sum", "CREDIT_sum", "net_flow_sum", "activity_intensity"]
+            data = np.column_stack(
+                [time_series.get_column(c).to_numpy() for c in cols]
+            )
+            corr = np.corrcoef(data, rowvar=False)
             return {
-                "debit_credit_correlation": float(
-                    correlation_matrix.loc["DEBIT_sum", "CREDIT_sum"]
-                ),
-                "debit_activity_correlation": float(
-                    correlation_matrix.loc["DEBIT_sum", "activity_intensity"]
-                ),
-                "credit_activity_correlation": float(
-                    correlation_matrix.loc["CREDIT_sum", "activity_intensity"]
-                ),
-                "net_flow_activity_correlation": float(
-                    correlation_matrix.loc["net_flow_sum", "activity_intensity"]
-                ),
+                "debit_credit_correlation": float(corr[0, 1]),
+                "debit_activity_correlation": float(corr[0, 3]),
+                "credit_activity_correlation": float(corr[1, 3]),
+                "net_flow_activity_correlation": float(corr[2, 3]),
             }
         except Exception:
             return {
@@ -544,18 +578,22 @@ class TimeBasedAnalytics:
                 "net_flow_activity_correlation": 0.0,
             }
 
-    def _detect_cyclical_patterns(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _detect_cyclical_patterns(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Detect cyclical patterns in transaction behavior"""
         cyclical_analysis = {}
 
         for metric in ["DEBIT_sum", "CREDIT_sum"]:
             if metric in time_series.columns and len(time_series) > 10:
-                series_values = time_series[metric].values
+                series_values = time_series.get_column(metric).to_numpy()
 
                 window = min(5, len(series_values) // 3)
                 if window >= 2:
-                    moving_avg = pd.Series(series_values).rolling(window=window).mean()
-                    detrended = series_values - moving_avg.fillna(moving_avg.mean())
+                    moving_avg = self._rolling_mean(series_values, window)
+                    if np.isnan(moving_avg).all():
+                        continue
+                    mean_val = np.nanmean(moving_avg)
+                    moving_avg = np.where(np.isnan(moving_avg), mean_val, moving_avg)
+                    detrended = series_values - moving_avg
 
                     zero_crossings = np.sum(np.diff(np.sign(detrended)) != 0)
                     cycle_frequency = (
@@ -568,19 +606,20 @@ class TimeBasedAnalytics:
                         "cycle_frequency": float(cycle_frequency),
                         "has_cycles": cycle_frequency > 0.1,
                         "cycle_strength": float(
-                            np.std(detrended) / (np.mean(np.abs(series_values)) + 1e-10)
+                            np.std(detrended)
+                            / (np.mean(np.abs(series_values)) + 1e-10)
                         ),
                     }
 
         return cyclical_analysis
 
-    def _analyze_volatility(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _analyze_volatility(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Analyze volatility in transaction patterns"""
         volatility_analysis = {}
 
         for metric in ["DEBIT_sum", "CREDIT_sum", "net_flow_sum"]:
             if metric in time_series.columns:
-                values = time_series[metric]
+                values = time_series.get_column(metric)
 
                 volatility_analysis[metric] = {
                     "standard_deviation": float(values.std()),
@@ -596,19 +635,17 @@ class TimeBasedAnalytics:
 
         return volatility_analysis
 
-    def _calculate_volatility_trend(self, series: pd.Series) -> str:
+    def _calculate_volatility_trend(self, series: pl.Series) -> str:
         """Calculate whether volatility is increasing, decreasing, or stable"""
         try:
-
             window = min(5, len(series) // 3)
             if window < 2:
                 return "insufficient_data"
 
-            rolling_vol = series.rolling(window=window).std()
-
-            vol_trend = self._calculate_linear_trend(
-                pd.Series(range(len(rolling_vol))), rolling_vol
-            )
+            rolling_vol = self._rolling_std(series.to_numpy(), window)
+            x_vals = pl.Series("x", list(range(len(rolling_vol))))
+            y_vals = pl.Series("y", rolling_vol)
+            vol_trend = self._calculate_linear_trend(x_vals, y_vals)
 
             if vol_trend["slope"] > 0 and vol_trend["r_squared"] > 0.3:
                 return "increasing"
@@ -619,64 +656,65 @@ class TimeBasedAnalytics:
         except Exception:
             return "unknown"
 
-    def _analyze_cash_flow_patterns(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _analyze_cash_flow_patterns(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Analyze cash flow patterns and liquidity trends"""
         flow_analysis = {}
 
-        time_series["cumulative_net_flow"] = time_series["net_flow_sum"].cumsum()
-        time_series["cumulative_debits"] = time_series["DEBIT_sum"].cumsum()
-        time_series["cumulative_credits"] = time_series["CREDIT_sum"].cumsum()
+        net_flow = time_series.get_column("net_flow_sum").to_numpy()
+        debits = time_series.get_column("DEBIT_sum").to_numpy()
+        credits = time_series.get_column("CREDIT_sum").to_numpy()
+
+        cumulative_net_flow = np.cumsum(net_flow)
+        cumulative_debits = np.cumsum(debits)
+        cumulative_credits = np.cumsum(credits)
 
         flow_analysis["net_flow_trend"] = self._calculate_linear_trend(
-            pd.Series(range(len(time_series))), time_series["cumulative_net_flow"]
+            pl.Series("x", list(range(len(cumulative_net_flow)))),
+            pl.Series("y", cumulative_net_flow),
         )
 
-        positive_flow_periods = len(time_series[time_series["net_flow_sum"] > 0])
-        negative_flow_periods = len(time_series[time_series["net_flow_sum"] < 0])
+        positive_flow_periods = int(np.sum(net_flow > 0))
+        negative_flow_periods = int(np.sum(net_flow < 0))
 
         flow_analysis["flow_balance"] = {
             "positive_periods": positive_flow_periods,
             "negative_periods": negative_flow_periods,
-            "neutral_periods": len(time_series)
-            - positive_flow_periods
-            - negative_flow_periods,
+            "neutral_periods": len(net_flow) - positive_flow_periods - negative_flow_periods,
             "net_positive_ratio": (
-                positive_flow_periods / len(time_series) if len(time_series) > 0 else 0
+                positive_flow_periods / len(net_flow) if len(net_flow) > 0 else 0
             ),
         }
 
-        max_negative_flow = time_series["cumulative_net_flow"].min()
+        max_negative_flow = float(np.min(cumulative_net_flow)) if len(cumulative_net_flow) else 0
         flow_analysis["liquidity_metrics"] = {
             "max_drawdown": float(max_negative_flow) if max_negative_flow < 0 else 0.0,
-            "final_position": float(time_series["cumulative_net_flow"].iloc[-1]),
-            "flow_volatility": float(time_series["net_flow_sum"].std()),
+            "final_position": float(cumulative_net_flow[-1]) if len(cumulative_net_flow) else 0.0,
+            "flow_volatility": float(np.std(net_flow)) if len(net_flow) else 0.0,
         }
 
         return flow_analysis
 
-    def _create_trend_visualizations(self, time_series: pd.DataFrame) -> Dict[str, Any]:
+    def _create_trend_visualizations(self, time_series: pl.DataFrame) -> Dict[str, Any]:
         """Create visualization data for trend analysis"""
         viz_data = {
             "time_series_data": {
-                "dates": time_series["time_key"].tolist(),
-                "debits": time_series["DEBIT_sum"].tolist(),
-                "credits": time_series["CREDIT_sum"].tolist(),
-                "net_flow": time_series["net_flow_sum"].tolist(),
-                "activity": time_series["activity_intensity"].tolist(),
+                "dates": time_series.get_column("time_key").to_list(),
+                "debits": time_series.get_column("DEBIT_sum").to_list(),
+                "credits": time_series.get_column("CREDIT_sum").to_list(),
+                "net_flow": time_series.get_column("net_flow_sum").to_list(),
+                "activity": time_series.get_column("activity_intensity").to_list(),
             }
         }
 
         window_size = min(7, len(time_series) // 3)
         if window_size >= 2:
             viz_data["moving_averages"] = {
-                "debit_ma": time_series["DEBIT_sum"]
-                .rolling(window=window_size)
-                .mean()
-                .tolist(),
-                "credit_ma": time_series["CREDIT_sum"]
-                .rolling(window=window_size)
-                .mean()
-                .tolist(),
+                "debit_ma": self._rolling_mean(
+                    time_series.get_column("DEBIT_sum").to_numpy(), window_size
+                ).tolist(),
+                "credit_ma": self._rolling_mean(
+                    time_series.get_column("CREDIT_sum").to_numpy(), window_size
+                ).tolist(),
             }
 
         return viz_data
@@ -795,7 +833,8 @@ class TimeBasedAnalytics:
         )
 
         if len(debits) > 5:
-            volatility = pd.Series(debits).rolling(window=5).std().fillna(0).tolist()
+            volatility = self._rolling_std(np.array(debits, dtype=float), 5)
+            volatility = np.nan_to_num(volatility, nan=0.0).tolist()
             fig.add_trace(
                 go.Scatter(
                     x=dates,
@@ -885,3 +924,25 @@ class TimeBasedAnalytics:
                 insights.append(f"🔄 Detected {len(cycles)} recurring patterns")
 
         return insights
+
+    def _rolling_mean(self, values: np.ndarray, window: int) -> np.ndarray:
+        if window < 1 or len(values) == 0:
+            return np.array([])
+        if len(values) < window:
+            return np.full(len(values), np.nan)
+        kernel = np.ones(window) / window
+        rolled = np.convolve(values, kernel, mode="valid")
+        return np.concatenate([np.full(window - 1, np.nan), rolled])
+
+    def _rolling_std(self, values: np.ndarray, window: int) -> np.ndarray:
+        if window < 1 or len(values) == 0:
+            return np.array([])
+        if len(values) < window:
+            return np.full(len(values), np.nan)
+        stds = []
+        for i in range(len(values)):
+            if i < window - 1:
+                stds.append(np.nan)
+            else:
+                stds.append(float(np.std(values[i - window + 1 : i + 1])))
+        return np.array(stds)

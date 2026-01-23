@@ -15,7 +15,7 @@ This module provides REST API endpoints for various financial analysis services 
 Analysis endpoints for the FastAPI financial analysis service.
 """
 import logging
-import pandas as pd
+import polars as pl
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 from fastapi import (
@@ -61,8 +61,8 @@ async def get_analysis_service(
 
 async def get_entity_transactions(
     entity_ids: List[str], db: DatabaseService
-) -> pd.DataFrame:
-    return await db.get_entity_transactions(entity_ids, convert_to_polars=False)
+) -> pl.DataFrame:
+    return await db.get_entity_transactions(entity_ids)
 
 
 @router.post(
@@ -98,9 +98,9 @@ async def analyze_ai_llm(
         logger.info(f"Starting AI LLM analysis for {len(request.entity_ids)} entities")
         logger.info(request.entity_ids)
         transactions = await database_service.get_entity_transactions(
-            request.entity_ids, convert_to_polars=False
+            request.entity_ids
         )
-        if transactions.empty:
+        if transactions.is_empty():
             raise EntityNotFoundError(f"No transactions found for entities: {request.entity_ids}")
         results = analyze_transactions(transactions=transactions)
         end_time = datetime.now(timezone.utc)

@@ -6,7 +6,7 @@ import io
 import logging
 from typing import Optional
 
-import pandas as pd
+import polars as pl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.core.exceptions import DatabaseError, ValidationError
@@ -54,7 +54,7 @@ async def generate_regex_from_csv(
 
     try:
         payload = await csv_file.read()
-        df = pd.read_csv(io.BytesIO(payload))
+        df = pl.read_csv(io.BytesIO(payload))
     except Exception as exc:
         logger.error("Failed to read CSV (%s): %s", csv_file.filename, exc)
         raise HTTPException(

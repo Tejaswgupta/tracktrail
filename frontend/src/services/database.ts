@@ -933,6 +933,68 @@ export const transactionsService = {
     return count || 0;
   },
 
+  async getCaseTransactionsSummary(
+    caseId: string,
+    filters: {
+      query?: string;
+      searchEntityIds?: string[];
+      searchAccountIds?: string[];
+      entityIds?: string[];
+      accountIds?: string[];
+      transactionIds?: string[];
+      dateFrom?: string;
+      dateTo?: string;
+      minAmount?: number;
+      maxAmount?: number;
+      direction?: "DR" | "CR";
+      status?: "Failed" | "Success";
+      description?: string;
+      counterparty?: string;
+    } = {}
+  ): Promise<{ totalCount: number; totalAmount: number }> {
+    if (filters.entityIds && filters.entityIds.length === 0) {
+      return { totalCount: 0, totalAmount: 0 };
+    }
+    if (filters.accountIds && filters.accountIds.length === 0) {
+      return { totalCount: 0, totalAmount: 0 };
+    }
+    if (filters.transactionIds && filters.transactionIds.length === 0) {
+      return { totalCount: 0, totalAmount: 0 };
+    }
+
+    const normalizeArray = (values?: string[]) =>
+      values && values.length > 0 ? values : null;
+
+    const { data, error } = await supabase.rpc(
+      "get_case_transactions_summary",
+      {
+        p_case_id: caseId,
+        p_entity_ids: normalizeArray(filters.entityIds),
+        p_account_ids: normalizeArray(filters.accountIds),
+        p_transaction_ids: normalizeArray(filters.transactionIds),
+        p_date_from: filters.dateFrom ?? null,
+        p_date_to: filters.dateTo ?? null,
+        p_min_amount: filters.minAmount ?? null,
+        p_max_amount: filters.maxAmount ?? null,
+        p_direction: filters.direction ?? null,
+        p_status: filters.status ?? null,
+        p_description: filters.description ?? null,
+        p_counterparty: filters.counterparty ?? null,
+        p_query: filters.query ?? null,
+        p_search_entity_ids: normalizeArray(filters.searchEntityIds),
+        p_search_account_ids: normalizeArray(filters.searchAccountIds),
+      }
+    );
+
+    if (error) throw error;
+
+    const row = data?.[0];
+    return {
+      totalCount: Number(row?.total_count ?? 0),
+      totalAmount: Number(row?.total_amount ?? 0),
+    };
+  },
+
   
 
 

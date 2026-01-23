@@ -7,9 +7,9 @@ import logging
 import os
 import networkx as nx
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Union
-import pandas as pd
+import numpy as np
 import polars as pl
 from app.core.exceptions import AnalysisError, EntityNotFoundError, ValidationError
 from app.services.database_service import DatabaseService, get_database_service
@@ -55,8 +55,7 @@ class AnalysisService:
         entity_ids: List[str],
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
-        convert_to_polars: bool = True,
-    ) -> Union[pl.DataFrame, pd.DataFrame]:
+    ) -> pl.DataFrame:
         """
         Fetch transaction data and prepare it for analysis.
 
@@ -64,8 +63,6 @@ class AnalysisService:
             entity_ids: List of entity IDs
             date_from: Optional start date filter
             date_to: Optional end date filter
-            convert_to_polars: Whether to return Polars DataFrame
-
         Returns:
             DataFrame with transaction data
 
@@ -81,19 +78,13 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=convert_to_polars,
             )
 
-            if (convert_to_polars and len(df) == 0) or (
-                not convert_to_polars and df.empty
-            ):
+            if len(df) == 0:
                 logger.warning(f"No transactions found for entities: {entity_ids}")
                 return df
 
-            if convert_to_polars:
-                df = self._prepare_polars_data(df)
-            else:
-                df = self._prepare_pandas_data(df)
+            df = self._prepare_polars_data(df)
 
             logger.info(f"Prepared {len(df)} transactions for analysis")
             return df
@@ -151,47 +142,6 @@ class AnalysisService:
             logger.error(f"Polars data preparation failed: {str(e)}")
             raise AnalysisError(f"Failed to prepare Polars data: {str(e)}")
 
-    def _prepare_pandas_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Prepare Pandas DataFrame for analysis services.
-
-        Args:
-            df: Raw Pandas DataFrame from database
-
-        Returns:
-            Prepared Pandas DataFrame with standardized columns
-        """
-        try:
-
-            required_columns = ["DATE", "DEBIT", "CREDIT", "DESCRIPTION"]
-
-            for col in required_columns:
-                if col not in df.columns:
-                    if col == "DATE":
-                        df[col] = pd.NaT
-                    elif col in ["DEBIT", "CREDIT"]:
-                        df[col] = 0.0
-                    else:
-                        df[col] = ""
-
-            df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
-            df["DEBIT"] = pd.to_numeric(df["DEBIT"], errors="coerce").fillna(0.0)
-            df["CREDIT"] = pd.to_numeric(df["CREDIT"], errors="coerce").fillna(0.0)
-            df["DESCRIPTION"] = df["DESCRIPTION"].astype(str).fillna("")
-
-            if "counterparty" not in df.columns:
-                df["counterparty"] = ""
-
-            sort_columns = ["DATE"]
-            if "original_index" in df.columns:
-                sort_columns.append("original_index")
-            df = df.sort_values(sort_columns).reset_index(drop=True)
-
-            return df
-
-        except Exception as e:
-            logger.error(f"Pandas data preparation failed: {str(e)}")
-            raise AnalysisError(f"Failed to prepare Pandas data: {str(e)}")
 
     async def analyze_cash_flow(
         self,
@@ -223,10 +173,9 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=False,
             )
 
-            if df.empty:
+            if df.is_empty():
                 return self._empty_analysis_result("cash_flow", entity_ids)
 
             results = self._perform_cash_flow_analysis(df, **kwargs)
@@ -236,7 +185,7 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 results=results,
                 transaction_count=len(df),
-                date_range=self._get_date_range(df),
+                date_range=self._get_date_range_polars(df),
             )
 
         except (ValidationError, EntityNotFoundError) as e:
@@ -245,7 +194,7 @@ class AnalysisService:
             logger.error(f"Cash flow analysis failed: {str(e)}")
             raise AnalysisError(f"Cash flow analysis failed: {str(e)}")
 
-    def _perform_cash_flow_analysis(self, df: pd.DataFrame, **kwargs) -> Dict[str, Any]:
+    def _perform_cash_flow_analysis(self, df: pl.DataFrame, **kwargs) -> Dict[str, Any]:
         """Extract core cash flow analysis logic"""
         try:
 
@@ -255,36 +204,54 @@ class AnalysisService:
             threshold = kwargs.get("threshold", 50000)
 
             pattern = "|".join(cash_keywords)
-            cash_mask = df["DESCRIPTION"].str.contains(pattern, case=False, na=False)
-            cash_txns = df[cash_mask].copy()
+            cash_txns = df.filter(
+                pl.col("DESCRIPTION").str.contains(pattern, case_sensitive=False)
+            )
 
-            if len(cash_txns) == 0:
+            if cash_txns.is_empty():
                 return {
                     "cash_transactions_found": False,
                     "total_cash_transactions": 0,
                     "message": "No cash transactions found with specified keywords",
                 }
 
-            total_cash_out = cash_txns["DEBIT"].fillna(0).sum()
-            total_cash_in = cash_txns["CREDIT"].fillna(0).sum()
+            total_cash_out = float(
+                cash_txns.get_column("DEBIT").fill_null(0).sum()
+            )
+            total_cash_in = float(
+                cash_txns.get_column("CREDIT").fill_null(0).sum()
+            )
 
-            large_cash = cash_txns[
-                (cash_txns["DEBIT"] > threshold) | (cash_txns["CREDIT"] > threshold)
-            ]
+            large_cash = cash_txns.filter(
+                (pl.col("DEBIT") > threshold) | (pl.col("CREDIT") > threshold)
+            )
 
-            cash_txns["Month"] = cash_txns["DATE"].dt.to_period("M")
-            monthly_freq = cash_txns.groupby("Month").size()
+            cash_txns = cash_txns.with_columns(
+                [
+                    pl.col("DATE").dt.truncate("1mo").alias("Month"),
+                    pl.col("DATE").dt.strftime("%A").alias("DayOfWeek"),
+                ]
+            )
 
+            monthly_freq = cash_txns.group_by("Month").len().sort("Month")
             monthly_freq_dict = {
-                str(k): int(v) for k, v in monthly_freq.to_dict().items()
+                str(row["Month"]): int(row["len"])
+                for row in monthly_freq.iter_rows(named=True)
             }
 
-            cash_txns["DayOfWeek"] = cash_txns["DATE"].dt.day_name()
-            dow_freq = cash_txns["DayOfWeek"].value_counts()
-
-            cash_amounts = pd.concat(
-                [cash_txns["DEBIT"].dropna(), cash_txns["CREDIT"].dropna()]
+            dow_freq = (
+                cash_txns.group_by("DayOfWeek")
+                .len()
+                .sort("len", descending=True)
             )
+
+            debit_amounts = (
+                cash_txns.get_column("DEBIT").drop_nulls().to_list()
+            )
+            credit_amounts = (
+                cash_txns.get_column("CREDIT").drop_nulls().to_list()
+            )
+            cash_amounts = debit_amounts + credit_amounts
 
             results = {
                 "cash_transactions_found": True,
@@ -295,48 +262,70 @@ class AnalysisService:
                 "large_cash_threshold": threshold,
                 "frequency_analysis": {
                     "monthly_frequency": monthly_freq_dict,
-                    "avg_monthly_transactions": float(monthly_freq.mean()),
-                    "day_of_week_pattern": dow_freq.to_dict(),
+                    "avg_monthly_transactions": float(
+                        monthly_freq.get_column("len").mean()
+                        if len(monthly_freq) > 0
+                        else 0
+                    ),
+                    "day_of_week_pattern": {
+                        row["DayOfWeek"]: int(row["len"])
+                        for row in dow_freq.iter_rows(named=True)
+                    },
                     "peak_activity_day": (
-                        dow_freq.idxmax() if not dow_freq.empty else None
+                        dow_freq.get_column("DayOfWeek")[0]
+                        if len(dow_freq) > 0
+                        else None
                     ),
                 },
                 "amount_patterns": {
                     "average_amount": (
-                        float(cash_amounts.mean()) if not cash_amounts.empty else 0
+                        float(sum(cash_amounts) / len(cash_amounts))
+                        if cash_amounts
+                        else 0
                     ),
                     "median_amount": (
-                        float(cash_amounts.median()) if not cash_amounts.empty else 0
+                        float(np.median(cash_amounts)) if cash_amounts else 0
                     ),
                     "max_amount": (
-                        float(cash_amounts.max()) if not cash_amounts.empty else 0
+                        float(max(cash_amounts)) if cash_amounts else 0
                     ),
                     "min_amount": (
-                        float(cash_amounts.min()) if not cash_amounts.empty else 0
+                        float(min(cash_amounts)) if cash_amounts else 0
                     ),
                 },
                 "temporal_patterns": {
                     "date_range_days": (
-                        cash_txns["DATE"].max() - cash_txns["DATE"].min()
-                    ).days,
+                        (cash_txns.get_column("DATE").max()
+                        - cash_txns.get_column("DATE").min()).days
+                        if cash_txns.get_column("DATE").max() is not None
+                        and cash_txns.get_column("DATE").min() is not None
+                        else 0
+                    ),
                     "analysis_period": {
-                        "start": cash_txns["DATE"].min().isoformat(),
-                        "end": cash_txns["DATE"].max().isoformat(),
+                        "start": (
+                            cash_txns.get_column("DATE").min().isoformat()
+                            if cash_txns.get_column("DATE").min() is not None
+                            else None
+                        ),
+                        "end": (
+                            cash_txns.get_column("DATE").max().isoformat()
+                            if cash_txns.get_column("DATE").max() is not None
+                            else None
+                        ),
                     },
                 },
             }
 
             if len(large_cash) > 0:
-                records = large_cash[
+                records = large_cash.select(
                     ["DATE", "DESCRIPTION", "DEBIT", "CREDIT"]
-                ].to_dict("records")
+                ).to_dicts()
 
                 for r in records:
                     date_val = r.get("DATE")
-                    if isinstance(date_val, (pd.Timestamp, datetime)):
+                    if isinstance(date_val, datetime):
                         r["DATE"] = date_val.isoformat()
                     elif date_val is not None:
-
                         r["DATE"] = str(date_val)
                 results["large_transactions"] = records
 
@@ -374,10 +363,9 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=False,
             )
 
-            if df.empty:
+            if df.is_empty():
                 return self._empty_analysis_result("counterparty_trends", entity_ids)
 
             min_transactions = kwargs.get("min_transactions", 3)
@@ -440,7 +428,7 @@ class AnalysisService:
                     },
                 },
                 transaction_count=len(df),
-                date_range=self._get_date_range(df),
+                date_range=self._get_date_range_polars(df),
             )
 
         except (ValidationError, EntityNotFoundError) as e:
@@ -477,10 +465,9 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=False,
             )
 
-            if df.empty:
+            if df.is_empty():
                 return self._empty_analysis_result("mule_accounts", entity_ids)
 
             account_identifier = kwargs.get(
@@ -535,7 +522,7 @@ class AnalysisService:
                     },
                 },
                 transaction_count=len(df),
-                date_range=self._get_date_range(df),
+                date_range=self._get_date_range_polars(df),
             )
 
         except (ValidationError, EntityNotFoundError) as e:
@@ -597,7 +584,6 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=True,
             )
 
             if len(df) == 0:
@@ -749,14 +735,13 @@ class AnalysisService:
         try:
             results = []
 
-            df_pandas = df.to_pandas()
             logger.info(
-                f"Starting emergency detection on {len(df_pandas)} transactions"
+                f"Starting emergency detection on {len(df)} transactions"
             )
 
             counterparties = set()
-            if "DESCRIPTION" in df_pandas.columns:
-                for desc in df_pandas["DESCRIPTION"].dropna():
+            if "DESCRIPTION" in df.columns:
+                for desc in df.get_column("DESCRIPTION").drop_nulls().to_list():
                     words = desc.upper().split()
                     for word in words:
                         if len(word) > 3 and any(
@@ -775,22 +760,23 @@ class AnalysisService:
 
             for cp in counterparties:
 
-                if "DESCRIPTION" not in df_pandas.columns:
+                if "DESCRIPTION" not in df.columns:
                     continue
-                mask = df_pandas["DESCRIPTION"].str.contains(cp, case=False, na=False)
-                cp_df = df_pandas[mask].copy()
+                cp_df = df.filter(
+                    pl.col("DESCRIPTION").str.contains(cp, case_sensitive=False)
+                )
 
-                if len(cp_df) == 0:
+                if cp_df.is_empty():
                     continue
 
-                cp_df = cp_df.sort_values("DATE")
+                cp_df = cp_df.sort("DATE")
 
-                debits = cp_df[
-                    (cp_df["DEBIT"].notna()) & (cp_df["DEBIT"] >= min_amount)
-                ]
-                credits = cp_df[
-                    (cp_df["CREDIT"].notna()) & (cp_df["CREDIT"] >= min_amount)
-                ]
+                debits = cp_df.filter(
+                    (pl.col("DEBIT").is_not_null()) & (pl.col("DEBIT") >= min_amount)
+                )
+                credits = cp_df.filter(
+                    (pl.col("CREDIT").is_not_null()) & (pl.col("CREDIT") >= min_amount)
+                )
 
                 logger.info(
                     f"Counterparty {cp}: {len(debits)} debits, {len(credits)} credits"
@@ -798,8 +784,10 @@ class AnalysisService:
 
                 credits_used = set()
 
-                for _, debit in debits.iterrows():
-                    for credit_idx, credit in credits.iterrows():
+                debits_rows = debits.to_dicts()
+                credits_rows = credits.to_dicts()
+                for debit in debits_rows:
+                    for credit_idx, credit in enumerate(credits_rows):
                         if credit_idx in credits_used:
                             continue
                         if credit["DATE"] > debit["DATE"]:
@@ -872,10 +860,9 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=False,
             )
 
-            if df.empty:
+            if df.is_empty():
                 return self._empty_analysis_result("network_cycles", entity_ids)
 
             import networkx as nx
@@ -960,14 +947,14 @@ class AnalysisService:
                     },
                 },
                 transaction_count=len(df),
-                date_range=self._get_date_range(df),
+                date_range=self._get_date_range_polars(df),
             )
 
         except Exception as e:
             logger.error(f"Network cycle detection failed: {str(e)}")
             raise AnalysisError(f"Network cycle detection failed: {str(e)}")
 
-    def _build_transaction_graph(self, df: pd.DataFrame) -> "nx.DiGraph":
+    def _build_transaction_graph(self, df: pl.DataFrame) -> "nx.DiGraph":
         """Build a directed graph from transaction data with entity resolution"""
         try:
             import networkx as nx
@@ -976,29 +963,37 @@ class AnalysisService:
 
             entity_name_mapping = self._create_entity_name_mapping(df)
 
-            entity_groups = df.groupby("entity_id")
-
-            for entity_id, entity_df in entity_groups:
-                entity_name = entity_df.iloc[0].get(
-                    "entity_name", f"Entity_{entity_id}"
+            for entity_id, entity_df in df.group_by(
+                "entity_id", maintain_order=True
+            ):
+                entity_name = (
+                    entity_df.get_column("entity_name").first()
+                    if "entity_name" in entity_df.columns
+                    else None
                 )
+                if not entity_name:
+                    entity_name = f"Entity_{entity_id}"
 
                 if not graph.has_node(entity_id):
                     graph.add_node(
                         entity_id,
                         name=entity_name,
-                        entity_type=entity_df.iloc[0].get("entity_type", "Unknown"),
+                        entity_type=(
+                            entity_df.get_column("entity_type").first()
+                            if "entity_type" in entity_df.columns
+                            else "Unknown"
+                        ),
                         node_type="entity",
                         total_debits=0,
                         total_credits=0,
                         transaction_count=0,
                     )
 
-                for _, row in entity_df.iterrows():
-                    counterparty = row.get("counterparty", "").strip()
-                    amount = row.get("amount", 0)
-                    is_debit = row.get("DEBIT", 0) > 0
-                    is_credit = row.get("CREDIT", 0) > 0
+                for row in entity_df.iter_rows(named=True):
+                    counterparty = (row.get("counterparty") or "").strip()
+                    amount = row.get("amount", 0) or 0
+                    is_debit = (row.get("DEBIT") or 0) > 0
+                    is_credit = (row.get("CREDIT") or 0) > 0
 
                     if is_debit:
                         graph.nodes[entity_id]["total_debits"] += amount
@@ -1019,9 +1014,12 @@ class AnalysisService:
 
                             if not graph.has_node(target_node_id):
 
-                                counterparty_data = df[
-                                    df["entity_id"] == counterparty_entity_id
-                                ].iloc[0]
+                                counterparty_data = df.filter(
+                                    pl.col("entity_id") == counterparty_entity_id
+                                ).to_dicts()
+                                counterparty_data = (
+                                    counterparty_data[0] if counterparty_data else {}
+                                )
                                 graph.add_node(
                                     target_node_id,
                                     name=counterparty_data.get(
@@ -1064,9 +1062,7 @@ class AnalysisService:
                                 {
                                     "amount": amount,
                                     "date": (
-                                        pd.to_datetime(row["DATE"])
-                                        if pd.notna(row["DATE"])
-                                        else datetime.now()
+                                        row["DATE"] if row.get("DATE") else datetime.now()
                                     ),
                                     "description": row.get("DESCRIPTION", ""),
                                     "transaction_id": row.get("transaction_id", ""),
@@ -1089,8 +1085,8 @@ class AnalysisService:
                                     {
                                         "amount": amount,
                                         "date": (
-                                            pd.to_datetime(row["DATE"])
-                                            if pd.notna(row["DATE"])
+                                            row["DATE"]
+                                            if row.get("DATE")
                                             else datetime.now()
                                         ),
                                         "description": row.get("DESCRIPTION", ""),
@@ -1129,7 +1125,7 @@ class AnalysisService:
             logger.error(f"Graph building failed: {str(e)}")
             raise AnalysisError(f"Failed to build transaction graph: {str(e)}")
 
-    def _create_entity_name_mapping(self, df: pd.DataFrame) -> Dict[str, str]:
+    def _create_entity_name_mapping(self, df: pl.DataFrame) -> Dict[str, str]:
         """
         Create a mapping from entity names to entity IDs for counterparty resolution.
 
@@ -1142,18 +1138,21 @@ class AnalysisService:
         try:
             entity_mapping = {}
 
-            unique_entities = df[["entity_id", "entity_name"]].drop_duplicates()
+            if "entity_id" not in df.columns or "entity_name" not in df.columns:
+                return {}
 
-            for _, row in unique_entities.iterrows():
-                entity_id = row["entity_id"]
-                entity_name = row["entity_name"]
+            unique_entities = df.select(["entity_id", "entity_name"]).unique()
 
-                if pd.notna(entity_name) and entity_name.strip():
+            for row in unique_entities.iter_rows(named=True):
+                entity_id = row.get("entity_id")
+                entity_name = row.get("entity_name")
+
+                if entity_name and str(entity_name).strip():
 
                     normalized_name = self._normalize_entity_name(entity_name)
                     entity_mapping[normalized_name] = entity_id
 
-                    entity_mapping[entity_name.strip()] = entity_id
+                    entity_mapping[str(entity_name).strip()] = entity_id
 
             logger.debug(
                 f"Created entity name mapping with {len(entity_mapping)} entries"
@@ -1404,10 +1403,9 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=False,
             )
 
-            if df.empty:
+            if df.is_empty():
                 return self._empty_analysis_result("rapid_movements", entity_ids)
 
             hours = kwargs.get("hours", 24)
@@ -1423,7 +1421,7 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 results=rapid_patterns,
                 transaction_count=len(df),
-                date_range=self._get_date_range(df),
+                date_range=self._get_date_range_polars(df),
             )
 
         except (ValidationError, EntityNotFoundError) as e:
@@ -1433,7 +1431,7 @@ class AnalysisService:
             raise AnalysisError(f"Rapid movement analysis failed: {str(e)}")
 
     def _detect_rapid_movements(
-        self, df: pd.DataFrame, hours: int, tolerance: float, min_amount: float
+        self, df: pl.DataFrame, hours: int, tolerance: float, min_amount: float
     ) -> Dict[str, Any]:
         """Extract rapid movement detection logic from rapid_movement.py"""
         try:
@@ -1441,31 +1439,34 @@ class AnalysisService:
             sort_columns = ["DATE"]
             if "original_index" in df.columns:
                 sort_columns.append("original_index")
-            df_sorted = df.sort_values(by=sort_columns).reset_index(drop=True)
+            df_sorted = df.sort(sort_columns)
             rapid_patterns = []
 
+            rows = df_sorted.to_dicts()
             matched_in_transactions = set()
             matched_out_transactions = set()
 
-            for i in range(len(df_sorted) - 1):
-                curr = df_sorted.iloc[i]
+            for i in range(len(rows) - 1):
+                curr = rows[i]
 
                 if i in matched_in_transactions:
                     continue
 
-                if pd.notna(curr["CREDIT"]) and curr["CREDIT"] >= min_amount:
+                if curr.get("CREDIT") is not None and curr["CREDIT"] >= min_amount:
                     best_match = None
                     best_match_index = None
                     best_amount_diff = float("inf")
 
-                    for j in range(i + 1, min(i + 20, len(df_sorted))):
-                        next_txn = df_sorted.iloc[j]
+                    for j in range(i + 1, min(i + 20, len(rows))):
+                        next_txn = rows[j]
 
                         if j in matched_out_transactions:
                             continue
 
-                        if pd.notna(next_txn["DEBIT"]):
+                        if next_txn.get("DEBIT") is not None:
 
+                            if not curr.get("DATE") or not next_txn.get("DATE"):
+                                continue
                             time_diff = (
                                 next_txn["DATE"] - curr["DATE"]
                             ).total_seconds() / 3600
@@ -1511,19 +1512,19 @@ class AnalysisService:
 
             repeated_pairs = []
             if rapid_patterns:
-                patterns_df = pd.DataFrame(rapid_patterns)
+                patterns_df = pl.DataFrame(rapid_patterns)
                 if {"in_counterparty", "out_counterparty"}.issubset(
                     patterns_df.columns
                 ):
                     pair_counts = (
-                        patterns_df.groupby(["in_counterparty", "out_counterparty"])
-                        .size()
-                        .reset_index(name="occurrences")
+                        patterns_df.group_by(["in_counterparty", "out_counterparty"])
+                        .len()
+                        .rename({"len": "occurrences"})
                     )
                     repeated_pairs = (
-                        pair_counts[pair_counts["occurrences"] >= 2]
-                        .sort_values("occurrences", ascending=False)
-                        .to_dict("records")
+                        pair_counts.filter(pl.col("occurrences") >= 2)
+                        .sort("occurrences", descending=True)
+                        .to_dicts()
                     )
 
             return {
@@ -1569,10 +1570,9 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=False,
             )
 
-            if df.empty:
+            if df.is_empty():
                 return self._empty_analysis_result("time_trends", entity_ids)
 
             time_granularity = kwargs.get("time_granularity", "daily")
@@ -1590,7 +1590,7 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 results=analysis_results,
                 transaction_count=len(df),
-                date_range=self._get_date_range(df),
+                date_range=self._get_date_range_polars(df),
             )
 
         except (ValidationError, EntityNotFoundError) as e:
@@ -1627,10 +1627,9 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 date_from=date_from,
                 date_to=date_to,
-                convert_to_polars=False,
             )
 
-            if df.empty:
+            if df.is_empty():
                 return self._empty_analysis_result("transfer_patterns", entity_ids)
 
             time_window = kwargs.get("time_window", 7)
@@ -1648,7 +1647,7 @@ class AnalysisService:
                 entity_ids=entity_ids,
                 results=transfer_patterns,
                 transaction_count=len(df),
-                date_range=self._get_date_range(df),
+                date_range=self._get_date_range_polars(df),
             )
 
         except (ValidationError, EntityNotFoundError) as e:
@@ -1659,7 +1658,7 @@ class AnalysisService:
 
     def _find_transfer_patterns(
         self,
-        df: pd.DataFrame,
+        df: pl.DataFrame,
         time_window: int,
         percentage_match: float,
         deviance: float,
@@ -1668,7 +1667,9 @@ class AnalysisService:
     ) -> Dict[str, Any]:
         """Extract transfer pattern detection logic from transfer_pattern.py"""
         try:
-            if "counterparty" not in df.columns or df["counterparty"].nunique() < 2:
+            if "counterparty" not in df.columns or df.get_column(
+                "counterparty"
+            ).n_unique() < 2:
                 return {
                     "transfer_patterns_found": False,
                     "message": "Transfer pattern analysis requires at least two counterparties",
@@ -1678,58 +1679,62 @@ class AnalysisService:
             sort_columns = ["DATE"]
             if "original_index" in df.columns:
                 sort_columns.append("original_index")
-            df_sorted = df.sort_values(sort_columns).reset_index(drop=True)
+            df_sorted = df.sort(sort_columns)
 
-            credits = df_sorted[
-                (df_sorted["CREDIT"].notna())
-                & (df_sorted["CREDIT"] >= min_amount)
-                & (df_sorted["counterparty"] != "")
-            ].copy()
+            credits = df_sorted.filter(
+                (pl.col("CREDIT").is_not_null())
+                & (pl.col("CREDIT") >= min_amount)
+                & (pl.col("counterparty") != "")
+            )
 
-            debits = df_sorted[
-                (df_sorted["DEBIT"].notna())
-                & (df_sorted["DEBIT"] >= min_amount)
-                & (df_sorted["counterparty"] != "")
-            ].copy()
+            debits = df_sorted.filter(
+                (pl.col("DEBIT").is_not_null())
+                & (pl.col("DEBIT") >= min_amount)
+                & (pl.col("counterparty") != "")
+            )
 
             potential_patterns = []
             used_debits = set()
 
-            for _, credit_txn in credits.iterrows():
+            credit_rows = credits.to_dicts()
+            debit_rows = debits.to_dicts()
+
+            for credit_txn in credit_rows:
                 credit_amount = credit_txn["CREDIT"]
                 credit_date = credit_txn["DATE"]
                 source_cp = credit_txn["counterparty"]
 
-                time_limit = credit_date + pd.Timedelta(days=time_window)
+                time_limit = credit_date + timedelta(days=time_window)
                 lower_bound = credit_amount * (percentage_match - deviance) / 100
                 upper_bound = credit_amount * (percentage_match + deviance) / 100
 
-                candidate_debits = debits[
-                    (debits["DATE"] > credit_date)
-                    & (debits["DATE"] <= time_limit)
-                    & (debits["DEBIT"] >= lower_bound)
-                    & (debits["DEBIT"] <= upper_bound)
-                    & (debits["counterparty"] != source_cp)
-                    & (~debits.index.isin(used_debits))
-                ]
+                best_match = None
+                best_match_score = None
+                best_match_index = None
 
-                if len(candidate_debits) > 0:
-                    candidate_debits = candidate_debits.copy()
-                    candidate_debits["amount_diff"] = abs(
-                        candidate_debits["DEBIT"] - credit_amount
-                    )
-                    candidate_debits["date_diff"] = (
-                        candidate_debits["DATE"] - credit_date
-                    ).dt.days
+                for idx, debit_txn in enumerate(debit_rows):
+                    if idx in used_debits:
+                        continue
+                    if debit_txn["DATE"] <= credit_date or debit_txn["DATE"] > time_limit:
+                        continue
+                    if debit_txn["DEBIT"] < lower_bound or debit_txn["DEBIT"] > upper_bound:
+                        continue
+                    if debit_txn["counterparty"] == source_cp:
+                        continue
 
-                    candidate_debits["match_score"] = (
-                        1 - candidate_debits["amount_diff"] / credit_amount
-                    ) * 0.7 + (1 - candidate_debits["date_diff"] / time_window) * 0.3
+                    amount_diff = abs(debit_txn["DEBIT"] - credit_amount)
+                    date_diff = (debit_txn["DATE"] - credit_date).days
+                    match_score = (
+                        1 - amount_diff / credit_amount
+                    ) * 0.7 + (1 - date_diff / time_window) * 0.3
 
-                    best_match = candidate_debits.loc[
-                        candidate_debits["match_score"].idxmax()
-                    ]
-                    used_debits.add(best_match.name)
+                    if best_match_score is None or match_score > best_match_score:
+                        best_match = debit_txn
+                        best_match_score = match_score
+                        best_match_index = idx
+
+                if best_match is not None:
+                    used_debits.add(best_match_index)
 
                     dest_cp = best_match["counterparty"]
                     potential_patterns.append(
@@ -1755,24 +1760,26 @@ class AnalysisService:
                     "patterns": [],
                 }
 
-            patterns_df = pd.DataFrame(potential_patterns)
-            pattern_groups = patterns_df.groupby(["source", "destination"])
-
             final_results = []
-            for (source, destination), group in pattern_groups:
+            patterns_df = pl.DataFrame(potential_patterns)
+            for (source, destination), group in patterns_df.group_by(
+                ["source", "destination"], maintain_order=True
+            ):
                 if len(group) >= min_occurrences:
                     summary = {
                         "source": source,
                         "destination": destination,
                         "occurrences": len(group),
-                        "average_in_amount": float(group["in_amount"].mean()),
-                        "average_out_amount": float(group["out_amount"].mean()),
-                        "average_percentage_transferred": float(
-                            group["percentage_transferred"].mean()
+                        "average_in_amount": float(group.get_column("in_amount").mean()),
+                        "average_out_amount": float(
+                            group.get_column("out_amount").mean()
                         ),
-                        "first_occurrence": group["in_date"].min(),
-                        "last_occurrence": group["out_date"].max(),
-                        "details": group.to_dict("records"),
+                        "average_percentage_transferred": float(
+                            group.get_column("percentage_transferred").mean()
+                        ),
+                        "first_occurrence": group.get_column("in_date").min(),
+                        "last_occurrence": group.get_column("out_date").max(),
+                        "details": group.to_dicts(),
                     }
                     final_results.append(summary)
 
@@ -1828,18 +1835,6 @@ class AnalysisService:
             "insights": ["No data available for analysis"],
             "risk_indicators": [],
             "timestamp": datetime.utcnow().isoformat(),
-        }
-
-    def _get_date_range(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Extract date range from DataFrame"""
-        if df.empty or "DATE" not in df.columns:
-            return {"start": None, "end": None}
-
-        return {
-            "start": (
-                df["DATE"].min().isoformat() if pd.notna(df["DATE"].min()) else None
-            ),
-            "end": df["DATE"].max().isoformat() if pd.notna(df["DATE"].max()) else None,
         }
 
     def _get_date_range_polars(self, df: pl.DataFrame) -> Dict[str, Any]:

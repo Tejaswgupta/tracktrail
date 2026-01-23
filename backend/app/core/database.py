@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from contextlib import asynccontextmanager
-import pandas as pd
+import polars as pl
 from supabase import create_client, Client
 from postgrest.exceptions import APIError
 
@@ -116,7 +116,7 @@ class DatabaseManager:
         entity_ids: List[str],
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
-    ) -> pd.DataFrame:
+    ) -> pl.DataFrame:
         """
         Fetch transactions for specified entities with optional date filtering.
 
@@ -188,9 +188,9 @@ class DatabaseManager:
                         raise EntityNotFoundError(
                             f"No entities found for IDs: {entity_ids}"
                         )
-                    return pd.DataFrame()
+                    return pl.DataFrame()
 
-                df = pd.DataFrame(all_data)
+                df = pl.DataFrame(all_data)
 
                 df = self._standardize_transaction_columns(df)
 
@@ -207,7 +207,7 @@ class DatabaseManager:
             logger.error(f"Unexpected database error: {str(e)}")
             raise DatabaseError(f"Database operation failed: {str(e)}")
 
-    def _standardize_transaction_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _standardize_transaction_columns(self, df: pl.DataFrame) -> pl.DataFrame:
         """
         Standardize transaction DataFrame columns for analysis services.
 
@@ -219,48 +219,90 @@ class DatabaseManager:
         """
         try:
 
-            df["DATE"] = pd.to_datetime(df["tx_date"])
-            df["DESCRIPTION"] = df["description"].fillna("")
-            df["counterparty"] = df["counterparty_merged"].fillna("")
-
-            df["DEBIT"] = df.apply(
-                lambda row: row["amount"] if row["direction"] == "DR" else 0.0, axis=1
+            df = df.with_columns(
+                [
+                    pl.col("tx_date").cast(pl.Datetime).alias("DATE"),
+                    pl.col("description").fill_null("").alias("DESCRIPTION"),
+                    pl.col("counterparty_merged").fill_null("").alias("counterparty"),
+                    pl.when(pl.col("direction") == "DR")
+                    .then(pl.col("amount"))
+                    .otherwise(0.0)
+                    .alias("DEBIT"),
+                    pl.when(pl.col("direction") == "CR")
+                    .then(pl.col("amount"))
+                    .otherwise(0.0)
+                    .alias("CREDIT"),
+                    pl.col("balance").fill_null(0.0).alias("balance"),
+                    pl.col("original_index").fill_null(0).alias("original_index"),
+                ]
             )
-            df["CREDIT"] = df.apply(
-                lambda row: row["amount"] if row["direction"] == "CR" else 0.0, axis=1
-            )
 
-            df["transaction_id"] = df["transaction_id"]
-            df["entity_id"] = df["entity_id"]
-            df["account_id"] = df["account_id"]
-            df["balance"] = df["balance"].fillna(0.0)
-            df["original_index"] = df["original_index"].fillna(0)
-
-            if "entities" in df.columns and not df["entities"].isna().all():
-                df["entity_name"] = df["entities"].apply(
-                    lambda x: x.get("entity_name", "") if isinstance(x, dict) else ""
-                )
-                df["entity_type"] = df["entities"].apply(
-                    lambda x: x.get("entity_type", "") if isinstance(x, dict) else ""
+            if "entities" in df.columns:
+                df = df.with_columns(
+                    [
+                        pl.col("entities")
+                        .map_elements(
+                            lambda x: x.get("entity_name", "")
+                            if isinstance(x, dict)
+                            else "",
+                            return_dtype=pl.Utf8,
+                        )
+                        .alias("entity_name"),
+                        pl.col("entities")
+                        .map_elements(
+                            lambda x: x.get("entity_type", "")
+                            if isinstance(x, dict)
+                            else "",
+                            return_dtype=pl.Utf8,
+                        )
+                        .alias("entity_type"),
+                    ]
                 )
             else:
-                df["entity_name"] = ""
-                df["entity_type"] = ""
+                df = df.with_columns(
+                    [
+                        pl.lit("").alias("entity_name"),
+                        pl.lit("").alias("entity_type"),
+                    ]
+                )
 
-            if "accounts" in df.columns and not df["accounts"].isna().all():
-                df["account_number"] = df["accounts"].apply(
-                    lambda x: x.get("account_number", "") if isinstance(x, dict) else ""
-                )
-                df["account_name"] = df["accounts"].apply(
-                    lambda x: x.get("account_name", "") if isinstance(x, dict) else ""
-                )
-                df["bank_name"] = df["accounts"].apply(
-                    lambda x: x.get("bank_name", "") if isinstance(x, dict) else ""
+            if "accounts" in df.columns:
+                df = df.with_columns(
+                    [
+                        pl.col("accounts")
+                        .map_elements(
+                            lambda x: x.get("account_number", "")
+                            if isinstance(x, dict)
+                            else "",
+                            return_dtype=pl.Utf8,
+                        )
+                        .alias("account_number"),
+                        pl.col("accounts")
+                        .map_elements(
+                            lambda x: x.get("account_name", "")
+                            if isinstance(x, dict)
+                            else "",
+                            return_dtype=pl.Utf8,
+                        )
+                        .alias("account_name"),
+                        pl.col("accounts")
+                        .map_elements(
+                            lambda x: x.get("bank_name", "")
+                            if isinstance(x, dict)
+                            else "",
+                            return_dtype=pl.Utf8,
+                        )
+                        .alias("bank_name"),
+                    ]
                 )
             else:
-                df["account_number"] = ""
-                df["account_name"] = ""
-                df["bank_name"] = ""
+                df = df.with_columns(
+                    [
+                        pl.lit("").alias("account_number"),
+                        pl.lit("").alias("account_name"),
+                        pl.lit("").alias("bank_name"),
+                    ]
+                )
 
             return df
 

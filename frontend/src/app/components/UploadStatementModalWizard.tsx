@@ -58,6 +58,11 @@ export default function UploadStatementModalWizard({
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
     null
   );
+  const [currentFileProgress, setCurrentFileProgress] =
+    useState<UploadProgress | null>(null);
+  const [currentUploadIndex, setCurrentUploadIndex] = useState<number | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [isLoadingAccount, setIsLoadingAccount] = useState(false);
 
@@ -296,11 +301,24 @@ export default function UploadStatementModalWizard({
     setIsUploading(true);
     setError(null);
     setUploadProgress(null);
+    setCurrentFileProgress(null);
+    setCurrentUploadIndex(0);
 
     try {
       for (let i = 0; i < files.length; i += 1) {
         const currentFile = files[i];
         const mapping = fileMappings[i] || undefined;
+        setCurrentUploadIndex(i);
+        setCurrentFileProgress({
+          loaded: 0,
+          total: currentFile.size,
+          percentage: 0,
+        });
+        setUploadProgress({
+          loaded: 0,
+          total: currentFile.size,
+          percentage: Math.round((i / files.length) * 100),
+        });
         await fileUploadService.uploadStatement({
           accountId,
           file: currentFile,
@@ -315,6 +333,9 @@ export default function UploadStatementModalWizard({
               100,
               Math.round((baseProgress + currentProgress) * 100)
             );
+            const filePercentage =
+              progress.uploadPercentage ?? progress.percentage;
+            setCurrentFileProgress({ ...progress, percentage: filePercentage });
             setUploadProgress({ ...progress, percentage });
           },
         });
@@ -328,6 +349,8 @@ export default function UploadStatementModalWizard({
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
+      setCurrentFileProgress(null);
+      setCurrentUploadIndex(null);
     }
   };
 
@@ -565,18 +588,46 @@ export default function UploadStatementModalWizard({
         )}
 
         {/* Upload Progress */}
-        {uploadProgress && (
-          <div className="mt-6 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span>Uploading...</span>
-              <span>{uploadProgress.percentage}%</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${uploadProgress.percentage}%` }}
-              />
-            </div>
+        {(isUploading || uploadProgress) && (
+          <div className="mt-6 space-y-3">
+            {currentUploadIndex !== null && files[currentUploadIndex] && (
+              <div className="flex flex-col gap-1 text-sm text-gray-700">
+                <span className="font-medium">
+                  Uploading file {currentUploadIndex + 1} of {files.length}
+                </span>
+                <span className="text-gray-500">
+                  {files[currentUploadIndex].name}
+                </span>
+              </div>
+            )}
+            {currentFileProgress && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Current file</span>
+                  <span>{currentFileProgress.percentage}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-400 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${currentFileProgress.percentage}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {uploadProgress && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span>Overall progress</span>
+                  <span>{uploadProgress.percentage}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress.percentage}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 

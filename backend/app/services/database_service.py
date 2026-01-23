@@ -7,7 +7,6 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import pandas as pd
 import polars as pl
 from app.core.database import db_manager
 from app.core.exceptions import (DatabaseError, EntityNotFoundError,
@@ -32,8 +31,7 @@ class DatabaseService:
         entity_ids: List[str],
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
-        convert_to_polars: bool = True,
-    ) -> pl.DataFrame | pd.DataFrame:
+    ) -> pl.DataFrame:
         """
         Fetch transactions for specified entities with optional date filtering.
 
@@ -41,8 +39,6 @@ class DatabaseService:
             entity_ids: List of entity IDs to fetch transactions for
             date_from: Optional start date filter
             date_to: Optional end date filter
-            convert_to_polars: Whether to convert result to Polars DataFrame
-
         Returns:
             DataFrame containing transaction data (Polars)
 
@@ -71,12 +67,6 @@ class DatabaseService:
             df = await self.db_manager.get_entity_transactions(
                 entity_ids=entity_ids, date_from=date_from, date_to=date_to
             )
-
-            if convert_to_polars and not df.empty:
-                df = pl.from_pandas(df)
-            elif convert_to_polars and df.empty:
-
-                df = pl.DataFrame()
 
             logger.info(
                 f"Successfully retrieved {len(df) if hasattr(df, '__len__') else 0} transactions"

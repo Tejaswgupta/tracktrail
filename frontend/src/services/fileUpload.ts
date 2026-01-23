@@ -6,6 +6,7 @@ import {
 import { createClient } from "@/utils/supabase/client";
 import { statementsService, transactionsService } from "./database";
 import { transactionExtractorService } from "./transactionExtractor";
+import * as tus from "tus-js-client";
 
 const supabase = createClient();
 
@@ -41,6 +42,8 @@ export interface UploadProgress {
   loaded: number;
   total: number;
   percentage: number;
+  uploadPercentage?: number;
+  stage?: "upload" | "processing";
 }
 
 export interface StatementUploadData {
@@ -166,17 +169,89 @@ export const fileUploadService = {
         .toString(36)
         .substring(2)}.${fileExt}`;
 
-      // Upload file to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from("bank-statements")
-        .upload(fileName, file, {
-          cacheControl: "3600",
-          upsert: false,
-        });
+      const uploadToStorage = async () => {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
 
-      if (uploadError) {
-        throw new Error(`Upload failed: ${uploadError.message}`);
-      }
+        if (sessionError || !session) {
+          throw new Error("Authentication required");
+        }
+
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (!supabaseUrl) {
+          throw new Error("Missing Supabase URL");
+        }
+
+        const uploadEndpoint = (() => {
+          const url = new URL(supabaseUrl);
+          if (url.hostname.endsWith(".supabase.co")) {
+            url.hostname = url.hostname.replace(
+              ".supabase.co",
+              ".storage.supabase.co"
+            );
+          }
+          return `${url.origin}/storage/v1/upload/resumable`;
+        })();
+
+        const uploadWeight = 30;
+
+        await new Promise<void>((resolve, reject) => {
+          const uploader = new tus.Upload(file, {
+            endpoint: uploadEndpoint,
+            retryDelays: [0, 3000, 5000, 10000, 20000],
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+              "x-upsert": "false",
+            },
+            uploadDataDuringCreation: true,
+            removeFingerprintOnSuccess: true,
+            chunkSize: 6 * 1024 * 1024,
+            metadata: {
+              bucketName: "bank-statements",
+              objectName: fileName,
+              contentType: file.type,
+              cacheControl: "3600",
+            },
+            onError: (error) => {
+              reject(error);
+            },
+            onProgress: (bytesUploaded, bytesTotal) => {
+              if (!onProgress || bytesTotal === 0) return;
+              const uploadPercentage = Math.round(
+                (bytesUploaded / bytesTotal) * 100
+              );
+              const overallPercentage = Math.min(
+                uploadWeight,
+                Math.round((uploadPercentage / 100) * uploadWeight)
+              );
+              onProgress({
+                loaded: bytesUploaded,
+                total: bytesTotal,
+                percentage: overallPercentage,
+                uploadPercentage,
+                stage: "upload",
+              });
+            },
+            onSuccess: () => {
+              resolve();
+            },
+          });
+
+          uploader
+            .findPreviousUploads()
+            .then((previousUploads) => {
+              if (previousUploads.length > 0) {
+                uploader.resumeFromPreviousUpload(previousUploads[0]);
+              }
+              uploader.start();
+            })
+            .catch(reject);
+        });
+      };
+
+      await uploadToStorage();
 
       // Get file type from MIME type
       const getFileType = (
@@ -212,9 +287,11 @@ export const fileUploadService = {
 
       if (onProgress) {
         onProgress({
-          loaded: file.size * 0.2,
+          loaded: file.size,
           total: file.size,
-          percentage: 20,
+          percentage: 30,
+          uploadPercentage: 100,
+          stage: "processing",
         });
       }
 
@@ -245,9 +322,11 @@ export const fileUploadService = {
 
         if (onProgress) {
           onProgress({
-            loaded: file.size * 0.3,
+            loaded: file.size,
             total: file.size,
             percentage: 30,
+            uploadPercentage: 100,
+            stage: "processing",
           });
         }
 
@@ -288,9 +367,11 @@ export const fileUploadService = {
 
         if (onProgress) {
           onProgress({
-            loaded: file.size * 0.6,
+            loaded: file.size,
             total: file.size,
             percentage: 60,
+            uploadPercentage: 100,
+            stage: "processing",
           });
         }
 
@@ -341,9 +422,11 @@ export const fileUploadService = {
 
           if (onProgress) {
             onProgress({
-              loaded: file.size * 0.9,
+              loaded: file.size,
               total: file.size,
               percentage: 90,
+              uploadPercentage: 100,
+              stage: "processing",
             });
           }
         }
@@ -366,7 +449,13 @@ export const fileUploadService = {
         }
 
         if (onProgress) {
-          onProgress({ loaded: file.size, total: file.size, percentage: 100 });
+          onProgress({
+            loaded: file.size,
+            total: file.size,
+            percentage: 100,
+            uploadPercentage: 100,
+            stage: "processing",
+          });
         }
 
         return {

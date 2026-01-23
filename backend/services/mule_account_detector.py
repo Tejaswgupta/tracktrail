@@ -6,7 +6,7 @@ multiple small amounts (credits) and then make large periodic debits.
 This is a common money laundering technique.
 """
 
-import pandas as pd
+import polars as pl
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
@@ -84,7 +84,7 @@ class MuleAccountDetector:
         }
 
     def detect_mule_patterns(
-        self, df: pd.DataFrame, account_identifier: str = None
+        self, df: pl.DataFrame, account_identifier: str = None
     ) -> List[MuleAccountAlert]:
         """
         Main detection function for mule account patterns.
@@ -99,12 +99,12 @@ class MuleAccountDetector:
         Returns:
             List of MuleAccountAlert objects
         """
-        if df.empty:
+        if df.is_empty():
             return []
 
         df_clean = self._prepare_mule_analysis_data(df)
 
-        if df_clean.empty:
+        if df_clean.is_empty():
             return []
 
         alerts = []
@@ -137,56 +137,88 @@ class MuleAccountDetector:
 
         return alerts
 
-    def _prepare_mule_analysis_data(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _prepare_mule_analysis_data(self, df: pl.DataFrame) -> pl.DataFrame:
         """Prepare data specifically for mule account analysis"""
-        df_clean = df.copy()
+        df_clean = df.clone()
 
         if "DATE" in df_clean.columns:
-            df_clean["DATE"] = pd.to_datetime(df_clean["DATE"], errors="coerce")
+            df_clean = df_clean.with_columns(
+                pl.col("DATE")
+                .cast(pl.Utf8)
+                .str.strptime(pl.Datetime, strict=False)
+                .alias("DATE")
+            )
 
         for col in ["DEBIT", "CREDIT"]:
             if col in df_clean.columns:
-                df_clean[col] = pd.to_numeric(
-                    df_clean[col].astype(str).str.replace(",", "").str.replace("₹", ""),
-                    errors="coerce",
+                df_clean = df_clean.with_columns(
+                    pl.col(col)
+                    .cast(pl.Utf8)
+                    .str.replace_all(",", "")
+                    .str.replace_all("₹", "")
+                    .cast(pl.Float64, strict=False)
+                    .fill_null(0)
+                    .alias(col)
                 )
-                df_clean[col] = df_clean[col].fillna(0)
 
-        df_clean = df_clean.dropna(subset=["DATE"])
+        df_clean = df_clean.filter(pl.col("DATE").is_not_null())
 
-        df_clean["is_credit"] = df_clean["CREDIT"] > 0
-        df_clean["is_debit"] = df_clean["DEBIT"] > 0
-        df_clean["amount"] = df_clean["CREDIT"] + df_clean["DEBIT"]
-        df_clean["transaction_type"] = df_clean.apply(
-            lambda row: "credit" if row["is_credit"] else "debit", axis=1
+        df_clean = df_clean.with_columns(
+            [
+                (pl.col("CREDIT") > 0).alias("is_credit"),
+                (pl.col("DEBIT") > 0).alias("is_debit"),
+                (pl.col("CREDIT") + pl.col("DEBIT")).alias("amount"),
+                pl.when(pl.col("CREDIT") > 0)
+                .then(pl.lit("credit"))
+                .otherwise(pl.lit("debit"))
+                .alias("transaction_type"),
+            ]
         )
 
-        if len(df_clean) > 0:
+        if df_clean.height > 0:
+            small_threshold = df_clean.select(
+                pl.col("amount").quantile(self.config["small_percentile_threshold"])
+            ).item()
+            large_threshold = df_clean.select(
+                pl.col("amount").quantile(self.config["large_percentile_threshold"])
+            ).item()
+            if small_threshold is None:
+                small_threshold = 0.0
+            if large_threshold is None:
+                large_threshold = 0.0
 
-            small_threshold = df_clean["amount"].quantile(
-                self.config["small_percentile_threshold"]
+            df_clean = df_clean.with_columns(
+                [
+                    (pl.col("amount") <= pl.lit(small_threshold)).alias(
+                        "is_small_amount"
+                    ),
+                    (pl.col("amount") >= pl.lit(large_threshold)).alias(
+                        "is_large_amount"
+                    ),
+                    pl.lit(small_threshold).alias("_adaptive_small_threshold"),
+                    pl.lit(large_threshold).alias("_adaptive_large_threshold"),
+                ]
             )
-            large_threshold = df_clean["amount"].quantile(
-                self.config["large_percentile_threshold"]
-            )
-
-            df_clean["is_small_amount"] = df_clean["amount"] <= small_threshold
-            df_clean["is_large_amount"] = df_clean["amount"] >= large_threshold
-
-            df_clean["_adaptive_small_threshold"] = small_threshold
-            df_clean["_adaptive_large_threshold"] = large_threshold
         else:
-            df_clean["is_small_amount"] = False
-            df_clean["is_large_amount"] = False
+            df_clean = df_clean.with_columns(
+                [
+                    pl.lit(False).alias("is_small_amount"),
+                    pl.lit(False).alias("is_large_amount"),
+                ]
+            )
 
-        df_clean["day_of_week"] = df_clean["DATE"].dt.day_name()
-        df_clean["day_of_month"] = df_clean["DATE"].dt.day
-        df_clean["week_of_year"] = df_clean["DATE"].dt.isocalendar().week
+        df_clean = df_clean.with_columns(
+            [
+                pl.col("DATE").dt.strftime("%A").alias("day_of_week"),
+                pl.col("DATE").dt.day().alias("day_of_month"),
+                pl.col("DATE").dt.week().alias("week_of_year"),
+            ]
+        )
 
-        return df_clean.sort_values("DATE")
+        return df_clean.sort("DATE")
 
     def _analyze_multiple_time_intervals(
-        self, df: pd.DataFrame
+        self, df: pl.DataFrame
     ) -> List[Dict[str, Any]]:
         """
         Analyze pass-through behavior across multiple time intervals to catch
@@ -194,7 +226,7 @@ class MuleAccountDetector:
         """
         results = []
 
-        if df.empty:
+        if df.is_empty():
             return results
 
         total_credits = df["CREDIT"].sum()
@@ -237,29 +269,51 @@ class MuleAccountDetector:
 
         return results
 
-    def _analyze_daily_balancing(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+    def _analyze_daily_balancing(self, df: pl.DataFrame) -> List[Dict[str, Any]]:
         """Analyze if the account balances out on a daily basis"""
         results = []
 
         try:
 
-            daily_groups = df.groupby(df["DATE"].dt.date)
-            balanced_days = 0
-            total_days_with_both = 0
+            daily_summary = (
+                df.with_columns(pl.col("DATE").dt.date().alias("date"))
+                .group_by("date")
+                .agg(
+                    [
+                        pl.col("CREDIT").sum().alias("day_credits"),
+                        pl.col("DEBIT").sum().alias("day_debits"),
+                    ]
+                )
+                .with_columns(
+                    (pl.col("day_credits") + pl.col("day_debits")).alias(
+                        "day_total_flow"
+                    ),
+                    (pl.col("day_credits") - pl.col("day_debits")).alias(
+                        "day_net_flow"
+                    ),
+                )
+                .with_columns(
+                    pl.when(pl.col("day_total_flow") > 0)
+                    .then(pl.col("day_net_flow").abs() / pl.col("day_total_flow"))
+                    .otherwise(pl.lit(1.0))
+                    .alias("day_ratio")
+                )
+            )
 
-            for date, day_df in daily_groups:
-                day_credits = day_df["CREDIT"].sum()
-                day_debits = day_df["DEBIT"].sum()
-
-                if day_credits > 0 and day_debits > 0:
-                    total_days_with_both += 1
-                    day_net_flow = day_credits - day_debits
-                    day_total_flow = day_credits + day_debits
-
-                    if day_total_flow > 0:
-                        day_ratio = abs(day_net_flow) / day_total_flow
-                        if day_ratio <= 0.1:
-                            balanced_days += 1
+            total_days_with_both = (
+                daily_summary.filter(
+                    (pl.col("day_credits") > 0) & (pl.col("day_debits") > 0)
+                )
+                .height
+            )
+            balanced_days = (
+                daily_summary.filter(
+                    (pl.col("day_credits") > 0)
+                    & (pl.col("day_debits") > 0)
+                    & (pl.col("day_ratio") <= 0.1)
+                )
+                .height
+            )
 
             if (
                 total_days_with_both >= 3
@@ -267,15 +321,21 @@ class MuleAccountDetector:
             ):
                 balance_ratio = balanced_days / total_days_with_both
 
+                total_credits = df["CREDIT"].sum()
+                total_debits = df["DEBIT"].sum()
+                total_flow = total_credits + total_debits
+                net_flow = total_credits - total_debits
+
                 results.append(
                     {
                         "interval_type": "daily",
-                        "total_credits": df["CREDIT"].sum(),
-                        "total_debits": df["DEBIT"].sum(),
-                        "net_flow": df["CREDIT"].sum() - df["DEBIT"].sum(),
-                        "total_flow": df["CREDIT"].sum() + df["DEBIT"].sum(),
-                        "net_flow_ratio": abs(df["CREDIT"].sum() - df["DEBIT"].sum())
-                        / (df["CREDIT"].sum() + df["DEBIT"].sum()),
+                        "total_credits": total_credits,
+                        "total_debits": total_debits,
+                        "net_flow": net_flow,
+                        "total_flow": total_flow,
+                        "net_flow_ratio": abs(net_flow) / total_flow
+                        if total_flow > 0
+                        else 1.0,
                         "suspicion_score": balance_ratio,
                         "periods_analyzed": total_days_with_both,
                         "balanced_periods": balanced_days,
@@ -288,33 +348,56 @@ class MuleAccountDetector:
 
         return results
 
-    def _analyze_weekly_balancing(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+    def _analyze_weekly_balancing(self, df: pl.DataFrame) -> List[Dict[str, Any]]:
         """Analyze if the account balances out on a weekly basis"""
         results = []
 
         try:
 
-            df["week"] = df["DATE"].dt.isocalendar().week
-            df["year"] = df["DATE"].dt.year
-            df["year_week"] = df["year"].astype(str) + "_" + df["week"].astype(str)
+            weekly_summary = (
+                df.with_columns(
+                    [
+                        pl.col("DATE").dt.week().alias("week"),
+                        pl.col("DATE").dt.year().alias("year"),
+                    ]
+                )
+                .group_by(["year", "week"])
+                .agg(
+                    [
+                        pl.col("CREDIT").sum().alias("week_credits"),
+                        pl.col("DEBIT").sum().alias("week_debits"),
+                    ]
+                )
+                .with_columns(
+                    (pl.col("week_credits") + pl.col("week_debits")).alias(
+                        "week_total_flow"
+                    ),
+                    (pl.col("week_credits") - pl.col("week_debits")).alias(
+                        "week_net_flow"
+                    ),
+                )
+                .with_columns(
+                    pl.when(pl.col("week_total_flow") > 0)
+                    .then(pl.col("week_net_flow").abs() / pl.col("week_total_flow"))
+                    .otherwise(pl.lit(1.0))
+                    .alias("week_ratio")
+                )
+            )
 
-            weekly_groups = df.groupby("year_week")
-            balanced_weeks = 0
-            total_weeks_with_both = 0
-
-            for week, week_df in weekly_groups:
-                week_credits = week_df["CREDIT"].sum()
-                week_debits = week_df["DEBIT"].sum()
-
-                if week_credits > 0 and week_debits > 0:
-                    total_weeks_with_both += 1
-                    week_net_flow = week_credits - week_debits
-                    week_total_flow = week_credits + week_debits
-
-                    if week_total_flow > 0:
-                        week_ratio = abs(week_net_flow) / week_total_flow
-                        if week_ratio <= 0.15:
-                            balanced_weeks += 1
+            total_weeks_with_both = (
+                weekly_summary.filter(
+                    (pl.col("week_credits") > 0) & (pl.col("week_debits") > 0)
+                )
+                .height
+            )
+            balanced_weeks = (
+                weekly_summary.filter(
+                    (pl.col("week_credits") > 0)
+                    & (pl.col("week_debits") > 0)
+                    & (pl.col("week_ratio") <= 0.15)
+                )
+                .height
+            )
 
             if (
                 total_weeks_with_both >= 2
@@ -322,15 +405,21 @@ class MuleAccountDetector:
             ):
                 balance_ratio = balanced_weeks / total_weeks_with_both
 
+                total_credits = df["CREDIT"].sum()
+                total_debits = df["DEBIT"].sum()
+                total_flow = total_credits + total_debits
+                net_flow = total_credits - total_debits
+
                 results.append(
                     {
                         "interval_type": "weekly",
-                        "total_credits": df["CREDIT"].sum(),
-                        "total_debits": df["DEBIT"].sum(),
-                        "net_flow": df["CREDIT"].sum() - df["DEBIT"].sum(),
-                        "total_flow": df["CREDIT"].sum() + df["DEBIT"].sum(),
-                        "net_flow_ratio": abs(df["CREDIT"].sum() - df["DEBIT"].sum())
-                        / (df["CREDIT"].sum() + df["DEBIT"].sum()),
+                        "total_credits": total_credits,
+                        "total_debits": total_debits,
+                        "net_flow": net_flow,
+                        "total_flow": total_flow,
+                        "net_flow_ratio": abs(net_flow) / total_flow
+                        if total_flow > 0
+                        else 1.0,
                         "suspicion_score": balance_ratio,
                         "periods_analyzed": total_weeks_with_both,
                         "balanced_periods": balanced_weeks,
@@ -343,30 +432,53 @@ class MuleAccountDetector:
 
         return results
 
-    def _analyze_monthly_balancing(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+    def _analyze_monthly_balancing(self, df: pl.DataFrame) -> List[Dict[str, Any]]:
         """Analyze if the account balances out on a monthly basis"""
         results = []
 
         try:
 
-            df["year_month"] = df["DATE"].dt.to_period("M")
-            monthly_groups = df.groupby("year_month")
-            balanced_months = 0
-            total_months_with_both = 0
+            monthly_summary = (
+                df.with_columns(
+                    pl.col("DATE").dt.truncate("1mo").alias("year_month")
+                )
+                .group_by("year_month")
+                .agg(
+                    [
+                        pl.col("CREDIT").sum().alias("month_credits"),
+                        pl.col("DEBIT").sum().alias("month_debits"),
+                    ]
+                )
+                .with_columns(
+                    (pl.col("month_credits") + pl.col("month_debits")).alias(
+                        "month_total_flow"
+                    ),
+                    (pl.col("month_credits") - pl.col("month_debits")).alias(
+                        "month_net_flow"
+                    ),
+                )
+                .with_columns(
+                    pl.when(pl.col("month_total_flow") > 0)
+                    .then(pl.col("month_net_flow").abs() / pl.col("month_total_flow"))
+                    .otherwise(pl.lit(1.0))
+                    .alias("month_ratio")
+                )
+            )
 
-            for month, month_df in monthly_groups:
-                month_credits = month_df["CREDIT"].sum()
-                month_debits = month_df["DEBIT"].sum()
-
-                if month_credits > 0 and month_debits > 0:
-                    total_months_with_both += 1
-                    month_net_flow = month_credits - month_debits
-                    month_total_flow = month_credits + month_debits
-
-                    if month_total_flow > 0:
-                        month_ratio = abs(month_net_flow) / month_total_flow
-                        if month_ratio <= 0.2:
-                            balanced_months += 1
+            total_months_with_both = (
+                monthly_summary.filter(
+                    (pl.col("month_credits") > 0) & (pl.col("month_debits") > 0)
+                )
+                .height
+            )
+            balanced_months = (
+                monthly_summary.filter(
+                    (pl.col("month_credits") > 0)
+                    & (pl.col("month_debits") > 0)
+                    & (pl.col("month_ratio") <= 0.2)
+                )
+                .height
+            )
 
             if (
                 total_months_with_both >= 2
@@ -374,15 +486,21 @@ class MuleAccountDetector:
             ):
                 balance_ratio = balanced_months / total_months_with_both
 
+                total_credits = df["CREDIT"].sum()
+                total_debits = df["DEBIT"].sum()
+                total_flow = total_credits + total_debits
+                net_flow = total_credits - total_debits
+
                 results.append(
                     {
                         "interval_type": "monthly",
-                        "total_credits": df["CREDIT"].sum(),
-                        "total_debits": df["DEBIT"].sum(),
-                        "net_flow": df["CREDIT"].sum() - df["DEBIT"].sum(),
-                        "total_flow": df["CREDIT"].sum() + df["DEBIT"].sum(),
-                        "net_flow_ratio": abs(df["CREDIT"].sum() - df["DEBIT"].sum())
-                        / (df["CREDIT"].sum() + df["DEBIT"].sum()),
+                        "total_credits": total_credits,
+                        "total_debits": total_debits,
+                        "net_flow": net_flow,
+                        "total_flow": total_flow,
+                        "net_flow_ratio": abs(net_flow) / total_flow
+                        if total_flow > 0
+                        else 1.0,
                         "suspicion_score": balance_ratio,
                         "periods_analyzed": total_months_with_both,
                         "balanced_periods": balanced_months,
@@ -395,7 +513,7 @@ class MuleAccountDetector:
 
         return results
 
-    def _analyze_rolling_windows(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+    def _analyze_rolling_windows(self, df: pl.DataFrame) -> List[Dict[str, Any]]:
         """Analyze rolling windows to catch sophisticated timing patterns"""
         results = []
 
@@ -419,13 +537,13 @@ class MuleAccountDetector:
         return results
 
     def _analyze_rolling_window(
-        self, df: pd.DataFrame, window_days: int, window_name: str
+        self, df: pl.DataFrame, window_days: int, window_name: str
     ) -> List[Dict[str, Any]]:
         """Analyze a specific rolling window size"""
         results = []
 
         try:
-            if len(df) < 5:
+            if df.height < 5:
                 return results
 
             date_range = (df["DATE"].max() - df["DATE"].min()).days
@@ -441,9 +559,11 @@ class MuleAccountDetector:
             current_date = start_date
             while current_date <= end_date:
                 window_end = current_date + timedelta(days=window_days)
-                window_df = df[(df["DATE"] >= current_date) & (df["DATE"] < window_end)]
+                window_df = df.filter(
+                    (pl.col("DATE") >= current_date) & (pl.col("DATE") < window_end)
+                )
 
-                if len(window_df) >= 2:
+                if window_df.height >= 2:
                     window_credits = window_df["CREDIT"].sum()
                     window_debits = window_df["DEBIT"].sum()
 
@@ -462,15 +582,21 @@ class MuleAccountDetector:
             if total_windows >= 3 and balanced_windows >= total_windows * 0.5:
                 balance_ratio = balanced_windows / total_windows
 
+                total_credits = df["CREDIT"].sum()
+                total_debits = df["DEBIT"].sum()
+                total_flow = total_credits + total_debits
+                net_flow = total_credits - total_debits
+
                 results.append(
                     {
                         "interval_type": f"rolling_{window_days}d",
-                        "total_credits": df["CREDIT"].sum(),
-                        "total_debits": df["DEBIT"].sum(),
-                        "net_flow": df["CREDIT"].sum() - df["DEBIT"].sum(),
-                        "total_flow": df["CREDIT"].sum() + df["DEBIT"].sum(),
-                        "net_flow_ratio": abs(df["CREDIT"].sum() - df["DEBIT"].sum())
-                        / (df["CREDIT"].sum() + df["DEBIT"].sum()),
+                        "total_credits": total_credits,
+                        "total_debits": total_debits,
+                        "net_flow": net_flow,
+                        "total_flow": total_flow,
+                        "net_flow_ratio": abs(net_flow) / total_flow
+                        if total_flow > 0
+                        else 1.0,
                         "suspicion_score": balance_ratio,
                         "periods_analyzed": total_windows,
                         "balanced_periods": balanced_windows,
@@ -484,7 +610,7 @@ class MuleAccountDetector:
         return results
 
     def _detect_passthrough_mule_pattern(
-        self, df: pd.DataFrame, account_id: str = None
+        self, df: pl.DataFrame, account_id: str = None
     ) -> Optional[MuleAccountAlert]:
         """
         Detect the core mule pattern: Pass-through account where inflow ≈ outflow
@@ -568,7 +694,7 @@ class MuleAccountDetector:
                     f"Moderately balanced flow: {net_flow_ratio*100:.1f}% net flow ratio"
                 )
 
-            transaction_count = len(df)
+            transaction_count = df.height
             if transaction_count >= 15:
                 confidence_score += 0.15
                 risk_indicators.append(
@@ -597,8 +723,8 @@ class MuleAccountDetector:
                     f"Active period: {transaction_count} transactions in {date_span} days"
                 )
 
-            credits_count = len(df[df["CREDIT"] > 0])
-            debits_count = len(df[df["DEBIT"] > 0])
+            credits_count = df.filter(pl.col("CREDIT") > 0).height
+            debits_count = df.filter(pl.col("DEBIT") > 0).height
 
             if credits_count >= 3 and debits_count >= 2:
                 confidence_score += 0.05
@@ -712,7 +838,7 @@ class MuleAccountDetector:
         return recommendations
 
     def _detect_classic_mule_pattern(
-        self, df: pd.DataFrame, account_id: str = None
+        self, df: pl.DataFrame, account_id: str = None
     ) -> Optional[MuleAccountAlert]:
         """
         Detect classic mule pattern: Many small credits → Few large debits
@@ -739,27 +865,27 @@ class MuleAccountDetector:
         """
         try:
 
-            credits = df[df["is_credit"]].copy()
-            debits = df[df["is_debit"]].copy()
+            credits = df.filter(pl.col("is_credit"))
+            debits = df.filter(pl.col("is_debit"))
 
             if (
-                len(credits) < self.config["min_collection_transactions"]
-                or len(debits) == 0
+                credits.height < self.config["min_collection_transactions"]
+                or debits.height == 0
             ):
                 return None
 
-            credit_amounts = credits["CREDIT"].values
+            credit_amounts = credits["CREDIT"].to_numpy()
             credit_median = np.median(credit_amounts)
             credit_q1 = np.percentile(credit_amounts, 25)
             credit_q3 = np.percentile(credit_amounts, 75)
 
-            small_credits = credits[credits["CREDIT"] <= credit_median]
+            small_credits = credits.filter(pl.col("CREDIT") <= credit_median)
 
             collection_analysis = {
-                "total_credits": len(credits),
-                "small_credits": len(small_credits),
+                "total_credits": credits.height,
+                "small_credits": small_credits.height,
                 "small_credit_ratio": (
-                    len(small_credits) / len(credits) if len(credits) > 0 else 0
+                    small_credits.height / credits.height if credits.height > 0 else 0
                 ),
                 "total_credit_amount": float(credits["CREDIT"].sum()),
                 "average_credit_amount": float(credits["CREDIT"].mean()),
@@ -769,7 +895,7 @@ class MuleAccountDetector:
                 "credit_coefficient_variation": float(
                     np.std(credit_amounts) / (np.mean(credit_amounts) + 1e-10)
                 ),
-                "credit_frequency_per_day": len(credits)
+                "credit_frequency_per_day": credits.height
                 / max(1, (credits["DATE"].max() - credits["DATE"].min()).days),
                 "collection_period_days": (
                     credits["DATE"].max() - credits["DATE"].min()
@@ -777,18 +903,18 @@ class MuleAccountDetector:
                 "adaptive_small_threshold": float(credit_median),
             }
 
-            debit_amounts = debits["DEBIT"].values
+            debit_amounts = debits["DEBIT"].to_numpy()
             debit_median = np.median(debit_amounts)
             debit_q1 = np.percentile(debit_amounts, 25)
             debit_q3 = np.percentile(debit_amounts, 75)
 
-            large_debits = debits[debits["DEBIT"] >= debit_median]
+            large_debits = debits.filter(pl.col("DEBIT") >= debit_median)
 
             disbursement_analysis = {
-                "total_debits": len(debits),
-                "large_debits": len(large_debits),
+                "total_debits": debits.height,
+                "large_debits": large_debits.height,
                 "large_debit_ratio": (
-                    len(large_debits) / len(debits) if len(debits) > 0 else 0
+                    large_debits.height / debits.height if debits.height > 0 else 0
                 ),
                 "total_debit_amount": float(debits["DEBIT"].sum()),
                 "average_debit_amount": float(debits["DEBIT"].mean()),
@@ -799,7 +925,7 @@ class MuleAccountDetector:
                 "debit_coefficient_variation": float(
                     np.std(debit_amounts) / (np.mean(debit_amounts) + 1e-10)
                 ),
-                "debit_frequency_per_day": len(debits)
+                "debit_frequency_per_day": debits.height
                 / max(1, (debits["DATE"].max() - debits["DATE"].min()).days),
                 "adaptive_large_threshold": float(debit_median),
             }
@@ -807,7 +933,7 @@ class MuleAccountDetector:
             confidence_score = 0.0
             risk_indicators = []
 
-            credit_debit_count_ratio = len(credits) / max(1, len(debits))
+            credit_debit_count_ratio = credits.height / max(1, debits.height)
             if credit_debit_count_ratio >= self.config["collection_disbursement_ratio"]:
                 score_weight = min(0.25, (credit_debit_count_ratio - 2) * 0.1)
                 confidence_score += score_weight
@@ -878,7 +1004,7 @@ class MuleAccountDetector:
             return None
 
     def _detect_periodic_mule_pattern(
-        self, df: pd.DataFrame, account_id: str = None
+        self, df: pl.DataFrame, account_id: str = None
     ) -> Optional[MuleAccountAlert]:
         """
         Detect periodic mule pattern: Regular disbursement cycles
@@ -898,9 +1024,9 @@ class MuleAccountDetector:
         Minimum threshold for alert: 0.5
         """
         try:
-            debits = df[df["is_debit"]].copy()
+            debits = df.filter(pl.col("is_debit"))
 
-            if len(debits) < 3:
+            if debits.height < 3:
                 return None
 
             periodicity_analysis = self._analyze_disbursement_periodicity(debits)
@@ -950,7 +1076,7 @@ class MuleAccountDetector:
             return None
 
     def _detect_threshold_mule_pattern(
-        self, df: pd.DataFrame, account_id: str = None
+        self, df: pl.DataFrame, account_id: str = None
     ) -> Optional[MuleAccountAlert]:
         """
         Detect threshold avoidance mule pattern
@@ -976,20 +1102,21 @@ class MuleAccountDetector:
 
             for threshold in thresholds:
 
-                near_threshold = df[
-                    (df["amount"] >= threshold * 0.85) & (df["amount"] < threshold)
-                ]
+                near_threshold = df.filter(
+                    (pl.col("amount") >= threshold * 0.85)
+                    & (pl.col("amount") < threshold)
+                )
 
-                if len(near_threshold) > 0:
-                    threshold_ratio = len(near_threshold) / len(df)
+                if near_threshold.height > 0:
+                    threshold_ratio = near_threshold.height / df.height
                     if threshold_ratio > 0.2:
                         total_threshold_score += threshold_ratio
                         risk_indicators.append(
-                            f"{len(near_threshold)} transactions just below ₹{threshold:,} threshold"
+                            f"{near_threshold.height} transactions just below ₹{threshold:,} threshold"
                         )
 
-            round_amounts = df[df["amount"] % 1000 == 0]
-            round_ratio = len(round_amounts) / len(df) if len(df) > 0 else 0
+            round_amounts = df.filter((pl.col("amount") % 1000) == 0)
+            round_ratio = round_amounts.height / df.height if df.height > 0 else 0
 
             if round_ratio > 0.6:
                 total_threshold_score += 0.3
@@ -1024,29 +1151,32 @@ class MuleAccountDetector:
             return None
 
     def _analyze_mule_timing_patterns(
-        self, credits: pd.DataFrame, debits: pd.DataFrame
+        self, credits: pl.DataFrame, debits: pl.DataFrame
     ) -> float:
         """Analyze timing patterns between collection and disbursement phases"""
         try:
-            if credits.empty or debits.empty:
+            if credits.is_empty() or debits.is_empty():
                 return 0.0
 
             timing_score = 0.0
 
-            for _, debit in debits.iterrows():
-                debit_date = debit["DATE"]
+            for debit in debits.to_dicts():
+                debit_date = debit.get("DATE")
+                if debit_date is None:
+                    continue
 
-                recent_credits = credits[
-                    (credits["DATE"] >= debit_date - timedelta(days=7))
-                    & (credits["DATE"] < debit_date)
-                ]
+                recent_credits = credits.filter(
+                    (pl.col("DATE") >= debit_date - timedelta(days=7))
+                    & (pl.col("DATE") < debit_date)
+                )
 
-                if len(recent_credits) >= 3:
+                if recent_credits.height >= 3:
                     timing_score += 0.2
 
-            if len(debits) >= 3:
-                debit_intervals = debits["DATE"].diff().dt.days.dropna()
-                if len(debit_intervals) > 0:
+            if debits.height >= 3:
+                debit_dates = debits.sort("DATE")["DATE"]
+                debit_intervals = debit_dates.diff().dt.total_days().drop_nulls()
+                if debit_intervals.len() > 0:
                     interval_std = debit_intervals.std()
                     interval_mean = debit_intervals.mean()
 
@@ -1058,15 +1188,17 @@ class MuleAccountDetector:
         except Exception:
             return 0.0
 
-    def _analyze_disbursement_periodicity(self, debits: pd.DataFrame) -> Dict[str, Any]:
+    def _analyze_disbursement_periodicity(self, debits: pl.DataFrame) -> Dict[str, Any]:
         """Analyze periodicity in disbursement patterns"""
         try:
-            if len(debits) < 3:
+            if debits.height < 3:
                 return {"is_periodic": False}
 
-            intervals = debits["DATE"].diff().dt.days.dropna()
+            intervals = (
+                debits.sort("DATE")["DATE"].diff().dt.total_days().drop_nulls()
+            )
 
-            if len(intervals) == 0:
+            if intervals.len() == 0:
                 return {"is_periodic": False}
 
             common_periods = [7, 14, 30]
@@ -1075,12 +1207,12 @@ class MuleAccountDetector:
 
             for period in common_periods:
 
-                close_intervals = intervals[
+                close_intervals = intervals.filter(
                     (intervals >= period - self.config["periodicity_tolerance"])
                     & (intervals <= period + self.config["periodicity_tolerance"])
-                ]
+                )
 
-                period_score = len(close_intervals) / len(intervals)
+                period_score = close_intervals.len() / intervals.len()
                 if period_score > best_score:
                     best_score = period_score
                     best_period = period
@@ -1169,10 +1301,10 @@ class MuleAccountDetector:
 
     def export_mule_alerts_to_dataframe(
         self, alerts: List[MuleAccountAlert]
-    ) -> pd.DataFrame:
+    ) -> pl.DataFrame:
         """Export mule alerts to DataFrame for analysis"""
         if not alerts:
-            return pd.DataFrame()
+            return pl.DataFrame()
 
         data = []
         for alert in alerts:
@@ -1206,4 +1338,4 @@ class MuleAccountDetector:
 
             data.append(row)
 
-        return pd.DataFrame(data).sort_values("confidence_score", ascending=False)
+        return pl.DataFrame(data).sort("confidence_score", descending=True)

@@ -3,7 +3,7 @@ import json
 import os
 import re
 
-import pandas as pd
+import polars as pl
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_core.prompts import ChatPromptTemplate
@@ -124,7 +124,9 @@ def get_api_key():
 def generate_regex_with_iterative_agent(df, description_col):
     """Generates regex patterns using a single iterative LangChain agent."""
     global _ALL_DESCRIPTIONS
-    all_descriptions = df[description_col].dropna().unique().tolist()
+    all_descriptions = (
+        df.get_column(description_col).drop_nulls().unique().to_list()
+    )
     _ALL_DESCRIPTIONS = all_descriptions  # Store for the tool to access
     
     try:
@@ -193,7 +195,7 @@ def generate_regex_with_iterative_agent(df, description_col):
 
 def test_regex_patterns(df, description_col, regex_patterns):
     """Tests regex patterns on all unique descriptions and returns results."""
-    all_descriptions = df[description_col].dropna().unique()
+    all_descriptions = df.get_column(description_col).drop_nulls().unique().to_list()
     failed_descriptions = []
 
     for desc in all_descriptions:
@@ -242,7 +244,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        df = pd.read_csv(args.csv_file)
+        df = pl.read_csv(args.csv_file)
         
         if args.desc_col not in df.columns:
             raise ValueError(f"Column '{args.desc_col}' not found in the CSV file.")

@@ -21,10 +21,10 @@ import os
 import re
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
-import pandas as pd
+import polars as pl
 import tiktoken
-from openai import OpenAI
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # Set up a standalone logger for this module
 logger = logging.getLogger('ai_llm_analysis')
@@ -376,10 +376,10 @@ def compile_analysis_results(results: List[AMLAnalysisResult]) -> AMLAnalysisRes
 
 
 def analyze_transactions(
-    transactions: pd.DataFrame,
+    transactions: pl.DataFrame | List[Dict[str, Any]],
 ) -> AMLAnalysisResult:
     """
-    Convenience helper (expects a pandas DataFrame):
+    Convenience helper (expects a polars DataFrame):
     - Optionally sort transactions by a detected date column
     - Convert to list[dict]
     - Chunk the transactions
@@ -399,7 +399,10 @@ def analyze_transactions(
             "recommendations": [],
         }
 
-    records = transactions.to_dict(orient="records")
+    if isinstance(transactions, list):
+        records = transactions
+    else:
+        records = transactions.to_dicts()
 
     chunks = chunk_transactions(records)
     logger.debug("Chunk sizes: %s", [len(l) for l in chunks])
@@ -432,7 +435,7 @@ __all__ = [
 
 
 if __name__ == '__main__':
-    df = pd.read_csv('db.csv')
+    df = pl.read_csv('db.csv')
     logger.debug(len(df))
     result = analyze_transactions(df)
     logger.debug(result)

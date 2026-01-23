@@ -15,7 +15,6 @@ import {
   ColumnDef,
   flexRender,
   getCoreRowModel,
-  getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
@@ -38,10 +37,20 @@ export type CaseTransactionRow = {
 
 interface CaseTransactionsDataTableProps {
   data: CaseTransactionRow[];
+  pageIndex: number;
+  pageSize: number;
+  pageCount: number;
+  totalCount: number;
+  onPageChange: (nextPageIndex: number) => void;
 }
 
 export default function CaseTransactionsDataTable({
   data,
+  pageIndex,
+  pageSize,
+  pageCount,
+  totalCount,
+  onPageChange,
 }: CaseTransactionsDataTableProps) {
   const [rowSelection, setRowSelection] = useState({});
   const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
@@ -160,14 +169,25 @@ export default function CaseTransactionsDataTable({
     state: {
       rowSelection,
       sorting,
+      pagination: {
+        pageIndex,
+        pageSize,
+      },
     },
     enableRowSelection: true,
     onRowSelectionChange: setRowSelection,
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    manualPagination: true,
+    pageCount,
   });
+
+  const hasNextPage = pageIndex + 1 < pageCount;
+  const hasPreviousPage = pageIndex > 0;
+  const safePageCount = Math.max(pageCount, 1);
+  const rangeStart = totalCount === 0 ? 0 : pageIndex * pageSize + 1;
+  const rangeEnd = Math.min((pageIndex + 1) * pageSize, totalCount);
 
   return (
     <div className="space-y-3">
@@ -229,22 +249,29 @@ export default function CaseTransactionsDataTable({
       <div className="flex items-center justify-between text-xs text-gray-500">
         <div>
           {table.getFilteredSelectedRowModel().rows.length} selected of{" "}
-          {table.getFilteredRowModel().rows.length} rows
+          {totalCount.toLocaleString()} total
+          <span className="mx-2 text-gray-300">|</span>
+          Showing {rangeStart.toLocaleString()}-
+          {rangeEnd.toLocaleString()} of {totalCount.toLocaleString()}
         </div>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
+            onClick={() => onPageChange(pageIndex - 1)}
+            disabled={!hasPreviousPage}
           >
             Previous
           </Button>
+          <span className="text-[11px] text-gray-500">
+            Page {(pageIndex + 1).toLocaleString()} of{" "}
+            {safePageCount.toLocaleString()}
+          </span>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
+            onClick={() => onPageChange(pageIndex + 1)}
+            disabled={!hasNextPage}
           >
             Next
           </Button>

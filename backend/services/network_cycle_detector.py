@@ -5,18 +5,18 @@ This module implements the NetworkCycleDetector class that identifies round trip
 using graph algorithms, calculates centrality metrics, and detects network-based anomalies.
 """
 
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-import pandas as pd
-import networkx as nx
-from dataclasses import dataclass
 import logging
 from collections import defaultdict
-import numpy as np
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
+import networkx as nx
+import numpy as np
+import polars as pl
 from sklearn.cluster import DBSCAN, KMeans, SpectralClustering
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
 
 
 @dataclass
@@ -67,6 +67,33 @@ class NetworkCycleDetector:
         """
         self.logger = logger or logging.getLogger(__name__)
         self.analysis_cache = {}
+
+    def _parse_datetimes(self, values: List[Any]) -> List[datetime]:
+        parsed: List[datetime] = []
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, datetime):
+                parsed.append(value)
+                continue
+            if isinstance(value, np.datetime64):
+                try:
+                    ts = value.astype("datetime64[ms]").astype("int64") / 1000
+                    parsed.append(datetime.utcfromtimestamp(ts))
+                    continue
+                except Exception:
+                    continue
+            if isinstance(value, str):
+                try:
+                    parsed.append(datetime.fromisoformat(value))
+                    continue
+                except Exception:
+                    continue
+        return parsed
+
+    def _parse_datetime_value(self, value: Any) -> Optional[datetime]:
+        parsed = self._parse_datetimes([value])
+        return parsed[0] if parsed else None
 
     def detect_network_cycles(
         self,
@@ -231,9 +258,9 @@ class NetworkCycleDetector:
                 tx["direction"] = "credit" if tx.get("amount", 0) > 0 else "debit"
 
             if dates_in_cycle:
-                dates_in_cycle = pd.to_datetime(dates_in_cycle)
-                first_date = dates_in_cycle.min()
-                last_date = dates_in_cycle.max()
+                parsed_dates = self._parse_datetimes(dates_in_cycle)
+                first_date = min(parsed_dates) if parsed_dates else datetime.min
+                last_date = max(parsed_dates) if parsed_dates else datetime.min
                 duration_days = (last_date - first_date).days
             else:
                 first_date = datetime.min
@@ -329,8 +356,8 @@ class NetworkCycleDetector:
             score *= 1.0 - length_penalty
 
         if len(amounts) > 1:
-            amount_variance = pd.Series(amounts).var()
-            amount_mean = pd.Series(amounts).mean()
+            amount_variance = np.var(amounts, ddof=1)
+            amount_mean = float(np.mean(amounts))
             if amount_mean > 0:
                 consistency_bonus = max(0.0, 1.0 - (amount_variance / (amount_mean**2)))
                 score *= 1.0 + consistency_bonus * 0.2
@@ -393,7 +420,9 @@ class NetworkCycleDetector:
         score += complexity_score * 0.15
 
         if len(amounts) > 1:
-            amount_cv = pd.Series(amounts).std() / pd.Series(amounts).mean()
+            amount_std = np.std(amounts, ddof=1)
+            amount_mean = float(np.mean(amounts))
+            amount_cv = amount_std / amount_mean if amount_mean else 0.0
             consistency_score = max(0.0, 1.0 - amount_cv)
             score += consistency_score * 0.10
 
@@ -660,18 +689,18 @@ class NetworkCycleDetector:
         synchronized_cycles = []
         temporal_clusters = []
 
-        cycle_timestamps = []
-        valid_cycles = []
+        timestamp_cycle_pairs = []
 
         for cycle in cycles:
             if (
                 hasattr(cycle, "first_transaction_date")
                 and cycle.first_transaction_date
             ):
-                cycle_timestamps.append(cycle.first_transaction_date)
-                valid_cycles.append(cycle)
+                parsed_time = self._parse_datetime_value(cycle.first_transaction_date)
+                if parsed_time:
+                    timestamp_cycle_pairs.append((parsed_time, cycle))
 
-        if not cycle_timestamps:
+        if not timestamp_cycle_pairs:
             return {
                 "synchronized_cycles": [],
                 "temporal_clusters": [],
@@ -681,7 +710,8 @@ class NetworkCycleDetector:
                 "burst_patterns": [],
             }
 
-        cycle_timestamps = pd.to_datetime(cycle_timestamps)
+        cycle_timestamps = [pair[0] for pair in timestamp_cycle_pairs]
+        valid_cycles = [pair[1] for pair in timestamp_cycle_pairs]
 
         time_groups = defaultdict(list)
 
@@ -737,13 +767,13 @@ class NetworkCycleDetector:
         }
 
     def _calculate_temporal_statistics(
-        self, timestamps: pd.DatetimeIndex, cycles: List[DetectedCycle]
+        self, timestamps: List[datetime], cycles: List[DetectedCycle]
     ) -> Dict[str, Any]:
         """
         Calculate comprehensive temporal statistics for cycles.
 
         Args:
-            timestamps: Pandas DatetimeIndex of cycle timestamps
+            timestamps: List of cycle timestamps
             cycles: List of cycles corresponding to timestamps
 
         Returns:
@@ -752,60 +782,90 @@ class NetworkCycleDetector:
         if len(timestamps) == 0:
             return {}
 
+        timestamps = self._parse_datetimes(timestamps)
+        if not timestamps:
+            return {}
+
+        timestamps.sort()
+        ts_series = pl.Series("ts", timestamps)
+        span_days = (timestamps[-1] - timestamps[0]).days
+
         stats = {
-            "time_span_days": (timestamps.max() - timestamps.min()).days,
-            "first_cycle": timestamps.min().isoformat(),
-            "last_cycle": timestamps.max().isoformat(),
-            "cycles_per_day": len(timestamps)
-            / max(1, (timestamps.max() - timestamps.min()).days),
+            "time_span_days": span_days,
+            "first_cycle": timestamps[0].isoformat(),
+            "last_cycle": timestamps[-1].isoformat(),
+            "cycles_per_day": len(timestamps) / max(1, span_days),
             "hourly_distribution": {},
             "daily_distribution": {},
             "weekly_distribution": {},
             "monthly_distribution": {},
         }
 
-        hourly_counts = timestamps.hour.value_counts().sort_index()
+        hourly_counts = (
+            ts_series.dt.hour()
+            .value_counts()
+            .sort("ts")
+            .to_dict(as_series=False)
+        )
         stats["hourly_distribution"] = {
-            str(hour): count for hour, count in hourly_counts.items()
+            str(hour): count
+            for hour, count in zip(hourly_counts["ts"], hourly_counts["counts"])
         }
 
-        daily_counts = timestamps.day_name().value_counts()
+        daily_counts = (
+            ts_series.dt.strftime("%A")
+            .value_counts()
+            .to_dict(as_series=False)
+        )
         stats["daily_distribution"] = {
-            day: count for day, count in daily_counts.items()
+            day: count for day, count in zip(daily_counts["ts"], daily_counts["counts"])
         }
 
-        weekly_counts = timestamps.isocalendar().week.value_counts().sort_index()
+        weekly_counts = (
+            ts_series.dt.week()
+            .value_counts()
+            .sort("ts")
+            .to_dict(as_series=False)
+        )
         stats["weekly_distribution"] = {
-            f"week_{week}": count for week, count in weekly_counts.items()
+            f"week_{week}": count
+            for week, count in zip(weekly_counts["ts"], weekly_counts["counts"])
         }
 
-        monthly_counts = timestamps.to_period("M").value_counts().sort_index()
+        monthly_counts = (
+            ts_series.dt.strftime("%Y-%m")
+            .value_counts()
+            .sort("ts")
+            .to_dict(as_series=False)
+        )
         stats["monthly_distribution"] = {
-            str(month): count for month, count in monthly_counts.items()
+            month: count
+            for month, count in zip(monthly_counts["ts"], monthly_counts["counts"])
         }
 
         if len(timestamps) > 1:
-            sorted_timestamps = timestamps.sort_values()
-            inter_arrival_times = sorted_timestamps.diff().dropna()
-
-            stats["inter_arrival_statistics"] = {
-                "mean_hours": inter_arrival_times.mean().total_seconds() / 3600,
-                "median_hours": inter_arrival_times.median().total_seconds() / 3600,
-                "std_hours": inter_arrival_times.std().total_seconds() / 3600,
-                "min_hours": inter_arrival_times.min().total_seconds() / 3600,
-                "max_hours": inter_arrival_times.max().total_seconds() / 3600,
-            }
+            diff_hours = (
+                ts_series.sort().diff().drop_nulls().dt.total_seconds() / 3600
+            )
+            if diff_hours.len() > 0:
+                stats["inter_arrival_statistics"] = {
+                    "mean_hours": float(diff_hours.mean()),
+                    "median_hours": float(diff_hours.median()),
+                    "std_hours": float(diff_hours.std()) if diff_hours.len() > 1 else 0.0,
+                    "min_hours": float(diff_hours.min()),
+                    "max_hours": float(diff_hours.max()),
+                }
 
         return stats
 
     def _detect_periodic_patterns(
-        self, timestamps: pd.DatetimeIndex, cycles: List[DetectedCycle]
+        self, timestamps: List[datetime], cycles: List[DetectedCycle]
     ) -> List[Dict[str, Any]]:
         """
         Detect periodic patterns in cycle timing.
 
         Args:
-            timestamps: Pandas DatetimeIndex of cycle timestamps
+            timestamps: List of cycle timestamps
             cycles: List of cycles corresponding to timestamps
 
         Returns:
@@ -816,8 +876,30 @@ class NetworkCycleDetector:
 
         patterns = []
 
-        hourly_counts = timestamps.hour.value_counts()
-        peak_hours = hourly_counts[hourly_counts >= 3].index.tolist()
+        parsed_pairs = []
+        for ts, cycle in zip(timestamps, cycles):
+            parsed_ts = self._parse_datetime_value(ts)
+            if parsed_ts is not None:
+                parsed_pairs.append((parsed_ts, cycle))
+
+        if len(parsed_pairs) < 3:
+            return []
+
+        timestamps = [pair[0] for pair in parsed_pairs]
+        cycles = [pair[1] for pair in parsed_pairs]
+
+        ts_series = pl.Series("ts", timestamps)
+
+        hourly_counts = (
+            ts_series.dt.hour()
+            .value_counts()
+            .to_dict(as_series=False)
+        )
+        peak_hours = [
+            hour
+            for hour, count in zip(hourly_counts["ts"], hourly_counts["counts"])
+            if count >= 3
+        ]
 
         for hour in peak_hours:
             hour_cycles = [
@@ -833,8 +915,16 @@ class NetworkCycleDetector:
                 }
             )
 
-        daily_counts = timestamps.day_name().value_counts()
-        peak_days = daily_counts[daily_counts >= 2].index.tolist()
+        daily_counts = (
+            ts_series.dt.strftime("%A")
+            .value_counts()
+            .to_dict(as_series=False)
+        )
+        peak_days = [
+            day
+            for day, count in zip(daily_counts["ts"], daily_counts["counts"])
+            if count >= 2
+        ]
 
         for day in peak_days:
             day_cycles = [
@@ -853,14 +943,15 @@ class NetworkCycleDetector:
             )
 
         if len(timestamps) > 2:
-            sorted_timestamps = timestamps.sort_values()
-            intervals = sorted_timestamps.diff().dropna()
-
-            interval_hours = intervals.total_seconds() / 3600
+            interval_hours = (
+                ts_series.sort().diff().drop_nulls().dt.total_seconds() / 3600
+            )
 
             from collections import Counter
 
-            rounded_intervals = [round(h) for h in interval_hours if 1 <= h <= 168]
+            rounded_intervals = [
+                round(h) for h in interval_hours if 1 <= h <= 168
+            ]
             interval_counts = Counter(rounded_intervals)
 
             for interval_h, count in interval_counts.items():
@@ -871,7 +962,7 @@ class NetworkCycleDetector:
                             "description": f"Regular {interval_h}-hour intervals",
                             "frequency": count,
                             "interval_hours": interval_h,
-                            "regularity_score": count / len(intervals),
+                            "regularity_score": count / len(interval_hours),
                         }
                     )
 
@@ -879,7 +970,7 @@ class NetworkCycleDetector:
 
     def _detect_burst_patterns(
         self,
-        timestamps: pd.DatetimeIndex,
+        timestamps: List[datetime],
         cycles: List[DetectedCycle],
         time_window_hours: int,
     ) -> List[Dict[str, Any]]:
@@ -887,7 +978,7 @@ class NetworkCycleDetector:
         Detect burst patterns (high activity in short periods).
 
         Args:
-            timestamps: Pandas DatetimeIndex of cycle timestamps
+            timestamps: List of cycle timestamps
             cycles: List of cycles corresponding to timestamps
             time_window_hours: Time window for burst detection
 
@@ -898,7 +989,17 @@ class NetworkCycleDetector:
             return []
 
         bursts = []
-        sorted_timestamps = timestamps.sort_values()
+        paired = []
+        for ts, cycle in zip(timestamps, cycles):
+            parsed_ts = self._parse_datetime_value(ts)
+            if parsed_ts is not None:
+                paired.append((parsed_ts, cycle))
+
+        if len(paired) < 3:
+            return []
+
+        paired = sorted(paired, key=lambda x: x[0])
+        sorted_timestamps = [ts for ts, _ in paired]
 
         min_cycles_for_burst = max(3, len(timestamps) // 10)
         burst_window = timedelta(hours=time_window_hours)
@@ -911,9 +1012,7 @@ class NetworkCycleDetector:
             cycles_in_window = []
             j = i
             while j < len(sorted_timestamps) and sorted_timestamps[j] <= window_end:
-                cycles_in_window.append(
-                    cycles[sorted_timestamps.get_loc(sorted_timestamps[j])]
-                )
+                cycles_in_window.append(paired[j][1])
                 j += 1
 
             if len(cycles_in_window) >= min_cycles_for_burst:
@@ -1242,12 +1341,19 @@ class NetworkCycleDetector:
                     cycle_dates.append(cycle.first_transaction_date)
 
             if cycle_dates:
-                cycle_dates = pd.to_datetime(cycle_dates)
-                node_features["first_cycle_date"] = cycle_dates.min().timestamp()
-                node_features["last_cycle_date"] = cycle_dates.max().timestamp()
-                node_features["cycle_date_span"] = (
-                    cycle_dates.max() - cycle_dates.min()
-                ).total_seconds() / (24 * 3600)
+                cycle_dates = self._parse_datetimes(cycle_dates)
+                if cycle_dates:
+                    first_date = min(cycle_dates)
+                    last_date = max(cycle_dates)
+                    node_features["first_cycle_date"] = first_date.timestamp()
+                    node_features["last_cycle_date"] = last_date.timestamp()
+                    node_features["cycle_date_span"] = (
+                        (last_date - first_date).total_seconds() / (24 * 3600)
+                    )
+                else:
+                    node_features["first_cycle_date"] = 0.0
+                    node_features["last_cycle_date"] = 0.0
+                    node_features["cycle_date_span"] = 0.0
             else:
                 node_features["first_cycle_date"] = 0.0
                 node_features["last_cycle_date"] = 0.0
@@ -1835,16 +1941,17 @@ class NetworkCycleDetector:
                     cycle_dates.append(cycle.first_transaction_date)
 
             if cycle_dates:
-                cycle_dates = pd.to_datetime(cycle_dates)
-                stats["temporal_metrics"] = {
-                    "analysis_time_span_days": (
-                        cycle_dates.max() - cycle_dates.min()
-                    ).days,
-                    "first_cycle_date": cycle_dates.min().isoformat(),
-                    "last_cycle_date": cycle_dates.max().isoformat(),
-                    "cycles_per_day": len(cycles)
-                    / max(1, (cycle_dates.max() - cycle_dates.min()).days),
-                }
+                cycle_dates = self._parse_datetimes(cycle_dates)
+                if cycle_dates:
+                    first_date = min(cycle_dates)
+                    last_date = max(cycle_dates)
+                    span_days = (last_date - first_date).days
+                    stats["temporal_metrics"] = {
+                        "analysis_time_span_days": span_days,
+                        "first_cycle_date": first_date.isoformat(),
+                        "last_cycle_date": last_date.isoformat(),
+                        "cycles_per_day": len(cycles) / max(1, span_days),
+                    }
 
         total_graph_volume = 0.0
         volume_distribution = []
@@ -2306,19 +2413,29 @@ class NetworkCycleDetector:
             )
 
             if all_amounts:
-                amount_cv = pd.Series(all_amounts).std() / pd.Series(all_amounts).mean()
-                analysis["coordination_score"] = max(0.0, 1.0 - amount_cv)
+                amount_mean = float(np.mean(all_amounts))
+                if amount_mean > 0:
+                    amount_std = float(
+                        np.std(all_amounts, ddof=1) if len(all_amounts) > 1 else 0.0
+                    )
+                    amount_cv = amount_std / amount_mean
+                    analysis["coordination_score"] = max(0.0, 1.0 - amount_cv)
+                else:
+                    analysis["coordination_score"] = 0.0
 
             if all_timestamps:
-                timestamps = pd.to_datetime(all_timestamps)
-
-                time_diffs = timestamps.sort_values().diff().dropna()
-                short_intervals = sum(
-                    1 for diff in time_diffs if diff.total_seconds() < 3600
-                )
-                analysis["time_clustering_score"] = (
-                    short_intervals / len(time_diffs) if len(time_diffs) > 0 else 0
-                )
+                timestamps = self._parse_datetimes(all_timestamps)
+                if len(timestamps) > 1:
+                    ts_series = pl.Series("ts", timestamps).sort()
+                    diff_hours = ts_series.diff().drop_nulls().dt.total_seconds() / 3600
+                    short_intervals = sum(1 for h in diff_hours if h < 1)
+                    analysis["time_clustering_score"] = (
+                        short_intervals / len(diff_hours)
+                        if len(diff_hours) > 0
+                        else 0
+                    )
+                else:
+                    analysis["time_clustering_score"] = 0
 
         return analysis
 
@@ -2373,11 +2490,15 @@ class NetworkCycleDetector:
         dwell_times = []
 
         for in_tx in incoming_txs:
-            in_time = pd.to_datetime(in_tx["date"])
+            in_time = self._parse_datetime_value(in_tx.get("date"))
+            if in_time is None:
+                continue
             in_amount = in_tx.get("amount", 0)
 
             for out_tx in outgoing_txs:
-                out_time = pd.to_datetime(out_tx["date"])
+                out_time = self._parse_datetime_value(out_tx.get("date"))
+                if out_time is None:
+                    continue
                 out_amount = out_tx.get("amount", 0)
 
                 if out_time > in_time:
