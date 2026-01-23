@@ -16,6 +16,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -1000,7 +1008,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                       )
                     }
                   >
-                    <SelectTrigger className="w-[180px]">
+                    <SelectTrigger className="w-45">
                       <SelectValue placeholder="All Entities" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1175,98 +1183,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                 </div>
 
                 {selectedCounterparty && (
-                  <div className="mt-6 rounded-lg border border-gray-200 bg-white">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-6 py-4">
-                      <div>
-                        <h4 className="text-sm font-semibold text-gray-900">
-                          Transactions for {selectedCounterparty}
-                        </h4>
-                        <p className="text-xs text-gray-500">
-                          {selectedCounterpartyTransactions.length.toLocaleString()}{" "}
-                          transactions
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCounterparty(null)}
-                        className="text-xs font-medium text-blue-600 hover:text-blue-800"
-                      >
-                        Clear
-                      </button>
-                    </div>
-
-                    {selectedCounterpartyTransactions.length === 0 ? (
-                      <div className="px-6 py-8 text-center text-sm text-gray-500">
-                        No transactions found for this counterparty.
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Date
-                              </th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Description
-                              </th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Source
-                              </th>
-                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Amount
-                              </th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Direction
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200 bg-white">
-                            {selectedCounterpartyTransactions.map((tx) => {
-                              const entityName =
-                                entityNameMap.get(tx.entity_id) || tx.entity_id;
-                              const accountLabel =
-                                accountLabelMap.get(tx.account_id) ||
-                                tx.account_id;
-
-                              return (
-                                <tr
-                                  key={tx.transaction_id}
-                                  className="hover:bg-gray-50"
-                                >
-                                  <td className="px-6 py-4 text-sm text-gray-900">
-                                    {formatDate(tx.tx_date)}
-                                  </td>
-                                  <td className="px-6 py-4 text-sm text-gray-700">
-                                    {tx.description || "No description"}
-                                  </td>
-                                  <td className="px-6 py-4 text-sm text-gray-700">
-                                    <div className="font-medium text-gray-900">
-                                      {entityName}
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                      {accountLabel}
-                                    </div>
-                                  </td>
-                                  <td className="px-6 py-4 text-right text-sm font-medium text-gray-900">
-                                    {formatCurrency(tx.amount)}
-                                  </td>
-                                  <td
-                                    className={`px-6 py-4 text-sm font-medium ${
-                                      tx.direction === "CR"
-                                        ? "text-green-600"
-                                        : "text-red-600"
-                                    }`}
-                                  >
-                                    {tx.direction === "CR" ? "Credit" : "Debit"}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                  <div className="sr-only" aria-live="polite">
+                    Showing transactions for {selectedCounterparty}
                   </div>
                 )}
               </>
@@ -1655,6 +1573,104 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           }}
         />
       )}
+      <Sheet
+        open={Boolean(selectedCounterparty)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedCounterparty(null);
+          }
+        }}
+      >
+        <SheetContent
+          side="right"
+          className="w-full sm:w-[70vw] sm:max-w-none p-0 [&>button]:hidden"
+        >
+          <SheetHeader className="border-b border-gray-200 px-6 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <SheetTitle className="text-base font-semibold text-gray-900">
+                  Transactions for {selectedCounterparty ?? "Counterparty"}
+                </SheetTitle>
+                <SheetDescription className="text-xs text-gray-500">
+                  {selectedCounterpartyTransactions.length.toLocaleString()}{" "}
+                  transactions
+                </SheetDescription>
+              </div>
+              <SheetClose className="rounded-md px-2 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800">
+                Close
+              </SheetClose>
+            </div>
+          </SheetHeader>
+          {selectedCounterpartyTransactions.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-gray-500">
+              No transactions found for this counterparty.
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Date
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Description
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Source
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Amount
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 bg-white">
+                    {selectedCounterpartyTransactions.map((tx) => {
+                      const entityName =
+                        entityNameMap.get(tx.entity_id) || tx.entity_id;
+                      const accountLabel =
+                        accountLabelMap.get(tx.account_id) || tx.account_id;
+
+                      return (
+                        <tr
+                          key={tx.transaction_id}
+                          className="hover:bg-gray-50"
+                        >
+                          <td className="px-6 py-4 text-sm text-gray-900">
+                            {formatDate(tx.tx_date)}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {tx.description || "No description"}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            <div className="font-medium text-gray-900">
+                              {entityName}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {accountLabel}
+                            </div>
+                          </td>
+                          <td
+                            className={`px-6 py-4 text-right text-sm font-medium ${
+                              tx.direction === "CR"
+                                ? "text-green-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {formatCurrency(tx.amount)}
+                            {tx.direction === "DR" ? " -" : ""}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

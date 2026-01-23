@@ -6,7 +6,7 @@ import {
   type ColumnMapping,
   type CSVValidationResult,
 } from "@/utils/csvValidator";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface Step2ColumnMappingProps {
   validationResult: CSVValidationResult | null;
@@ -29,19 +29,33 @@ export default function Step2ColumnMapping({
   fileCount,
   ctaLabel,
 }: Step2ColumnMappingProps) {
+  const headersKey = validationResult?.headers?.join("\u0000") || "";
+  const previewHeaderKey = validationResult?.previewData?.[0]
+    ? Object.keys(validationResult.previewData[0]).join("\u0000")
+    : "";
+  const headers = useMemo(() => {
+    if (validationResult?.headers?.length) {
+      return validationResult.headers;
+    }
+    if (validationResult?.previewData?.[0]) {
+      return Object.keys(validationResult.previewData[0]);
+    }
+    return [];
+  }, [headersKey, previewHeaderKey]);
+
   const getInitialMapping = () => {
     if (columnMapping) {
       return { ...columnMapping };
     }
     const init = buildSuggestedColumnMapping(validationResult);
-    if (!init.AMOUNT && !init.DEBIT && !init.CREDIT && validationResult) {
+    if (!init.AMOUNT && !init.DEBIT && !init.CREDIT && headers.length) {
       init.DEBIT =
-        validationResult.headers.find(
+        headers.find(
           (h) =>
             h.toLowerCase().includes("debit") || h.toLowerCase().includes("dr")
         ) || "";
       init.CREDIT =
-        validationResult.headers.find(
+        headers.find(
           (h) =>
             h.toLowerCase().includes("credit") || h.toLowerCase().includes("cr")
         ) || "";
@@ -56,7 +70,7 @@ export default function Step2ColumnMapping({
   useEffect(() => {
     setMapping(getInitialMapping());
     setDeletedRows([]);
-  }, [validationResult, columnMapping]);
+  }, [validationResult, columnMapping, headersKey, previewHeaderKey]);
 
   const handleMappingChange = (
     requiredColumn: keyof ColumnMapping,
@@ -100,7 +114,7 @@ export default function Step2ColumnMapping({
     );
   }
 
-  const previewRows = validationResult.previewData?.slice(0, 5) || [];
+  const previewRows = validationResult.previewData?.slice(0, 50) || [];
 
   return (
     <div className="space-y-6">
@@ -134,7 +148,7 @@ export default function Step2ColumnMapping({
             className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">Select column...</option>
-            {validationResult.headers.map((header) => (
+            {headers.map((header) => (
               <option key={header} value={header}>
                 {header}
               </option>
@@ -159,7 +173,7 @@ export default function Step2ColumnMapping({
             className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">Select column...</option>
-            {validationResult.headers.map((header) => (
+            {headers.map((header) => (
               <option key={header} value={header}>
                 {header}
               </option>
@@ -185,8 +199,8 @@ export default function Step2ColumnMapping({
                   setMapping((prev) => ({
                     ...prev,
                     AMOUNT: "",
-                    DEBIT: prev.DEBIT || validationResult.headers[0] || "",
-                    CREDIT: prev.CREDIT || validationResult.headers[1] || "",
+                    DEBIT: prev.DEBIT || headers[0] || "",
+                    CREDIT: prev.CREDIT || headers[1] || "",
                     DIRECTION: "",
                   }))
                 }
@@ -205,7 +219,7 @@ export default function Step2ColumnMapping({
                     ...prev,
                     DEBIT: "",
                     CREDIT: "",
-                    AMOUNT: prev.AMOUNT || validationResult.headers[0] || "",
+                    AMOUNT: prev.AMOUNT || headers[0] || "",
                   }))
                 }
                 disabled={disabled}
@@ -228,7 +242,7 @@ export default function Step2ColumnMapping({
                 className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Select column...</option>
-                {validationResult.headers.map((header) => (
+                {headers.map((header) => (
                   <option key={header} value={header}>
                     {header}
                   </option>
@@ -247,7 +261,7 @@ export default function Step2ColumnMapping({
                 className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Select column...</option>
-                {validationResult.headers.map((header) => (
+                {headers.map((header) => (
                   <option key={header} value={header}>
                     {header}
                   </option>
@@ -270,7 +284,7 @@ export default function Step2ColumnMapping({
                 className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Select column...</option>
-                {validationResult.headers.map((header) => (
+                {headers.map((header) => (
                   <option key={header} value={header}>
                     {header}
                   </option>
@@ -292,7 +306,7 @@ export default function Step2ColumnMapping({
                 className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Select column...</option>
-                {validationResult.headers.map((header) => (
+                {headers.map((header) => (
                   <option key={header} value={header}>
                     {header}
                   </option>
@@ -312,7 +326,7 @@ export default function Step2ColumnMapping({
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium text-gray-700">
-              Preview Data (First 5 Rows)
+              Preview Data (First 50 Rows)
             </h4>
             {deletedRows.length > 0 && (
               <span className="text-xs text-gray-500">
@@ -327,7 +341,7 @@ export default function Step2ColumnMapping({
                   <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     Action
                   </th>
-                  {validationResult.headers.map((header) => (
+                  {headers.map((header) => (
                     <th
                       key={header}
                       className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
@@ -366,7 +380,7 @@ export default function Step2ColumnMapping({
                           </button>
                         )}
                       </td>
-                      {validationResult.headers.map((header) => (
+                      {headers.map((header) => (
                         <td
                           key={header}
                           className="px-3 py-2 whitespace-nowrap text-xs text-gray-900"

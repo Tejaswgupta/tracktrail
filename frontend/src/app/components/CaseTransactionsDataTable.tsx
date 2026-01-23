@@ -30,6 +30,7 @@ export type CaseTransactionRow = {
   description: string;
   amountLabel: string;
   amountValue: number;
+  directionLabel: "Debit" | "Credit";
   counterparty: string;
   status: "Success" | "Failed";
   onCounterpartySave: (newName: string) => Promise<void> | void;
@@ -107,11 +108,19 @@ export default function CaseTransactionsDataTable({
       {
         accessorKey: "amountValue",
         header: () => <div className="text-right">Amount</div>,
-        cell: ({ row }) => (
-          <div className="text-right font-medium text-gray-900">
-            {row.original.amountLabel}
-          </div>
-        ),
+        cell: ({ row }) => {
+          const isDebit = row.original.directionLabel === "Debit";
+          return (
+            <div
+              className={`text-right font-medium ${
+                isDebit ? "text-red-600" : "text-emerald-600"
+              }`}
+            >
+              {isDebit ? "-" : ""}
+              {row.original.amountLabel}
+            </div>
+          );
+        },
       },
       {
         accessorKey: "counterparty",

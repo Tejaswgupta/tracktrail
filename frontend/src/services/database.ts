@@ -12,6 +12,22 @@ import { createClient } from "@/utils/supabase/client";
 
 const supabase = createClient();
 
+const getCaseEntityIds = async (caseId: string): Promise<string[]> => {
+  const { data, error } = await supabase
+    .from("case_entities")
+    .select("entity_id")
+    .eq("case_id", caseId);
+
+  if (error) throw error;
+  return data?.map((item) => item.entity_id) || [];
+};
+
+const escapeOrValue = (value: string) =>
+  value.replace(/([(),])/g, "\\$1");
+
+const formatOrInList = (values: string[]) =>
+  `(${values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",")})`;
+
 // Simple in-memory cache with expiration
 class SimpleCache<T> {
   private cache = new Map<string, { value: T; expiry: number }>();
@@ -173,6 +189,25 @@ export const caseTransactionsService = {
 
     if (error) throw error;
     return data || [];
+  },
+
+  async getFlaggedTransactionIds(
+    caseId: string,
+    flagType?: import("@/types/database").CaseTransaction["flag_type"]
+  ): Promise<string[]> {
+    let query = supabase
+      .from("case_transactions")
+      .select("transaction_id")
+      .eq("case_id", caseId);
+
+    if (flagType) {
+      query = query.eq("flag_type", flagType);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+    return data?.map((item) => item.transaction_id) || [];
   },
 
   async getFlagForTransaction(
@@ -683,6 +718,217 @@ export const transactionsService = {
       .select("*", { count: "exact", head: true })
       .in("entity_id", entityIds);
 
+    if (error) throw error;
+    return count || 0;
+  },
+
+  async searchByCaseId(
+    caseId: string,
+    filters: {
+      query?: string;
+      searchEntityIds?: string[];
+      searchAccountIds?: string[];
+      entityIds?: string[];
+      accountIds?: string[];
+      transactionIds?: string[];
+      dateFrom?: string;
+      dateTo?: string;
+      minAmount?: number;
+      maxAmount?: number;
+      direction?: "DR" | "CR";
+      status?: "Failed" | "Success";
+      description?: string;
+      counterparty?: string;
+      offset?: number;
+      limit?: number;
+    }
+  ): Promise<Transaction[]> {
+    const caseEntityIds = await getCaseEntityIds(caseId);
+    if (caseEntityIds.length === 0) {
+      return [];
+    }
+
+    let query = supabase
+      .from("transactions")
+      .select("*")
+      .in("entity_id", caseEntityIds);
+
+    if (filters.entityIds) {
+      if (filters.entityIds.length === 0) return [];
+      query = query.in("entity_id", filters.entityIds);
+    }
+    if (filters.accountIds) {
+      if (filters.accountIds.length === 0) return [];
+      query = query.in("account_id", filters.accountIds);
+    }
+    if (filters.transactionIds) {
+      if (filters.transactionIds.length === 0) return [];
+      query = query.in("transaction_id", filters.transactionIds);
+    }
+    if (filters.dateFrom) {
+      query = query.gte("tx_date", filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      query = query.lte("tx_date", filters.dateTo);
+    }
+    if (filters.minAmount !== undefined) {
+      query = query.gte("amount", filters.minAmount);
+    }
+    if (filters.maxAmount !== undefined) {
+      query = query.lte("amount", filters.maxAmount);
+    }
+    if (filters.direction) {
+      query = query.eq("direction", filters.direction);
+    }
+    if (filters.status === "Failed") {
+      query = query.or(
+        "counterparty_merged.is.null,counterparty_merged.eq.\"\""
+      );
+    } else if (filters.status === "Success") {
+      query = query
+        .not("counterparty_merged", "is", null)
+        .neq("counterparty_merged", "");
+    }
+    if (filters.description) {
+      query = query.ilike("description", `%${filters.description}%`);
+    }
+    if (filters.counterparty) {
+      query = query.ilike("counterparty_merged", `%${filters.counterparty}%`);
+    }
+
+    const orConditions: string[] = [];
+    if (filters.query) {
+      const escaped = escapeOrValue(filters.query);
+      orConditions.push(
+        `description.ilike.*${escaped}*`,
+        `transaction_id.ilike.*${escaped}*`,
+        `counterparty_merged.ilike.*${escaped}*`
+      );
+    }
+    if (filters.searchEntityIds && filters.searchEntityIds.length > 0) {
+      orConditions.push(
+        `entity_id.in.${formatOrInList(filters.searchEntityIds)}`
+      );
+    }
+    if (filters.searchAccountIds && filters.searchAccountIds.length > 0) {
+      orConditions.push(
+        `account_id.in.${formatOrInList(filters.searchAccountIds)}`
+      );
+    }
+    if (orConditions.length > 0) {
+      query = query.or(orConditions.join(","));
+    }
+
+    query = query.order("tx_date", { ascending: false });
+
+    if (filters.offset !== undefined) {
+      query = query.range(
+        filters.offset,
+        filters.offset + (filters.limit || 100) - 1
+      );
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+
+  async searchByCaseIdCount(
+    caseId: string,
+    filters: {
+      query?: string;
+      searchEntityIds?: string[];
+      searchAccountIds?: string[];
+      entityIds?: string[];
+      accountIds?: string[];
+      transactionIds?: string[];
+      dateFrom?: string;
+      dateTo?: string;
+      minAmount?: number;
+      maxAmount?: number;
+      direction?: "DR" | "CR";
+      status?: "Failed" | "Success";
+      description?: string;
+      counterparty?: string;
+    }
+  ): Promise<number> {
+    const caseEntityIds = await getCaseEntityIds(caseId);
+    if (caseEntityIds.length === 0) {
+      return 0;
+    }
+
+    let query = supabase
+      .from("transactions")
+      .select("*", { count: "exact", head: true })
+      .in("entity_id", caseEntityIds);
+
+    if (filters.entityIds) {
+      if (filters.entityIds.length === 0) return 0;
+      query = query.in("entity_id", filters.entityIds);
+    }
+    if (filters.accountIds) {
+      if (filters.accountIds.length === 0) return 0;
+      query = query.in("account_id", filters.accountIds);
+    }
+    if (filters.transactionIds) {
+      if (filters.transactionIds.length === 0) return 0;
+      query = query.in("transaction_id", filters.transactionIds);
+    }
+    if (filters.dateFrom) {
+      query = query.gte("tx_date", filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      query = query.lte("tx_date", filters.dateTo);
+    }
+    if (filters.minAmount !== undefined) {
+      query = query.gte("amount", filters.minAmount);
+    }
+    if (filters.maxAmount !== undefined) {
+      query = query.lte("amount", filters.maxAmount);
+    }
+    if (filters.direction) {
+      query = query.eq("direction", filters.direction);
+    }
+    if (filters.status === "Failed") {
+      query = query.or(
+        "counterparty_merged.is.null,counterparty_merged.eq.\"\""
+      );
+    } else if (filters.status === "Success") {
+      query = query
+        .not("counterparty_merged", "is", null)
+        .neq("counterparty_merged", "");
+    }
+    if (filters.description) {
+      query = query.ilike("description", `%${filters.description}%`);
+    }
+    if (filters.counterparty) {
+      query = query.ilike("counterparty_merged", `%${filters.counterparty}%`);
+    }
+
+    const orConditions: string[] = [];
+    if (filters.query) {
+      const escaped = escapeOrValue(filters.query);
+      orConditions.push(
+        `description.ilike.*${escaped}*`,
+        `transaction_id.ilike.*${escaped}*`,
+        `counterparty_merged.ilike.*${escaped}*`
+      );
+    }
+    if (filters.searchEntityIds && filters.searchEntityIds.length > 0) {
+      orConditions.push(
+        `entity_id.in.${formatOrInList(filters.searchEntityIds)}`
+      );
+    }
+    if (filters.searchAccountIds && filters.searchAccountIds.length > 0) {
+      orConditions.push(
+        `account_id.in.${formatOrInList(filters.searchAccountIds)}`
+      );
+    }
+    if (orConditions.length > 0) {
+      query = query.or(orConditions.join(","));
+    }
+
+    const { count, error } = await query;
     if (error) throw error;
     return count || 0;
   },

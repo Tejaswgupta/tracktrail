@@ -76,9 +76,9 @@ async function parseCSVFile(file: File): Promise<{
         // Parse headers
         const headers = parseCSVLine(lines[0]);
 
-        // Parse first few rows for preview (max 5 rows)
+        // Parse first few rows for preview (max 50 rows)
         const data: Record<string, string>[] = [];
-        const previewRows = Math.min(5, lines.length - 1);
+        const previewRows = Math.min(50, lines.length - 1);
 
         for (let i = 1; i <= previewRows; i++) {
           if (lines[i]) {

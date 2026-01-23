@@ -46,6 +46,38 @@ interface Case {
   category: string;
 }
 
+type CaseFilter = {
+  id: string;
+  field:
+    | "entity"
+    | "account"
+    | "status"
+    | "date"
+    | "amount"
+    | "counterparty"
+    | "direction"
+    | "description";
+  operator:
+    | "is"
+    | "contains"
+    | "before"
+    | "after"
+    | "greater"
+    | "less"
+    | "between";
+  value: string | string[];
+  valueTo?: string;
+};
+
+const getFilterValues = (filter: CaseFilter) => {
+  const values = Array.isArray(filter.value)
+    ? filter.value.filter(Boolean)
+    : filter.value
+    ? [filter.value]
+    : [];
+  return values.map((value) => value.trim()).filter(Boolean);
+};
+
 export default function CaseDetailPage() {
   const params = useParams();
   const caseId = params.id as string;
@@ -76,33 +108,32 @@ export default function CaseDetailPage() {
   const [flagsByTxId, setFlagsByTxId] = useState<
     Record<string, CaseTransaction | null>
   >({});
-  const [filters, setFilters] = useState<
-    Array<{
-      id: string;
-      field:
-        | "entity"
-        | "account"
-        | "status"
-        | "date"
-        | "amount"
-        | "counterparty"
-        | "direction"
-        | "description";
-      operator:
-        | "is"
-        | "contains"
-        | "before"
-        | "after"
-        | "greater"
-        | "less"
-        | "between";
-      value: string | string[];
-      valueTo?: string;
-    }>
-  >([]);
+  const [filters, setFilters] = useState<CaseFilter[]>([]);
   const [openMultiSelectId, setOpenMultiSelectId] = useState<string | null>(
     null
   );
+  const normalizedQuery = searchQuery.trim();
+  const normalizedQueryLower = normalizedQuery.toLowerCase();
+  const entityMap = useMemo(() => {
+    const map = new Map<string, EntityWithAccounts>();
+    entities.forEach((entity) => map.set(entity.entity_id, entity));
+    return map;
+  }, [entities]);
+  const accountMap = useMemo(() => {
+    const map = new Map<
+      string,
+      { entity: EntityWithAccounts; accountLabel: string }
+    >();
+    entities.forEach((entity) => {
+      entity.accounts?.forEach((account) => {
+        const label = `${account.bank_name || "Bank"} (${
+          account.account_number
+        })`;
+        map.set(account.account_id, { entity, accountLabel: label });
+      });
+    });
+    return map;
+  }, [entities]);
 
   useEffect(() => {
     if (!openMultiSelectId) return;
@@ -174,7 +205,15 @@ export default function CaseDetailPage() {
     };
 
     fetchEntities();
-  }, [caseId]);
+  }, [
+    caseId,
+    normalizedQuery,
+    normalizedQueryLower,
+    activeView,
+    filters,
+    entities,
+    accountMap,
+  ]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -185,15 +224,236 @@ export default function CaseDetailPage() {
         setTransactionsLoading(true);
         setTransactionsProgress(null);
 
-        const totalCount = await transactionsService.getByCaseIdCount(caseId);
+        const activeFilters = filters.filter((filter) => {
+          const values = getFilterValues(filter);
+          if (values.length === 0) return false;
+          if (filter.operator === "between" && !filter.valueTo) return false;
+          return true;
+        });
+
+        const shouldUseServerSearch =
+          normalizedQuery.length > 0 ||
+          activeFilters.length > 0 ||
+          activeView !== "all";
+
+        let flaggedTransactionIds: string[] | undefined;
+        if (activeView === "needs-review") {
+          flaggedTransactionIds =
+            await caseTransactionsService.getFlaggedTransactionIds(
+              caseId,
+              "Under Review"
+            );
+          if (flaggedTransactionIds.length === 0) {
+            if (!isCancelled) {
+              setTransactions([]);
+              setTransactionsProgress(null);
+              setTransactionsLoading(false);
+            }
+            return;
+          }
+        }
+
+        const buildServerFilters = () => {
+          const entityFilters = activeFilters.filter(
+            (filter) => filter.field === "entity"
+          );
+          const accountFilters = activeFilters.filter(
+            (filter) => filter.field === "account"
+          );
+          const statusFilters = activeFilters.filter(
+            (filter) => filter.field === "status"
+          );
+          const directionFilters = activeFilters.filter(
+            (filter) => filter.field === "direction"
+          );
+          const descriptionFilter = activeFilters.find(
+            (filter) => filter.field === "description"
+          );
+          const counterpartyFilter = activeFilters.find(
+            (filter) => filter.field === "counterparty"
+          );
+          const dateFilter = activeFilters.find(
+            (filter) => filter.field === "date"
+          );
+          const amountFilter = activeFilters.find(
+            (filter) => filter.field === "amount"
+          );
+
+          const entityIds =
+            entityFilters.length > 0
+              ? entities
+                  .filter((entity) =>
+                    entityFilters.every((filter) => {
+                      const values = getFilterValues(filter).map((value) =>
+                        value.toLowerCase()
+                      );
+                      if (values.length === 0) return true;
+                      const name = entity.entity_name.toLowerCase();
+                      if (filter.operator === "is") {
+                        return values.some((value) => name === value);
+                      }
+                      return values.some((value) => name.includes(value));
+                    })
+                  )
+                  .map((entity) => entity.entity_id)
+              : undefined;
+
+          const accountEntries = Array.from(accountMap.entries());
+          const accountIds =
+            accountFilters.length > 0
+              ? accountEntries
+                  .filter(([_, account]) =>
+                    accountFilters.every((filter) => {
+                      const values = getFilterValues(filter).map((value) =>
+                        value.toLowerCase()
+                      );
+                      if (values.length === 0) return true;
+                      const label = account.accountLabel.toLowerCase();
+                      if (filter.operator === "is") {
+                        return values.some((value) => label === value);
+                      }
+                      return values.some((value) => label.includes(value));
+                    })
+                  )
+                  .map(([accountId]) => accountId)
+              : undefined;
+
+          const statusValues = statusFilters.flatMap((filter) =>
+            getFilterValues(filter)
+          );
+          const statusSet = new Set(statusValues);
+          let status: "Failed" | "Success" | undefined;
+          if (statusSet.size === 1) {
+            const [value] = Array.from(statusSet);
+            if (value === "Failed" || value === "Success") {
+              status = value;
+            }
+          }
+          if (activeView === "failed") {
+            status = "Failed";
+          }
+
+          const directionValues = directionFilters.flatMap((filter) =>
+            getFilterValues(filter)
+          );
+          const directionSet = new Set(directionValues);
+          let direction: "DR" | "CR" | undefined;
+          if (directionSet.size === 1) {
+            const [value] = Array.from(directionSet);
+            if (value === "DR" || value === "CR") {
+              direction = value;
+            }
+          }
+
+          const descriptionValues = descriptionFilter
+            ? getFilterValues(descriptionFilter)
+            : [];
+          const counterpartyValues = counterpartyFilter
+            ? getFilterValues(counterpartyFilter)
+            : [];
+
+          const dateValues = dateFilter ? getFilterValues(dateFilter) : [];
+          let dateFrom: string | undefined;
+          let dateTo: string | undefined;
+          if (dateFilter && dateValues[0]) {
+            if (dateFilter.operator === "before") {
+              dateTo = dateValues[0];
+            } else if (dateFilter.operator === "after") {
+              dateFrom = dateValues[0];
+            } else if (dateFilter.operator === "between") {
+              dateFrom = dateValues[0];
+              dateTo = dateFilter.valueTo || dateValues[0];
+            }
+          }
+
+          const amountValues = amountFilter ? getFilterValues(amountFilter) : [];
+          let minAmount: number | undefined;
+          let maxAmount: number | undefined;
+          if (amountFilter && amountValues[0]) {
+            const value = Number(amountValues[0]);
+            const valueTo = amountFilter.valueTo
+              ? Number(amountFilter.valueTo)
+              : value;
+            if (!Number.isNaN(value)) {
+              if (amountFilter.operator === "greater") {
+                minAmount = value;
+              } else if (amountFilter.operator === "less") {
+                maxAmount = value;
+              } else if (amountFilter.operator === "between") {
+                minAmount = value;
+                maxAmount = valueTo;
+              }
+            }
+          }
+
+          const searchEntityIds =
+            normalizedQueryLower.length > 0
+              ? entities
+                  .filter((entity) =>
+                    entity.entity_name
+                      .toLowerCase()
+                      .includes(normalizedQueryLower)
+                  )
+                  .map((entity) => entity.entity_id)
+              : [];
+          const searchAccountIds =
+            normalizedQueryLower.length > 0
+              ? accountEntries
+                  .filter(([_, account]) =>
+                    account.accountLabel
+                      .toLowerCase()
+                      .includes(normalizedQueryLower)
+                  )
+                  .map(([accountId]) => accountId)
+              : [];
+
+          return {
+            query: normalizedQuery || undefined,
+            searchEntityIds:
+              searchEntityIds.length > 0 ? searchEntityIds : undefined,
+            searchAccountIds:
+              searchAccountIds.length > 0 ? searchAccountIds : undefined,
+            entityIds,
+            accountIds,
+            transactionIds: flaggedTransactionIds,
+            dateFrom,
+            dateTo,
+            minAmount,
+            maxAmount,
+            direction,
+            status,
+            description:
+              descriptionValues.length > 0 ? descriptionValues[0] : undefined,
+            counterparty:
+              counterpartyValues.length > 0 ? counterpartyValues[0] : undefined,
+          };
+        };
+
+        const serverFilters = shouldUseServerSearch
+          ? buildServerFilters()
+          : null;
+
+        const totalCount = shouldUseServerSearch
+          ? await transactionsService.searchByCaseIdCount(
+              caseId,
+              serverFilters || {}
+            )
+          : await transactionsService.getByCaseIdCount(caseId);
+
         const allTransactions: Transaction[] = [];
         let offset = 0;
 
         while (!isCancelled) {
-          const page = await transactionsService.getByCaseId(caseId, {
-            offset,
-            limit: TRANSACTIONS_PER_PAGE,
-          });
+          const page = shouldUseServerSearch
+            ? await transactionsService.searchByCaseId(caseId, {
+                ...(serverFilters || {}),
+                offset,
+                limit: TRANSACTIONS_PER_PAGE,
+              })
+            : await transactionsService.getByCaseId(caseId, {
+                offset,
+                limit: TRANSACTIONS_PER_PAGE,
+              });
 
           allTransactions.push(...page);
 
@@ -313,30 +573,6 @@ export default function CaseDetailPage() {
     []
   );
 
-  const entityMap = useMemo(() => {
-    const map = new Map<string, EntityWithAccounts>();
-    entities.forEach((entity) => map.set(entity.entity_id, entity));
-    return map;
-  }, [entities]);
-
-  const accountMap = useMemo(() => {
-    const map = new Map<
-      string,
-      { entity: EntityWithAccounts; accountLabel: string }
-    >();
-    entities.forEach((entity) => {
-      entity.accounts?.forEach((account) => {
-        const label = `${account.bank_name || "Bank"} (${
-          account.account_number
-        })`;
-        map.set(account.account_id, { entity, accountLabel: label });
-      });
-    });
-    return map;
-  }, [entities]);
-
-  const normalizedQuery = searchQuery.trim().toLowerCase();
-
   const filtersWithLabels = useMemo(() => {
     return filters
       .map((filter) => {
@@ -389,7 +625,7 @@ export default function CaseDetailPage() {
         !counterpartyRaw || counterpartyRaw.trim() === "";
       const status = isCounterpartyMissing ? "Failed" : "Success";
 
-      const baseMatch = normalizedQuery
+      const baseMatch = normalizedQueryLower
         ? [
             entityName,
             accountLabel,
@@ -399,7 +635,7 @@ export default function CaseDetailPage() {
           ]
             .join(" ")
             .toLowerCase()
-            .includes(normalizedQuery)
+            .includes(normalizedQueryLower)
         : true;
 
       const viewMatch =
@@ -407,6 +643,8 @@ export default function CaseDetailPage() {
           ? true
           : activeView === "failed"
           ? isCounterpartyMissing
+          : Object.keys(flagsByTxId).length === 0
+          ? true
           : flagsByTxId[transaction.transaction_id]?.flag_type ===
             "Under Review";
 
@@ -483,7 +721,7 @@ export default function CaseDetailPage() {
     return transactions.filter(matchesFilters);
   }, [
     transactions,
-    normalizedQuery,
+    normalizedQueryLower,
     activeView,
     filters,
     entityMap,
@@ -527,6 +765,7 @@ export default function CaseDetailPage() {
         refId: transaction.transaction_id,
         amountLabel: formatCurrency(transaction.amount),
         amountValue: transaction.amount,
+        directionLabel: transaction.direction === "DR" ? "Debit" : "Credit",
         counterparty,
         status: isCounterpartyMissing ? "Failed" : "Success",
         onCounterpartySave: async (newName) => {

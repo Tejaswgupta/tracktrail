@@ -4,14 +4,14 @@ Provides high-level database operations for entity transactions and metadata.
 """
 
 import logging
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import polars as pl
-
 from app.core.database import db_manager
-from app.core.exceptions import DatabaseError, EntityNotFoundError, ValidationError
+from app.core.exceptions import (DatabaseError, EntityNotFoundError,
+                                 ValidationError)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class DatabaseService:
             convert_to_polars: Whether to convert result to Polars DataFrame
 
         Returns:
-            DataFrame containing transaction data (Polars or Pandas)
+            DataFrame containing transaction data (Polars)
 
         Raises:
             ValidationError: If input parameters are invalid
