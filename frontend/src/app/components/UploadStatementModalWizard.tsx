@@ -5,9 +5,9 @@ import {
   type BankPreset,
 } from "@/constants/banks";
 import { accountsService, entitiesService } from "@/services/database";
-import type { EntityWithAccounts } from "@/types/database";
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
 import { transactionExtractorService } from "@/services/transactionExtractor";
+import type { EntityWithAccounts } from "@/types/database";
 import {
   buildSuggestedColumnMapping,
   isColumnMappingValid,
@@ -56,12 +56,12 @@ export default function UploadStatementModalWizard({
   const [selectedBank, setSelectedBank] = useState<BankPreset>("generic");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
-    null
+    null,
   );
   const [currentFileProgress, setCurrentFileProgress] =
     useState<UploadProgress | null>(null);
   const [currentUploadIndex, setCurrentUploadIndex] = useState<number | null>(
-    null
+    null,
   );
   const [error, setError] = useState<string | null>(null);
   const [isLoadingAccount, setIsLoadingAccount] = useState(false);
@@ -70,7 +70,7 @@ export default function UploadStatementModalWizard({
     (CSVValidationResult | null)[]
   >([]);
   const [fileMappings, setFileMappings] = useState<(ColumnMapping | null)[]>(
-    []
+    [],
   );
   const [mappingIndex, setMappingIndex] = useState(0);
   const [deletedRows, setDeletedRows] = useState<number[]>([]);
@@ -88,9 +88,7 @@ export default function UploadStatementModalWizard({
         const caseEntities = await entitiesService.getByCaseId(caseId);
         if (!isActive) return;
         setEntities(caseEntities);
-        setAccountEntityId(
-          (prev) => prev || caseEntities[0]?.entity_id || ""
-        );
+        setAccountEntityId((prev) => prev || caseEntities[0]?.entity_id || "");
       } catch (error) {
         console.error("Error fetching entities:", error);
       } finally {
@@ -104,7 +102,7 @@ export default function UploadStatementModalWizard({
     return () => {
       isActive = false;
     };
-  }, [caseId, refreshEntitiesTrigger]);
+  }, []);
 
   useEffect(() => {
     if (!accountEntityId) {
@@ -114,13 +112,17 @@ export default function UploadStatementModalWizard({
 
     const entity = entities.find((item) => item.entity_id === accountEntityId);
     const matchingAccount = entity?.accounts?.find(
-      (account) => account.account_id === accountId
+      (account) => account.account_id === accountId,
     );
     if (matchingAccount) return;
 
     const firstAccount = entity?.accounts?.[0];
-    setAccountId(firstAccount?.account_id || "");
-  }, [accountEntityId, entities, accountId]);
+    const nextAccountId = firstAccount?.account_id || "";
+
+    if (nextAccountId !== accountId) {
+      setAccountId(nextAccountId);
+    }
+  }, []);
 
   useEffect(() => {
     const fetchAccountAndInferBank = async () => {
@@ -131,7 +133,7 @@ export default function UploadStatementModalWizard({
         const account = await accountsService.getById(accountId);
         if (account?.bank_name) {
           const inferredBankPreset = inferBankPresetFromBankName(
-            account.bank_name
+            account.bank_name,
           );
           setSelectedBank(inferredBankPreset);
         }
@@ -143,7 +145,7 @@ export default function UploadStatementModalWizard({
     };
 
     fetchAccountAndInferBank();
-  }, [accountId]);
+  }, []);
 
   const CREATE_ENTITY_VALUE = "__create_entity__";
   const CREATE_ACCOUNT_VALUE = "__create_account__";
@@ -199,10 +201,10 @@ export default function UploadStatementModalWizard({
 
     setIsProcessingFile(true);
     const validations: (CSVValidationResult | null)[] = Array(
-      selectedFiles.length
+      selectedFiles.length,
     ).fill(null);
     const mappings: (ColumnMapping | null)[] = Array(selectedFiles.length).fill(
-      null
+      null,
     );
 
     for (let index = 0; index < selectedFiles.length; index += 1) {
@@ -219,7 +221,8 @@ export default function UploadStatementModalWizard({
         ) {
           validation = await fileUploadService.validateExcel(file);
         } else if (file.type === "application/pdf") {
-          validation = await transactionExtractorService.previewPDFColumns(file);
+          validation =
+            await transactionExtractorService.previewPDFColumns(file);
         }
 
         validations[index] = validation;
@@ -231,7 +234,7 @@ export default function UploadStatementModalWizard({
       } catch (error) {
         console.error("File validation error:", error);
         setError(
-          error instanceof Error ? error.message : "Failed to validate file"
+          error instanceof Error ? error.message : "Failed to validate file",
         );
       }
     }
@@ -240,7 +243,7 @@ export default function UploadStatementModalWizard({
 
   const handleColumnMappingComplete = (
     mapping: ColumnMapping,
-    rowsToDelete: number[]
+    rowsToDelete: number[],
   ) => {
     setFileMappings((prev) => {
       const next = [...prev];
@@ -331,7 +334,7 @@ export default function UploadStatementModalWizard({
             const currentProgress = progress.percentage / 100 / files.length;
             const percentage = Math.min(
               100,
-              Math.round((baseProgress + currentProgress) * 100)
+              Math.round((baseProgress + currentProgress) * 100),
             );
             const filePercentage =
               progress.uploadPercentage ?? progress.percentage;
@@ -446,7 +449,9 @@ export default function UploadStatementModalWizard({
                       value={accountEntityId}
                       items={entityOptions}
                       placeholder={
-                        isLoadingEntities ? "Loading entities..." : "Select entity"
+                        isLoadingEntities
+                          ? "Loading entities..."
+                          : "Select entity"
                       }
                       searchPlaceholder="Search entities..."
                       emptyText="No entities found."
@@ -522,7 +527,9 @@ export default function UploadStatementModalWizard({
               fileIndex={mappingIndex}
               fileCount={files.length}
               ctaLabel={
-                mappingIndex < files.length - 1 ? "Save & Next File" : "Continue"
+                mappingIndex < files.length - 1
+                  ? "Save & Next File"
+                  : "Continue"
               }
             />
           )}

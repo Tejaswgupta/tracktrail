@@ -215,15 +215,7 @@ export default function CaseDetailPage() {
     };
 
     fetchEntities();
-  }, [
-    caseId,
-    normalizedQuery,
-    normalizedQueryLower,
-    activeView,
-    filters,
-    entities,
-    accountMap,
-  ]);
+  }, [caseId]);
 
   useEffect(() => {
     setPageIndex(0);
