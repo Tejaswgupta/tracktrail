@@ -1,0 +1,118 @@
+{
+  "UJJIVAN": {
+    "DATE": "DATE",
+    "DESCRIPTION": "TRANSACTION DETAILS",
+    "DEBIT": "DEBIT",
+    "CREDIT": "CREDIT"
+  },
+  "CBI": {
+    "DATE": "Post",
+    "DESCRIPTION": "Details",
+    "DEBIT": "Debit",
+    "CREDIT": "Credit",
+    "NOTES": "Alternative Date: 'Value'"
+  },
+  "ICICI BANK": {
+    "DATE": "Date_of_transaction",
+    "DESCRIPTION": "Narration",
+    "DEBIT": "Debit_amount",
+    "CREDIT": "Credit_Amount"
+  },
+  "CANARA BANK": {
+    "DATE": "TXN DT",
+    "DESCRIPTION": "NARRATION",
+    "DEBIT": "DEBIT",
+    "CREDIT": "CREDIT",
+    "NOTES": "Has 'POST DATE' as well"
+  },
+  "SOUTH INDIAN BANK": {
+    "DATE": "TXN DATE",
+    "DESCRIPTION": "TXN COMMENT/DESCRIPTION)",
+    "DEBIT": "PAYMENT(DR)",
+    "CREDIT": "RECEIPT (CR)"
+  },
+  "EQUITY SMALL FINANCE BANK": {
+    "DATE": "Tran Date",
+    "DESCRIPTION": "Description",
+    "DEBIT": "Debits",
+    "CREDIT": "Credits"
+  },
+  "AXIS BANK": {
+    "DATE": "Tran Date",
+    "DESCRIPTION": "Transaction Particulars",
+    "DEBIT": "Debit(INR)",
+    "CREDIT": "Credit(INR)"
+  },
+  "BANK OF BARODA": {
+    "STATUS": "MISSING_SAMPLE"
+  },
+  "CSB": {
+    "DATE": "Transaction Date",
+    "DESCRIPTION": "Transaction Description",
+    "DEBIT": "Debit Credit",
+    "CREDIT": "Debit Credit"
+  },
+  "HDFC BANK": {
+    "DATE": "Transaction Date",
+    "DESCRIPTION": "Transaction Description",
+    "DEBIT": "Debit",
+    "CREDIT": "Credit"
+  },
+  "IDBI BANK": {
+    "DATE": "Date of transaction",
+    "DESCRIPTION": "Transaction description ",
+    "AMOUNT": null,
+    "DIRECTION": "Flag debit /credit",
+    "NOTES": "Direction column present, verify Amount column name if available"
+  },
+  "IDFC FIRST": {
+    "DATE": "Trans Date and Time",
+    "DESCRIPTION": "Transaction Details",
+    "DEBIT": "Debit",
+    "CREDIT": "Credit"
+  },
+  "INDUSIND BANK": {
+    "STATUS": "MISSING_SAMPLE"
+  },
+  "KALUPUR CO-OPERATIVE": {
+    "DATE": "Tran Date",
+    "DESCRIPTION": "Particulars",
+    "DEBIT": "Debit Amt.",
+    "CREDIT": "Credit Amt."
+  },
+  "Kotak Mahindra Bank": {
+    "DATE": "TXN DATE",
+    "DESCRIPTION": "TXN PARTICULARS",
+    "DEBIT": null,
+    "CREDIT": null,
+    "AMOUNT": "AMOUNT",
+    "DIRECTION": "Dr Cr"
+  },
+  "PNB": {
+    "DATE": "Date",
+    "DESCRIPTION": "Narration",
+    "DEBIT": "Withdrawal",
+    "CREDIT": "Deposit"
+  },
+  "RBL BANK": {
+    "DATE": "Tran Date",
+    "DESCRIPTION": "Narration",
+    "DEBIT": "Debit",
+    "CREDIT": "Credit",
+    "NOTES": "Inferred from partial strings extraction. Verify against binary XLS."
+  },
+  "SBI": {
+    "DATE": "Txn Date",
+    "DESCRIPTION": "Description",
+    "DEBIT": "Debit",
+    "CREDIT": "Credit"
+  },
+  "YES BANK": {
+    "DATE": "Txn Date",
+    "DESCRIPTION": "Description",
+    "DEBIT": null,
+    "CREDIT": null,
+    "AMOUNT": "Amount",
+    "DIRECTION": "Dr/Cr"
+  }
+}

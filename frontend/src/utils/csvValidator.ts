@@ -13,7 +13,6 @@ export interface CSVValidationResult {
   requiredColumns: RequiredColumns;
   missingColumns: string[];
   suggestedMapping?: Record<string, string>;
-  previewData?: Record<string, string>[];
 }
 
 export interface ColumnMapping {
@@ -54,54 +53,21 @@ export function isColumnMappingValid(
 }
 
 /**
- * Parse CSV file and return headers and preview data
+ * Parse CSV file and return headers only.
  */
-async function parseCSVFile(file: File): Promise<{
-  headers: string[];
-  data: Record<string, string>[];
-}> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+async function parseCSVHeaders(file: File): Promise<string[]> {
+  try {
+    const chunk = await file.slice(0, 1024 * 1024).text();
+    const lines = chunk.split(/\r?\n/).filter((line) => line.trim());
 
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        const lines = text.split("\n").filter((line) => line.trim());
+    if (lines.length === 0) {
+      throw new Error("CSV file is empty");
+    }
 
-        if (lines.length === 0) {
-          reject(new Error("CSV file is empty"));
-          return;
-        }
-
-        // Parse headers
-        const headers = parseCSVLine(lines[0]);
-
-        // Parse first few rows for preview (max 50 rows)
-        const data: Record<string, string>[] = [];
-        const previewRows = Math.min(50, lines.length - 1);
-
-        for (let i = 1; i <= previewRows; i++) {
-          if (lines[i]) {
-            const values = parseCSVLine(lines[i]);
-            const row: Record<string, string> = {};
-
-            headers.forEach((header, index) => {
-              row[header] = values[index] || "";
-            });
-
-            data.push(row);
-          }
-        }
-
-        resolve({ headers, data });
-      } catch (error) {
-        reject(new Error("Failed to parse CSV file"));
-      }
-    };
-
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsText(file);
-  });
+    return parseCSVLine(lines[0]);
+  } catch (error) {
+    throw new Error("Failed to parse CSV file");
+  }
 }
 
 /**
@@ -280,11 +246,10 @@ export function validateCSVColumns(headers: string[]): CSVValidationResult {
 export async function validateCSVFile(
   file: File
 ): Promise<CSVValidationResult> {
-  const { headers, data } = await parseCSVFile(file);
+  const headers = await parseCSVHeaders(file);
   const validation = validateCSVColumns(headers);
 
   return {
     ...validation,
-    previewData: data,
   };
 }

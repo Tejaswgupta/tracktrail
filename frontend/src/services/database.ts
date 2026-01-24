@@ -9,6 +9,7 @@ import type {
   Transaction,
 } from "@/types/database";
 import { createClient } from "@/utils/supabase/client";
+import { getAutoMergePairs } from "@/utils/counterpartyMerge";
 
 const supabase = createClient();
 
@@ -22,8 +23,7 @@ const getCaseEntityIds = async (caseId: string): Promise<string[]> => {
   return data?.map((item) => item.entity_id) || [];
 };
 
-const escapeOrValue = (value: string) =>
-  value.replace(/([(),])/g, "\\$1");
+const escapeOrValue = (value: string) => value.replace(/([(),])/g, "\\$1");
 
 const formatOrInList = (values: string[]) =>
   `(${values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",")})`;
@@ -33,7 +33,8 @@ class SimpleCache<T> {
   private cache = new Map<string, { value: T; expiry: number }>();
   private defaultTtl: number;
 
-  constructor(defaultTtlMs: number = 5 * 60 * 1000) { // 5 minutes default
+  constructor(defaultTtlMs: number = 5 * 60 * 1000) {
+    // 5 minutes default
     this.defaultTtl = defaultTtlMs;
   }
 
@@ -71,7 +72,7 @@ class SimpleCache<T> {
       }
     }
   }
-  
+
   // Get cache statistics
   getStats() {
     return {
@@ -79,8 +80,8 @@ class SimpleCache<T> {
       entries: Array.from(this.cache.entries()).map(([key, item]) => ({
         key,
         expiresAt: new Date(item.expiry).toISOString(),
-        isExpired: Date.now() > item.expiry
-      }))
+        isExpired: Date.now() > item.expiry,
+      })),
     };
   }
 }
@@ -88,7 +89,9 @@ class SimpleCache<T> {
 // Create cache instances for different data types
 const transactionCache = new SimpleCache<Transaction[]>(15 * 60 * 1000); // 5 minutes
 const caseAMLMetadataCache = new SimpleCache<AMLMetadata>(10 * 60 * 1000); // 10 minutes
-const caseTransactionsAnalysisCache = new SimpleCache<Transaction[]>(10 * 60 * 1000); // 10 minutes
+const caseTransactionsAnalysisCache = new SimpleCache<Transaction[]>(
+  10 * 60 * 1000,
+); // 10 minutes
 
 export interface AMLMetadata {
   entityIds: string[];
@@ -101,7 +104,10 @@ export interface AMLMetadata {
 export const casesService = {
   async getAll(): Promise<CaseWithStats[]> {
     // Get the current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
     if (userError) {
       console.error("Error getting user:", userError);
@@ -148,9 +154,7 @@ export const casesService = {
     return data;
   },
 
-  async create(
-    caseData: Omit<Case, "case_id" | "created_at" >
-  ): Promise<Case> {
+  async create(caseData: Omit<Case, "case_id" | "created_at">): Promise<Case> {
     const { data, error } = await supabase
       .from("cases")
       .insert(caseData)
@@ -178,7 +182,7 @@ export const casesService = {
 export const caseTransactionsService = {
   async getFlagsForTransactions(
     caseId: string,
-    transactionIds: string[]
+    transactionIds: string[],
   ): Promise<import("@/types/database").CaseTransaction[]> {
     if (!transactionIds || transactionIds.length === 0) return [];
     const { data, error } = await supabase
@@ -193,7 +197,7 @@ export const caseTransactionsService = {
 
   async getFlaggedTransactionIds(
     caseId: string,
-    flagType?: import("@/types/database").CaseTransaction["flag_type"]
+    flagType?: import("@/types/database").CaseTransaction["flag_type"],
   ): Promise<string[]> {
     let query = supabase
       .from("case_transactions")
@@ -212,7 +216,7 @@ export const caseTransactionsService = {
 
   async getFlagForTransaction(
     caseId: string,
-    transactionId: string
+    transactionId: string,
   ): Promise<import("@/types/database").CaseTransaction | null> {
     const { data, error } = await supabase
       .from("case_transactions")
@@ -234,7 +238,7 @@ export const caseTransactionsService = {
   }): Promise<import("@/types/database").CaseTransaction> {
     const existing = await this.getFlagForTransaction(
       params.caseId,
-      params.transactionId
+      params.transactionId,
     );
 
     if (existing) {
@@ -271,7 +275,7 @@ export const caseTransactionsService = {
 
   async deleteFlagByTransaction(
     caseId: string,
-    transactionId: string
+    transactionId: string,
   ): Promise<void> {
     const { error } = await supabase
       .from("case_transactions")
@@ -343,7 +347,7 @@ export const entitiesService = {
             bank_statements (count)
           )
         )
-      `
+      `,
       )
       .eq("case_id", caseId);
 
@@ -358,13 +362,13 @@ export const entitiesService = {
         item.entities.accounts?.reduce(
           (sum: number, acc: any) =>
             sum + (acc.bank_statements?.[0]?.count || 0),
-          0
+          0,
         ) || 0,
     }));
   },
 
   async create(
-    entityData: Omit<Entity, "entity_id" | "created_at">
+    entityData: Omit<Entity, "entity_id" | "created_at">,
   ): Promise<Entity> {
     const { data, error } = await supabase
       .from("entities")
@@ -380,7 +384,7 @@ export const entitiesService = {
     caseId: string,
     entityId: string,
     role: string,
-    addedBy: string
+    addedBy: string,
   ): Promise<void> {
     const { error } = await supabase.from("case_entities").insert({
       case_id: caseId,
@@ -401,7 +405,7 @@ export const entitiesService = {
       .eq("entity_id", entityId);
 
     if (error) throw error;
-    
+
     // Clear transaction caches since deleting an entity removes its transactions
     transactionCache.clear();
   },
@@ -416,7 +420,10 @@ export const entitiesService = {
     if (error) throw error;
   },
 
-  async update(entityId: string, updates: Partial<Omit<Entity, "entity_id" | "created_at">>): Promise<Entity> {
+  async update(
+    entityId: string,
+    updates: Partial<Omit<Entity, "entity_id" | "created_at">>,
+  ): Promise<Entity> {
     const { data, error } = await supabase
       .from("entities")
       .update({ ...updates })
@@ -439,7 +446,7 @@ export const accountsService = {
       .single();
 
     if (error) {
-      if (error.code === 'PGRST116') {
+      if (error.code === "PGRST116") {
         return null; // Not found
       }
       throw error;
@@ -456,7 +463,7 @@ export const accountsService = {
         bank_statements (
           *
         )
-      `
+      `,
       )
       .eq("entity_id", entityId);
 
@@ -470,15 +477,15 @@ export const accountsService = {
         account.bank_statements?.length > 0
           ? Math.max(
               ...account.bank_statements.map((s: any) =>
-                new Date(s.upload_date).getTime()
-              )
+                new Date(s.upload_date).getTime(),
+              ),
             )
           : undefined,
     }));
   },
 
   async create(
-    accountData: Omit<Account, "account_id" | "created_at">
+    accountData: Omit<Account, "account_id" | "created_at">,
   ): Promise<Account> {
     const { data, error } = await supabase
       .from("accounts")
@@ -498,7 +505,7 @@ export const accountsService = {
       .eq("account_id", accountId);
 
     if (error) throw error;
-    
+
     // Clear transaction caches since deleting an account removes its transactions
     transactionCache.clear();
   },
@@ -518,7 +525,7 @@ export const statementsService = {
   },
 
   async create(
-    statementData: Omit<BankStatement, "statement_id" | "upload_date">
+    statementData: Omit<BankStatement, "statement_id" | "upload_date">,
   ): Promise<BankStatement> {
     const { data, error } = await supabase
       .from("bank_statements")
@@ -533,7 +540,7 @@ export const statementsService = {
   async updateProcessingStatus(
     statementId: string,
     status: BankStatement["processing_status"],
-    progress?: number
+    progress?: number,
   ): Promise<void> {
     const updates: any = { processing_status: status };
     if (progress !== undefined) {
@@ -560,7 +567,7 @@ export const statementsService = {
     console.log(error);
 
     if (error) throw error;
-    
+
     // Clear transaction caches since deleting a statement removes its transactions
     transactionCache.clear();
   },
@@ -583,7 +590,7 @@ export const transactionsService = {
       .order("tx_date", { ascending: false });
 
     if (error) throw error;
-    
+
     const result = data || [];
     // Cache the result
     transactionCache.set(cacheKey, result);
@@ -595,7 +602,7 @@ export const transactionsService = {
     options?: {
       offset?: number;
       limit?: number;
-    }
+    },
   ): Promise<Transaction[]> {
     // Check cache first (only for non-paginated requests)
     const cacheKey = `transactions-entity-${entityId}`;
@@ -615,14 +622,14 @@ export const transactionsService = {
     if (options?.offset !== undefined) {
       query = query.range(
         options.offset,
-        options.offset + (options.limit || 100) - 1
+        options.offset + (options.limit || 100) - 1,
       );
     }
 
     const { data, error } = await query;
 
     if (error) throw error;
-    
+
     const result = data || [];
     // Cache the result only for non-paginated requests
     if (!options?.offset && !options?.limit) {
@@ -646,7 +653,7 @@ export const transactionsService = {
     options?: {
       offset?: number;
       limit?: number;
-    }
+    },
   ): Promise<Transaction[]> {
     // Check cache first (only for non-paginated requests)
     const cacheKey = `transactions-case-${caseId}`;
@@ -681,14 +688,14 @@ export const transactionsService = {
     if (options?.offset !== undefined) {
       query = query.range(
         options.offset,
-        options.offset + (options.limit || 100) - 1
+        options.offset + (options.limit || 100) - 1,
       );
     }
 
     const { data, error } = await query;
 
     if (error) throw error;
-    
+
     const result = data || [];
     // Cache the result only for non-paginated requests
     if (!options?.offset && !options?.limit) {
@@ -741,7 +748,7 @@ export const transactionsService = {
       counterparty?: string;
       offset?: number;
       limit?: number;
-    }
+    },
   ): Promise<Transaction[]> {
     const caseEntityIds = await getCaseEntityIds(caseId);
     if (caseEntityIds.length === 0) {
@@ -781,9 +788,7 @@ export const transactionsService = {
       query = query.eq("direction", filters.direction);
     }
     if (filters.status === "Failed") {
-      query = query.or(
-        "counterparty_merged.is.null,counterparty_merged.eq.\"\""
-      );
+      query = query.or('counterparty_merged.is.null,counterparty_merged.eq.""');
     } else if (filters.status === "Success") {
       query = query
         .not("counterparty_merged", "is", null)
@@ -802,17 +807,17 @@ export const transactionsService = {
       orConditions.push(
         `description.ilike.*${escaped}*`,
         `transaction_id.ilike.*${escaped}*`,
-        `counterparty_merged.ilike.*${escaped}*`
+        `counterparty_merged.ilike.*${escaped}*`,
       );
     }
     if (filters.searchEntityIds && filters.searchEntityIds.length > 0) {
       orConditions.push(
-        `entity_id.in.${formatOrInList(filters.searchEntityIds)}`
+        `entity_id.in.${formatOrInList(filters.searchEntityIds)}`,
       );
     }
     if (filters.searchAccountIds && filters.searchAccountIds.length > 0) {
       orConditions.push(
-        `account_id.in.${formatOrInList(filters.searchAccountIds)}`
+        `account_id.in.${formatOrInList(filters.searchAccountIds)}`,
       );
     }
     if (orConditions.length > 0) {
@@ -824,7 +829,7 @@ export const transactionsService = {
     if (filters.offset !== undefined) {
       query = query.range(
         filters.offset,
-        filters.offset + (filters.limit || 100) - 1
+        filters.offset + (filters.limit || 100) - 1,
       );
     }
 
@@ -850,7 +855,7 @@ export const transactionsService = {
       status?: "Failed" | "Success";
       description?: string;
       counterparty?: string;
-    }
+    },
   ): Promise<number> {
     const caseEntityIds = await getCaseEntityIds(caseId);
     if (caseEntityIds.length === 0) {
@@ -890,9 +895,7 @@ export const transactionsService = {
       query = query.eq("direction", filters.direction);
     }
     if (filters.status === "Failed") {
-      query = query.or(
-        "counterparty_merged.is.null,counterparty_merged.eq.\"\""
-      );
+      query = query.or('counterparty_merged.is.null,counterparty_merged.eq.""');
     } else if (filters.status === "Success") {
       query = query
         .not("counterparty_merged", "is", null)
@@ -911,17 +914,17 @@ export const transactionsService = {
       orConditions.push(
         `description.ilike.*${escaped}*`,
         `transaction_id.ilike.*${escaped}*`,
-        `counterparty_merged.ilike.*${escaped}*`
+        `counterparty_merged.ilike.*${escaped}*`,
       );
     }
     if (filters.searchEntityIds && filters.searchEntityIds.length > 0) {
       orConditions.push(
-        `entity_id.in.${formatOrInList(filters.searchEntityIds)}`
+        `entity_id.in.${formatOrInList(filters.searchEntityIds)}`,
       );
     }
     if (filters.searchAccountIds && filters.searchAccountIds.length > 0) {
       orConditions.push(
-        `account_id.in.${formatOrInList(filters.searchAccountIds)}`
+        `account_id.in.${formatOrInList(filters.searchAccountIds)}`,
       );
     }
     if (orConditions.length > 0) {
@@ -950,7 +953,7 @@ export const transactionsService = {
       status?: "Failed" | "Success";
       description?: string;
       counterparty?: string;
-    } = {}
+    } = {},
   ): Promise<{ totalCount: number; totalAmount: number }> {
     if (filters.entityIds && filters.entityIds.length === 0) {
       return { totalCount: 0, totalAmount: 0 };
@@ -983,7 +986,7 @@ export const transactionsService = {
         p_query: filters.query ?? null,
         p_search_entity_ids: normalizeArray(filters.searchEntityIds),
         p_search_account_ids: normalizeArray(filters.searchAccountIds),
-      }
+      },
     );
 
     if (error) throw error;
@@ -994,9 +997,6 @@ export const transactionsService = {
       totalAmount: Number(row?.total_amount ?? 0),
     };
   },
-
-  
-
 
   // Optimized method for AML analysis - only fetches metadata
   async getCaseAMLMetadata(caseId: string): Promise<AMLMetadata> {
@@ -1068,7 +1068,7 @@ export const transactionsService = {
       // transactionCount,
       // totalVolume,
     };
-    
+
     // Cache the result
     caseAMLMetadataCache.set(cacheKey, result);
     return result;
@@ -1084,10 +1084,10 @@ export const transactionsService = {
       "direction",
       "counterparty_merged",
       "entity_id",
-    ]
+    ],
   ): Promise<Transaction[]> {
     // Check cache first
-    const cacheKey = `transactions-analysis-${caseId}-${fields.sort().join(',')}`;
+    const cacheKey = `transactions-analysis-${caseId}-${fields.sort().join(",")}`;
     const cached = caseTransactionsAnalysisCache.get(cacheKey);
     if (cached) {
       return cached;
@@ -1127,7 +1127,7 @@ export const transactionsService = {
   },
 
   async create(
-    transactionData: Omit<Transaction, "transaction_id" | "created_at">
+    transactionData: Omit<Transaction, "transaction_id" | "created_at">,
   ): Promise<Transaction> {
     const { data, error } = await supabase
       .from("transactions")
@@ -1136,15 +1136,15 @@ export const transactionsService = {
       .single();
 
     if (error) throw error;
-    
+
     // Invalidate relevant caches
     transactionCache.clear(); // Clear all transaction caches when adding new transactions
-    
+
     return data;
   },
 
   async createBatch(
-    transactions: Omit<Transaction, "transaction_id" | "created_at">[]
+    transactions: Omit<Transaction, "transaction_id" | "created_at">[],
   ): Promise<Transaction[]> {
     const { data, error } = await supabase
       .from("transactions")
@@ -1161,7 +1161,17 @@ export const transactionsService = {
 
   async updateTransaction(
     transactionId: string,
-    updates: Partial<Omit<Transaction, "transaction_id" | "created_at" | "account_id" | "entity_id" | "statement_id" | "original_index">>
+    updates: Partial<
+      Omit<
+        Transaction,
+        | "transaction_id"
+        | "created_at"
+        | "account_id"
+        | "entity_id"
+        | "statement_id"
+        | "original_index"
+      >
+    >,
   ): Promise<Transaction> {
     const { data, error } = await supabase
       .from("transactions")
@@ -1222,7 +1232,7 @@ export const transactionsService = {
     options?: {
       offset?: number;
       limit?: number;
-    }
+    },
   ): Promise<Transaction[]> {
     let query = supabase
       .from("transactions")
@@ -1238,7 +1248,7 @@ export const transactionsService = {
     if (options?.offset !== undefined) {
       query = query.range(
         options.offset,
-        options.offset + (options.limit || 10) - 1
+        options.offset + (options.limit || 10) - 1,
       );
     }
 
@@ -1249,7 +1259,7 @@ export const transactionsService = {
 
   async getTransactionSummaryByStatements(
     accountId: string,
-    statementIds?: string[]
+    statementIds?: string[],
   ) {
     let query = supabase
       .from("transactions")
@@ -1292,7 +1302,7 @@ export const transactionsService = {
       statementIds?: string[];
       offset?: number;
       limit?: number;
-    }
+    },
   ): Promise<Transaction[]> {
     let query = supabase
       .from("transactions")
@@ -1326,7 +1336,7 @@ export const transactionsService = {
     if (filters.offset !== undefined) {
       query = query.range(
         filters.offset,
-        filters.offset + (filters.limit || 10) - 1
+        filters.offset + (filters.limit || 10) - 1,
       );
     }
 
@@ -1345,7 +1355,7 @@ export const transactionsService = {
       direction?: "DR" | "CR";
       description?: string;
       statementIds?: string[];
-    }
+    },
   ): Promise<number> {
     let query = supabase
       .from("transactions")
@@ -1384,9 +1394,10 @@ export const transactionsService = {
     oldCounterpartyName: string,
     newCounterpartyName: string,
   ): Promise<{ affectedCount: number }> {
+    console.log(
+      `Updating counterparty from "${oldCounterpartyName}" to "${newCounterpartyName}" for case ${caseId}`,
+    );
 
-    console.log(`Updating counterparty from "${oldCounterpartyName}" to "${newCounterpartyName}" for case ${caseId}`);
-    
     // First get all entity IDs for this case
     const { data: caseEntities, error: caseError } = await supabase
       .from("case_entities")
@@ -1418,11 +1429,11 @@ export const transactionsService = {
         counterparty_merged: newCounterpartyName,
       })
       .in("entity_id", entityIds)
-      .eq("counterparty_merged", oldCounterpartyName).select();
+      .eq("counterparty_merged", oldCounterpartyName)
+      .select();
 
     if (error) throw error;
-    
-    
+
     return { affectedCount: data?.length || 0 };
   },
 };
@@ -1445,7 +1456,7 @@ export const counterpartyService = {
       if (tx.counterparty_merged) {
         counts.set(
           tx.counterparty_merged,
-          (counts.get(tx.counterparty_merged) || 0) + 1
+          (counts.get(tx.counterparty_merged) || 0) + 1,
         );
       }
     });
@@ -1498,83 +1509,8 @@ export const counterpartyService = {
     return data || [];
   },
 
-  async findSimilarCounterparties(
-    caseId: string,
-    similarityThreshold: number = 0.8
-  ): Promise<
-    Array<{
-      name1: string;
-      name2: string;
-      similarity_score: number;
-      combined_transaction_count: number;
-      name1_count: number;
-      name2_count: number;
-    }>
-  > {
-    const { data, error } = await supabase.rpc(
-      "find_similar_counterparties_v2",
-      {
-        p_case_id: caseId,
-        p_similarity_threshold: similarityThreshold,
-      }
-    );
-
-    if (error) throw error;
-    return data || [];
-  },
-
-  async getCounterpartyMergeCandidates(
-    caseId: string,
-    minSimilarity: number = 0.75,
-    limit: number = 100
-  ): Promise<
-    Array<{
-      representative: string;
-      similar_names: string[];
-      similarity_scores: number[];
-      total_transactions: number;
-      potential_savings: number;
-    }>
-  > {
-    const { data, error } = await supabase.rpc(
-      "get_counterparty_merge_candidates_v2",
-      {
-        p_case_id: caseId,
-        p_min_similarity: minSimilarity,
-        p_limit: limit,
-      }
-    );
-
-    if (error) throw error;
-    return data || [];
-  },
-
-  async previewCounterpartyMerge(
-    caseId: string,
-    fromNames: string[],
-    toName: string
-  ): Promise<{
-    affected_transactions: number;
-    affected_accounts: number;
-    total_amount: number;
-    date_range_start: string;
-    date_range_end: string;
-  } | null> {
-    const { data, error } = await supabase.rpc(
-      "preview_counterparty_merge_v2",
-      {
-        p_case_id: caseId,
-        p_from_names: fromNames,
-        p_to_name: toName,
-      }
-    );
-
-    if (error) throw error;
-    return data?.[0] || null;
-  },
-
   async getCounterpartiesByCase(
-    caseId: string
+    caseId: string,
   ): Promise<Array<{ name: string; count: number }>> {
     // Use the new efficient function instead of complex joins
     const stats = await this.getCaseCounterpartyStats(caseId);
@@ -1587,7 +1523,7 @@ export const counterpartyService = {
   async mergeCounterparties(
     fromName: string,
     toName: string,
-    userId: string
+    userId: string,
   ): Promise<{ affectedCount: number }> {
     const { data, error } = await supabase
       .from("transactions")
@@ -1604,7 +1540,7 @@ export const counterpartyService = {
 
   async batchMergeCounterparties(
     merges: Array<{ from: string; to: string }>,
-    userId: string
+    userId: string,
   ): Promise<{ totalAffected: number; errors: string[] }> {
     let totalAffected = 0;
     const errors: string[] = [];
@@ -1614,14 +1550,14 @@ export const counterpartyService = {
         const result = await this.mergeCounterparties(
           merge.from,
           merge.to,
-          userId
+          userId,
         );
         totalAffected += result.affectedCount;
       } catch (error) {
         errors.push(
           `Failed to merge "${merge.from}" to "${merge.to}": ${
             error instanceof Error ? error.message : "Unknown error"
-          }`
+          }`,
         );
       }
     }
@@ -1629,11 +1565,36 @@ export const counterpartyService = {
     return { totalAffected, errors };
   },
 
+  async autoMergeCounterpartiesByCase(
+    caseId: string,
+    userId: string,
+    similarityThreshold: number = 0.95,
+  ): Promise<{ totalAffected: number; totalMerges: number; errors: string[] }> {
+    const counterparties = await this.getCounterpartiesByCase(caseId);
+    const merges = getAutoMergePairs(counterparties, similarityThreshold);
+
+    if (merges.length === 0) {
+      return { totalAffected: 0, totalMerges: 0, errors: [] };
+    }
+
+    const { totalAffected, errors } = await this.batchMergeCounterparties(
+      merges,
+      userId,
+    );
+
+    return { totalAffected, totalMerges: merges.length, errors };
+  },
+
   // Batch fetch entity information for multiple counterparties in a single query
   async getEntitiesForMultipleCounterparties(
     caseId: string,
-    counterpartyNames: string[]
-  ): Promise<Map<string, Array<{ entity_id: string; entity_name: string; entity_type: string }>>> {
+    counterpartyNames: string[],
+  ): Promise<
+    Map<
+      string,
+      Array<{ entity_id: string; entity_name: string; entity_type: string }>
+    >
+  > {
     if (counterpartyNames.length === 0) {
       return new Map();
     }
@@ -1642,14 +1603,16 @@ export const counterpartyService = {
       // First, get all entities in the case
       const { data: caseEntities, error: entityError } = await supabase
         .from("case_entities")
-        .select(`
+        .select(
+          `
           entity_id,
           entities!inner (
             entity_id,
             entity_name,
             entity_type
           )
-        `)
+        `,
+        )
         .eq("case_id", caseId);
 
       if (entityError) throw entityError;
@@ -1660,7 +1623,7 @@ export const counterpartyService = {
         return new Map();
       }
 
-      const entityIds = entities.map(e => e.entity_id);
+      const entityIds = entities.map((e) => e.entity_id);
 
       // Get accounts for these entities
       const { data: accounts, error: accountError } = await supabase
@@ -1670,7 +1633,7 @@ export const counterpartyService = {
 
       if (accountError) throw accountError;
 
-      const accountIds = accounts?.map(a => a.account_id) || [];
+      const accountIds = accounts?.map((a) => a.account_id) || [];
 
       if (accountIds.length === 0) {
         return new Map();
@@ -1693,35 +1656,50 @@ export const counterpartyService = {
           if (!counterpartyToEntityIds.has(tx.counterparty_merged)) {
             counterpartyToEntityIds.set(tx.counterparty_merged, new Set());
           }
-          counterpartyToEntityIds.get(tx.counterparty_merged)!.add(tx.entity_id);
+          counterpartyToEntityIds
+            .get(tx.counterparty_merged)!
+            .add(tx.entity_id);
         }
       });
 
       // Create the final result map
-      const result = new Map<string, Array<{ entity_id: string; entity_name: string; entity_type: string }>>();
+      const result = new Map<
+        string,
+        Array<{ entity_id: string; entity_name: string; entity_type: string }>
+      >();
 
       // Create entity lookup map for quick access
       const entityLookup = new Map(entities.map((e: any) => [e.entity_id, e]));
 
       // For each counterparty name, find its entities
-      counterpartyNames.forEach(name => {
+      counterpartyNames.forEach((name) => {
         const entityIds = counterpartyToEntityIds.get(name) || new Set();
-        const entityDetails = Array.from(entityIds).map(entityId => {
-          const entity = entityLookup.get(entityId);
-          return entity ? {
-            entity_id: entity.entity_id,
-            entity_name: entity.entity_name,
-            entity_type: entity.entity_type,
-          } : null;
-        }).filter(Boolean) as Array<{ entity_id: string; entity_name: string; entity_type: string }>;
+        const entityDetails = Array.from(entityIds)
+          .map((entityId) => {
+            const entity = entityLookup.get(entityId);
+            return entity
+              ? {
+                  entity_id: entity.entity_id,
+                  entity_name: entity.entity_name,
+                  entity_type: entity.entity_type,
+                }
+              : null;
+          })
+          .filter(Boolean) as Array<{
+          entity_id: string;
+          entity_name: string;
+          entity_type: string;
+        }>;
 
         result.set(name, entityDetails);
       });
 
       return result;
-
     } catch (error) {
-      console.error("Error fetching entities for multiple counterparties:", error);
+      console.error(
+        "Error fetching entities for multiple counterparties:",
+        error,
+      );
       // Return empty map on error
       return new Map();
     }
@@ -1735,7 +1713,7 @@ const entityMappingService = {
       "get_case_entity_mapping_stats",
       {
         p_case_id: caseId,
-      }
+      },
     );
 
     if (error) throw error;
@@ -1757,7 +1735,7 @@ const entityMappingService = {
       "get_case_unmapped_counterparties",
       {
         p_case_id: caseId,
-      }
+      },
     );
 
     if (error) throw error;
@@ -1782,7 +1760,7 @@ const diagnosticsService = {
       "check_statement_transaction_consistency",
       {
         p_account_id: accountId,
-      }
+      },
     );
 
     if (error) {
@@ -1794,7 +1772,7 @@ const diagnosticsService = {
 
       const results = statements.map((stmt) => {
         const actualCount = transactions.filter(
-          (tx) => tx.statement_id === stmt.statement_id
+          (tx) => tx.statement_id === stmt.statement_id,
         ).length;
         return {
           statement_id: stmt.statement_id,
@@ -1821,7 +1799,7 @@ const diagnosticsService = {
         tx_date,
         description,
         amount
-      `
+      `,
       )
       .eq("account_id", accountId)
       .not(
@@ -1830,7 +1808,7 @@ const diagnosticsService = {
         supabase
           .from("bank_statements")
           .select("statement_id")
-          .eq("account_id", accountId)
+          .eq("account_id", accountId),
       );
 
     if (error) throw error;
@@ -1852,7 +1830,7 @@ const searchService = {
 
   async findEntitiesByName(
     name: string,
-    threshold: number = 0.3
+    threshold: number = 0.3,
   ): Promise<Entity[]> {
     const { data, error } = await supabase
       .from("entities")
@@ -1882,99 +1860,105 @@ export const cacheManagement = {
     caseAMLMetadataCache.cleanup();
     caseTransactionsAnalysisCache.cleanup();
   },
-  
+
   // Clear all caches (use when data has been updated)
   clearAllCaches() {
     transactionCache.clear();
     caseAMLMetadataCache.clear();
     caseTransactionsAnalysisCache.clear();
   },
-  
+
   // Get cache statistics
   getCacheStats() {
     return {
       transactions: transactionCache.getStats(),
       amlMetadata: caseAMLMetadataCache.getStats(),
-      transactionsAnalysis: caseTransactionsAnalysisCache.getStats()
+      transactionsAnalysis: caseTransactionsAnalysisCache.getStats(),
     };
   },
-  
+
   // Enable or disable cache monitoring
   enableMonitoring(enabled: boolean) {
     (globalThis as any).__CACHE_MONITORING_ENABLED__ = enabled;
   },
-  
+
   // Log cache hit/miss statistics
   logCacheStats() {
     if (!(globalThis as any).__CACHE_MONITORING_ENABLED__) return;
-    
+
     const stats = this.getCacheStats();
     console.log("=== Cache Statistics ===");
     console.log("Transaction cache size:", stats.transactions.size);
     console.log("AML Metadata cache size:", stats.amlMetadata.size);
-    console.log("Transaction Analysis cache size:", stats.transactionsAnalysis.size);
+    console.log(
+      "Transaction Analysis cache size:",
+      stats.transactionsAnalysis.size,
+    );
     console.log("========================");
   },
-  
+
   // Warm cache for a specific case by preloading commonly accessed data
   async warmCaseCache(caseId: string) {
     try {
       // Load AML metadata
       await transactionsService.getCaseAMLMetadata(caseId);
-      
+
       // Load transactions for analysis (with default fields)
       await transactionsService.getCaseTransactionsForAnalysis(caseId);
-      
+
       // Load full transaction data for the case (this is what DetailedOverviewTab needs)
       await transactionsService.getByCaseId(caseId);
-      
+
       // Load counterparty stats which are commonly used
       await counterpartyService.getCaseCounterpartyStats(caseId);
-      
+
       console.log(`Cache warmed for case ${caseId}`);
     } catch (error) {
       console.warn(`Failed to warm cache for case ${caseId}:`, error);
     }
   },
-  
+
   // Warm cache for a specific account
   async warmAccountCache(accountId: string) {
     try {
       // Load account transactions (full data)
       await transactionsService.getByAccountId(accountId);
-      
+
       console.log(`Cache warmed for account ${accountId}`);
     } catch (error) {
       console.warn(`Failed to warm cache for account ${accountId}:`, error);
     }
   },
-  
+
   // Warm caches for all active cases
   async warmAllCasesCache() {
     try {
       // Get all cases
       const cases = await casesService.getAll();
-      
+
       // Warm cache for each case
       for (const caseItem of cases) {
         await this.warmCaseCache(caseItem.case_id);
       }
-      
+
       console.log(`Cache warmed for all ${cases.length} cases`);
     } catch (error) {
       console.warn("Failed to warm cache for all cases:", error);
     }
-  }
+  },
 };
 
 // Periodic cache cleanup (runs every 10 minutes)
-setInterval(() => {
-  try {
-    cacheManagement.cleanupAllCaches();
-  } catch (error) {
-    console.warn("Error during periodic cache cleanup:", error);
-  }
-}, 10 * 60 * 1000); // 10 minutes
+setInterval(
+  () => {
+    try {
+      cacheManagement.cleanupAllCaches();
+    } catch (error) {
+      console.warn("Error during periodic cache cleanup:", error);
+    }
+  },
+  10 * 60 * 1000,
+); // 10 minutes
 
 // Bank Regex Patterns Service
 export interface BankRegexPattern {
@@ -2050,7 +2034,10 @@ export const regexPatternsService = {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error(`Error fetching patterns with stats for bank ${bankPreset}:`, error);
+      console.error(
+        `Error fetching patterns with stats for bank ${bankPreset}:`,
+        error,
+      );
       return [];
     }
   },
@@ -2064,7 +2051,7 @@ export const regexPatternsService = {
       createdBy?: string;
       notes?: string;
       priority?: number;
-    } = {}
+    } = {},
   ): Promise<BankRegexPattern | null> {
     try {
       const { data, error } = await supabase
@@ -2096,10 +2083,10 @@ export const regexPatternsService = {
   // Update pattern usage statistics
   async updatePatternStats(stats: PatternUsageStats): Promise<void> {
     try {
-      const { error } = await supabase.rpc('update_regex_pattern_stats', {
+      const { error } = await supabase.rpc("update_regex_pattern_stats", {
         p_pattern_id: stats.patternId,
         p_success: stats.success,
-        p_increment: 1
+        p_increment: 1,
       });
 
       if (error) {
@@ -2123,10 +2110,10 @@ export const regexPatternsService = {
       createdBy?: string;
       notes?: string;
       priority?: number;
-    }>
+    }>,
   ): Promise<BankRegexPattern[]> {
     try {
-      const patternsToInsert = patterns.map(p => ({
+      const patternsToInsert = patterns.map((p) => ({
         bank_preset: p.bankPreset,
         pattern: p.pattern,
         is_ai_generated: p.isAiGenerated || false,
@@ -2143,8 +2130,8 @@ export const regexPatternsService = {
       if (error) throw error;
 
       // Clear cache for all affected banks
-      const uniqueBanks = [...new Set(patterns.map(p => p.bankPreset))];
-      uniqueBanks.forEach(bank => {
+      const uniqueBanks = [...new Set(patterns.map((p) => p.bankPreset))];
+      uniqueBanks.forEach((bank) => {
         regexPatternsCache.delete(`regex_patterns_${bank}`);
       });
 
@@ -2175,7 +2162,10 @@ export const regexPatternsService = {
   },
 
   // Update pattern priority
-  async updatePatternPriority(patternId: string, priority: number): Promise<boolean> {
+  async updatePatternPriority(
+    patternId: string,
+    priority: number,
+  ): Promise<boolean> {
     try {
       const { error } = await supabase
         .from("bank_regex_patterns")
@@ -2212,12 +2202,14 @@ export const regexPatternsService = {
       if (error) throw error;
 
       const patterns = data || [];
-      const activePatterns = patterns.filter(p => p.is_active);
-      const aiPatterns = patterns.filter(p => p.is_ai_generated);
+      const activePatterns = patterns.filter((p) => p.is_active);
+      const aiPatterns = patterns.filter((p) => p.is_ai_generated);
 
-      const avgSuccessRate = activePatterns.length > 0
-        ? activePatterns.reduce((sum, p) => sum + p.success_rate, 0) / activePatterns.length
-        : 0;
+      const avgSuccessRate =
+        activePatterns.length > 0
+          ? activePatterns.reduce((sum, p) => sum + p.success_rate, 0) /
+            activePatterns.length
+          : 0;
 
       const topPerforming = activePatterns
         .sort((a, b) => b.success_rate - a.success_rate)

@@ -48,7 +48,7 @@ export default function Step4Review({
   const fileTypeLabel = fileTypes.length > 1 ? "Mixed Types" : fileTypes[0];
   const totalSize = files.reduce((sum, file) => sum + file.size, 0);
   const mappedCount = fileMappings.filter((mapping) =>
-    isColumnMappingValid(mapping)
+    isColumnMappingValid(mapping),
   ).length;
 
   return (
@@ -116,66 +116,23 @@ export default function Step4Review({
           )}
         </div>
 
-        {/* Column Mapping */}
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h4 className="text-sm font-medium text-gray-700">Column Mapping</h4>
-            {onEdit && (
-              <button
-                type="button"
-                onClick={() => onEdit(3)}
-                className="text-xs text-blue-600 hover:text-blue-800"
-              >
-                Edit
-              </button>
-            )}
-          </div>
-          {fileMappings.length ? (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Mapped:</span>
-                <span className="font-medium text-gray-900">
-                  {mappedCount} of {files.length}
-                </span>
-              </div>
-              <div className="pt-2 space-y-1">
-                {files.map((fileItem, index) => (
-                  <div
-                    key={`${fileItem.name}-${fileItem.size}`}
-                    className="flex justify-between text-xs text-gray-600"
-                  >
-                    <span className="truncate pr-2">{fileItem.name}</span>
-                    <span>
-                      {isColumnMappingValid(fileMappings[index])
-                        ? "Mapped"
-                        : "Needs mapping"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-gray-500">No column mapping configured</p>
-          )}
-        </div>
-
         {/* Bank Selection */}
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-sm font-medium text-gray-700">Bank Type</h4>
-            {onEdit && (
-              <button
-                type="button"
-                onClick={() => onEdit(4)}
-                className="text-xs text-blue-600 hover:text-blue-800"
-              >
-                Edit
-              </button>
-            )}
           </div>
-          <p className="text-sm font-medium text-gray-900">
-            {BANK_PRESETS[selectedBank] || selectedBank}
-          </p>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">Preset:</span>
+            <span className="font-medium text-gray-900">
+              {BANK_PRESETS[selectedBank] || selectedBank}
+            </span>
+          </div>
+          <div className="flex justify-between text-sm mt-2">
+            <span className="text-gray-600">Columns:</span>
+            <span className="font-medium text-gray-900">
+              {mappedCount} of {files.length} detected
+            </span>
+          </div>
         </div>
 
         {/* Statement Period */}

@@ -84,11 +84,6 @@ export default function CSVColumnMapper({
     onMappingComplete(mapping);
   };
 
-  const getPreviewValue = (csvColumn: string): string => {
-    if (!csvColumn || !validationResult.previewData?.[0]) return "";
-    return validationResult.previewData[0][csvColumn] || "";
-  };
-
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -126,11 +121,7 @@ export default function CSVColumnMapper({
               ))}
             </select>
           </div>
-          <div className="text-xs text-gray-500">
-            {mapping.DATE && (
-              <span>Preview: {getPreviewValue(mapping.DATE)}</span>
-            )}
-          </div>
+          <div />
         </div>
 
         {/* DESCRIPTION Column */}
@@ -154,11 +145,7 @@ export default function CSVColumnMapper({
               ))}
             </select>
           </div>
-          <div className="text-xs text-gray-500">
-            {mapping.DESCRIPTION && (
-              <span>Preview: {getPreviewValue(mapping.DESCRIPTION)}</span>
-            )}
-          </div>
+          <div />
         </div>
 
         {/* Amount Format Selection */}
@@ -212,11 +199,7 @@ export default function CSVColumnMapper({
                         ))}
                       </select>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {mapping.DEBIT && (
-                        <span>Preview: {getPreviewValue(mapping.DEBIT)}</span>
-                      )}
-                    </div>
+                    <div />
                   </div>
 
                   <div className="grid grid-cols-3 gap-4 items-center">
@@ -237,11 +220,7 @@ export default function CSVColumnMapper({
                         ))}
                       </select>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {mapping.CREDIT && (
-                        <span>Preview: {getPreviewValue(mapping.CREDIT)}</span>
-                      )}
-                    </div>
+                    <div />
                   </div>
                 </div>
               )}
@@ -291,11 +270,7 @@ export default function CSVColumnMapper({
                         ))}
                       </select>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {mapping.AMOUNT && (
-                        <span>Preview: {getPreviewValue(mapping.AMOUNT)}</span>
-                      )}
-                    </div>
+                    <div />
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
                     Note: Positive values will be treated as credits, negative
@@ -321,11 +296,7 @@ export default function CSVColumnMapper({
                         ))}
                       </select>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {mapping.DIRECTION && (
-                        <span>Preview: {getPreviewValue(mapping.DIRECTION)}</span>
-                      )}
-                    </div>
+                    <div />
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
                     If provided, DIRECTION should contain values like DR/CR, Debit/Credit, etc.
@@ -336,48 +307,6 @@ export default function CSVColumnMapper({
           </div>
         </div>
       </div>
-
-      {/* Preview Table */}
-      {validationResult.previewData &&
-        validationResult.previewData.length > 0 && (
-          <div className="border-t pt-4">
-            <h4 className="text-sm font-medium text-gray-700 mb-2">
-              Preview Data
-            </h4>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {validationResult.headers.map((header) => (
-                      <th
-                        key={header}
-                        className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                      >
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {validationResult.previewData
-                    .slice(0, 3)
-                    .map((row, index) => (
-                      <tr key={index}>
-                        {validationResult.headers.map((header) => (
-                          <td
-                            key={header}
-                            className="px-3 py-2 whitespace-nowrap text-xs text-gray-900"
-                          >
-                            {row[header] || ""}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
 
       {/* Action Buttons */}
       <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">

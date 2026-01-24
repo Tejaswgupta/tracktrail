@@ -3,7 +3,9 @@ Settings endpoints for workspace-specific admin tooling.
 """
 
 import io
+import json
 import logging
+from pathlib import Path
 from typing import Optional
 
 import polars as pl
@@ -31,6 +33,30 @@ router = APIRouter(
         500: {"description": "Internal server error"},
     },
 )
+
+@router.get(
+    "/bank-header-mappings",
+    summary="Return supported bank header mappings for statement ingestion",
+)
+async def list_bank_header_mappings() -> dict:
+    mapping_path = (
+        Path(__file__).resolve().parents[4] / "bank_header_mappings.json"
+    )
+    if not mapping_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Bank header mappings file not found.",
+        )
+
+    try:
+        with mapping_path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to parse bank header mappings: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Bank header mappings are invalid.",
+        )
 
 
 @router.post(

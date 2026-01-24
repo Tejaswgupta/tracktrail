@@ -6,6 +6,7 @@ import {
   transactionsService,
 } from "@/services/database";
 import type { EntityWithAccounts, Transaction } from "@/types/database";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 // Import Recharts components
 import {
@@ -39,8 +40,6 @@ import {
 } from "recharts";
 import DetailedOverviewTab from "./DetailedOverviewTab";
 import EditableCounterpartyName from "./EditableCounterpartyName";
-import EditableTransactionType from "./EditableTransactionType";
-import UploadStatementModalWizard from "./UploadStatementModalWizard";
 
 interface CounterpartyStats {
   name: string;
@@ -114,8 +113,6 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     current: number;
     total: number;
   } | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const TRANSACTIONS_PER_PAGE = 1000;
   const ALL_ENTITIES_VALUE = "__all_entities__";
 
@@ -137,7 +134,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     };
 
     fetchData();
-  }, [caseId, refreshTrigger]);
+  }, [caseId]);
 
   // Fetch transactions with pagination
   useEffect(() => {
@@ -491,24 +488,6 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     return "bank"; // Default to bank
   };
 
-  // Predefined transaction types for easy selection
-  const PREDEFINED_TRANSACTION_TYPES = [
-    "NEFT",
-    "RTGS",
-    "IMPS",
-    "UPI",
-    "CHQ",
-    "CASH",
-    "DD",
-    "MOB",
-    "NET",
-    "CARD",
-    "WIRE",
-    "ACH",
-    "SWIFT",
-    "OTHER",
-  ];
-
   // Colors for transaction types
   const TRANSACTION_TYPE_COLORS: { [key: string]: string } = {
     NEFT: "#3B82F6",
@@ -760,71 +739,6 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
     }
   }, [sortedCounterparties, selectedCounterparty]);
 
-  // Function to handle saving updated transaction type names
-  const handleSaveTransactionType = async (
-    oldType: string,
-    newType: string,
-  ) => {
-    try {
-      // Update all transactions with the old type to the new type
-      // Note: Since transaction types are calculated on the fly from descriptions,
-      // we need to store the mapping or update the actual description fields
-      // For now, we'll update the local state to reflect the change
-
-      setTransactionTypeStats((prevStats) => {
-        // Check if there's already a type with the new name
-        const existingIndex = prevStats.findIndex(
-          (type) => type.type === newType,
-        );
-        const oldIndex = prevStats.findIndex((type) => type.type === oldType);
-
-        if (
-          existingIndex !== -1 &&
-          oldIndex !== -1 &&
-          existingIndex !== oldIndex
-        ) {
-          // Merge the old type into the existing one
-          const updatedStats = [...prevStats];
-          const existingType = updatedStats[existingIndex];
-          const oldTypeData = updatedStats[oldIndex];
-
-          // Create merged type with combined stats
-          const mergedType: TransactionTypeStats = {
-            type: newType,
-            count: existingType.count + oldTypeData.count,
-            totalAmount: existingType.totalAmount + oldTypeData.totalAmount,
-            totalDebits: existingType.totalDebits + oldTypeData.totalDebits,
-            totalCredits: existingType.totalCredits + oldTypeData.totalCredits,
-            netFlow: existingType.netFlow + oldTypeData.netFlow,
-            avgAmount:
-              (existingType.totalAmount + oldTypeData.totalAmount) /
-              (existingType.count + oldTypeData.count),
-            maxAmount: Math.max(existingType.maxAmount, oldTypeData.maxAmount),
-            minAmount: Math.min(existingType.minAmount, oldTypeData.minAmount),
-            description: existingType.description || oldTypeData.description,
-          };
-
-          // Replace the existing type with merged data and remove the old one
-          updatedStats[existingIndex] = mergedType;
-          return updatedStats.filter((_, index) => index !== oldIndex);
-        } else {
-          // Normal case: just update the name
-          return prevStats.map((type) =>
-            type.type === oldType ? { ...type, type: newType } : type,
-          );
-        }
-      });
-
-      console.log(
-        `Successfully renamed transaction type from "${oldType}" to "${newType}"`,
-      );
-    } catch (error) {
-      console.error("Error updating transaction type:", error);
-      alert(`Failed to update transaction type: ${(error as Error).message}`);
-      throw error; // Re-throw so the child component can handle the error
-    }
-  };
-
   // Function to handle saving updated counterparty names
   const handleSaveCounterpartyName = async (
     oldName: string,
@@ -935,12 +849,12 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <button
-            onClick={() => setIsUploadModalOpen(true)}
+          <Link
+            href={`/cases/${caseId}/upload`}
             className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
           >
             Upload Statement
-          </button>
+          </Link>
         </div>
       </div>
       {/* Subtabs */}
@@ -1117,8 +1031,19 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {sortedCounterparties.map((cp) => (
-                        <tr key={cp.name} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <tr
+                          key={cp.name}
+                          className="cursor-pointer hover:bg-gray-50"
+                          onClick={() =>
+                            setSelectedCounterparty((current) =>
+                              current === cp.name ? null : cp.name,
+                            )
+                          }
+                        >
+                          <td
+                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+                            onClick={(event) => event.stopPropagation()}
+                          >
                             <EditableCounterpartyName
                               name={cp.name}
                               description={cp.description}
@@ -1127,18 +1052,8 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                               }
                             />
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setSelectedCounterparty((current) =>
-                                  current === cp.name ? null : cp.name,
-                                )
-                              }
-                              className="font-medium text-blue-600 hover:text-blue-800"
-                            >
-                              {cp.transactionCount.toLocaleString()}
-                            </button>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 underline">
+                            {cp.transactionCount.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">
                             {formatCurrency(cp.totalDebit)}
@@ -1491,7 +1406,7 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {transactionTypeStats.map((typeStat) => (
                         <tr key={typeStat.type} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             <div className="flex items-center">
                               <div
                                 className="w-3 h-3 rounded-full mr-2"
@@ -1501,17 +1416,19 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                                     "#6B7280",
                                 }}
                               ></div>
-                              <EditableTransactionType
-                                type={typeStat.type}
-                                description={typeStat.description}
-                                onSave={(newType) =>
-                                  handleSaveTransactionType(
-                                    typeStat.type,
-                                    newType,
-                                  )
-                                }
-                                predefinedTypes={PREDEFINED_TRANSACTION_TYPES}
-                              />
+                              <div className="flex flex-col">
+                                <div className="font-medium text-gray-900">
+                                  {typeStat.type}
+                                </div>
+                                {typeStat.description && (
+                                  <div
+                                    className="text-xs text-gray-500 font-normal truncate"
+                                    title={typeStat.description}
+                                  >
+                                    {typeStat.description}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -1562,16 +1479,6 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
         </div>
       ) : (
         <DetailedOverviewTab caseId={caseId} />
-      )}
-      {isUploadModalOpen && (
-        <UploadStatementModalWizard
-          caseId={caseId}
-          onClose={() => setIsUploadModalOpen(false)}
-          onUploadComplete={() => {
-            setIsUploadModalOpen(false);
-            setRefreshTrigger((prev) => prev + 1);
-          }}
-        />
       )}
       <Sheet
         open={Boolean(selectedCounterparty)}
@@ -1658,8 +1565,9 @@ export default function OverviewTab({ caseId }: OverviewTabProps) {
                                 : "text-red-600"
                             }`}
                           >
-                            {formatCurrency(tx.amount)}
-                            {tx.direction === "DR" ? " -" : ""}
+                            {tx.direction === "DR"
+                              ? `- ${formatCurrency(tx.amount)}`
+                              : ""}
                           </td>
                         </tr>
                       );

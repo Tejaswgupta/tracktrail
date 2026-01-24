@@ -1,11 +1,20 @@
 "use client";
 
 import {
+  BANK_PRESETS,
   inferBankPresetFromBankName,
   type BankPreset,
 } from "@/constants/banks";
-import { accountsService, entitiesService } from "@/services/database";
+import {
+  accountsService,
+  counterpartyService,
+  entitiesService,
+} from "@/services/database";
 import { fileUploadService, type UploadProgress } from "@/services/fileUpload";
+import {
+  fetchBankHeaderMappings,
+  type BankHeaderMappings,
+} from "@/services/settingsService";
 import { transactionExtractorService } from "@/services/transactionExtractor";
 import type { EntityWithAccounts } from "@/types/database";
 import {
@@ -14,34 +23,57 @@ import {
   type ColumnMapping,
   type CSVValidationResult,
 } from "@/utils/csvValidator";
+import { useAuth } from "@/contexts/AuthContext";
 import { useEffect, useMemo, useState } from "react";
+import CSVColumnMapper from "./CSVColumnMapper";
 import CreateAccountModal from "./CreateAccountModal";
 import CreateEntityModal from "./CreateEntityModal";
 import SearchablePopover from "./SearchablePopover";
+import BankTypeSelect from "./upload-wizard/BankTypeSelect";
 import ProgressStepper from "./upload-wizard/ProgressStepper";
 import Step1FileUpload from "./upload-wizard/Step1FileUpload";
-import Step2ColumnMapping from "./upload-wizard/Step2ColumnMapping";
-import Step3BankSelection from "./upload-wizard/Step3BankSelection";
 import Step4Review from "./upload-wizard/Step4Review";
 
 interface UploadStatementModalWizardProps {
   caseId: string;
   onClose: () => void;
   onUploadComplete: () => void;
+  variant?: "modal" | "page";
 }
 
 const STEPS = [
   { id: 1, name: "Account", description: "Choose entity & account" },
   { id: 2, name: "File", description: "Select files" },
-  { id: 3, name: "Columns", description: "Map columns" },
-  { id: 4, name: "Bank", description: "Choose bank" },
-  { id: 5, name: "Review", description: "Review & submit" },
+  { id: 3, name: "Mapping", description: "Review columns" },
+  { id: 4, name: "Review", description: "Review & submit" },
 ];
+
+const BANK_HEADER_MAPPING_KEYS: Partial<Record<BankPreset, string>> = {
+  axis: "AXIS BANK",
+  bank_of_baroda: "BANK OF BARODA",
+  canara: "CANARA BANK",
+  cbi: "CBI",
+  csb: "CSB",
+  hdfc: "HDFC BANK",
+  icici: "ICICI BANK",
+  idbi: "IDBI BANK",
+  idfc: "IDFC FIRST",
+  indusind: "INDUSIND BANK",
+  kalupur: "KALUPUR CO-OPERATIVE",
+  kotak: "Kotak Mahindra Bank",
+  pnb: "PNB",
+  rbl: "RBL BANK",
+  sbi: "SBI",
+  south_indian: "SOUTH INDIAN BANK",
+  ujjvain: "UJJIVAN",
+  yes: "YES BANK",
+};
 
 export default function UploadStatementModalWizard({
   caseId,
   onClose,
   onUploadComplete,
+  variant = "modal",
 }: UploadStatementModalWizardProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const [entities, setEntities] = useState<EntityWithAccounts[]>([]);
@@ -64,7 +96,7 @@ export default function UploadStatementModalWizard({
     null,
   );
   const [error, setError] = useState<string | null>(null);
-  const [isLoadingAccount, setIsLoadingAccount] = useState(false);
+  const { user } = useAuth();
 
   const [fileValidations, setFileValidations] = useState<
     (CSVValidationResult | null)[]
@@ -72,13 +104,14 @@ export default function UploadStatementModalWizard({
   const [fileMappings, setFileMappings] = useState<(ColumnMapping | null)[]>(
     [],
   );
-  const [mappingIndex, setMappingIndex] = useState(0);
-  const [deletedRows, setDeletedRows] = useState<number[]>([]);
+  const [filesNeedingMapping, setFilesNeedingMapping] = useState<number[]>([]);
+  const [currentMappingIndex, setCurrentMappingIndex] = useState(0);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [isLoadingEntities, setIsLoadingEntities] = useState(true);
   const [refreshEntitiesTrigger, setRefreshEntitiesTrigger] = useState(0);
-  const primaryFile = files[0] ?? null;
-  const primaryMapping = fileMappings[0] ?? null;
+  const [hasManualBankSelection, setHasManualBankSelection] = useState(false);
+  const [bankHeaderMappings, setBankHeaderMappings] =
+    useState<BankHeaderMappings | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -102,6 +135,25 @@ export default function UploadStatementModalWizard({
     return () => {
       isActive = false;
     };
+  }, [caseId, refreshEntitiesTrigger]);
+
+  useEffect(() => {
+    let isActive = true;
+    const loadBankHeaderMappings = async () => {
+      try {
+        const mappings = await fetchBankHeaderMappings();
+        if (isActive) {
+          setBankHeaderMappings(mappings);
+        }
+      } catch (error) {
+        console.error("Error loading bank header mappings:", error);
+      }
+    };
+
+    loadBankHeaderMappings();
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -122,30 +174,35 @@ export default function UploadStatementModalWizard({
     if (nextAccountId !== accountId) {
       setAccountId(nextAccountId);
     }
-  }, []);
+  }, [accountEntityId, accountId, entities]);
 
   useEffect(() => {
     const fetchAccountAndInferBank = async () => {
       if (!accountId) return;
 
-      setIsLoadingAccount(true);
       try {
         const account = await accountsService.getById(accountId);
         if (account?.bank_name) {
           const inferredBankPreset = inferBankPresetFromBankName(
             account.bank_name,
           );
-          setSelectedBank(inferredBankPreset);
+          if (!hasManualBankSelection) {
+            setSelectedBank(inferredBankPreset);
+          }
         }
       } catch (error) {
         console.error("Error fetching account details:", error);
-      } finally {
-        setIsLoadingAccount(false);
       }
     };
 
     fetchAccountAndInferBank();
-  }, []);
+  }, [accountId, hasManualBankSelection]);
+
+  useEffect(() => {
+    if (selectedBank) {
+      transactionExtractorService.setBankPreset(selectedBank);
+    }
+  }, [selectedBank]);
 
   const CREATE_ENTITY_VALUE = "__create_entity__";
   const CREATE_ACCOUNT_VALUE = "__create_account__";
@@ -192,17 +249,95 @@ export default function UploadStatementModalWizard({
   const handleFileSelect = async (selectedFiles: File[]) => {
     setFiles(selectedFiles);
     setError(null);
-    setFileValidations(Array(selectedFiles.length).fill(null));
-    setFileMappings(Array(selectedFiles.length).fill(null));
-    setMappingIndex(0);
+    setFileValidations([]);
+    setFileMappings([]);
+    setFilesNeedingMapping([]);
+    setCurrentMappingIndex(0);
     setIsProcessingFile(false);
+  };
 
-    if (!selectedFiles.length) return;
+  const requiresColumnMapping = (file: File) =>
+    file.type === "text/csv" ||
+    file.type === "application/pdf" ||
+    file.type ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    file.type === "application/vnd.ms-excel";
+
+  const getBankHeaderMappingForPreset = (preset: BankPreset) => {
+    if (!bankHeaderMappings) return null;
+    const mappedKey = BANK_HEADER_MAPPING_KEYS[preset];
+    if (mappedKey && bankHeaderMappings[mappedKey]) {
+      return bankHeaderMappings[mappedKey];
+    }
+    const displayKey = BANK_PRESETS[preset]?.toUpperCase();
+    if (displayKey && bankHeaderMappings[displayKey]) {
+      return bankHeaderMappings[displayKey];
+    }
+    return null;
+  };
+
+  const buildBankSuggestedMapping = (
+    headers: string[],
+    preset: BankPreset,
+  ): Record<string, string> | null => {
+    const bankMapping = getBankHeaderMappingForPreset(preset);
+    if (!bankMapping) return null;
+
+    const normalizedHeaders = headers.map((header) =>
+      header.toUpperCase().trim(),
+    );
+
+    const findHeaderMatch = (pattern: string) => {
+      const normalizedPattern = pattern.toUpperCase().trim();
+      const exactIndex = normalizedHeaders.findIndex(
+        (header) => header === normalizedPattern,
+      );
+      if (exactIndex !== -1) {
+        return headers[exactIndex];
+      }
+
+      const escaped = normalizedPattern.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&",
+      );
+      const boundaryRegex = new RegExp(
+        `(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`,
+      );
+      const partialIndex = normalizedHeaders.findIndex((header) =>
+        boundaryRegex.test(header),
+      );
+      if (partialIndex !== -1) {
+        return headers[partialIndex];
+      }
+      return "";
+    };
+
+    const result: Record<string, string> = {};
+    (["DATE", "DESCRIPTION", "DEBIT", "CREDIT", "AMOUNT", "DIRECTION"] as const)
+      .forEach((key) => {
+        const pattern = bankMapping[key];
+        if (!pattern) return;
+        const match = findHeaderMatch(pattern);
+        if (match) {
+          result[key] = match;
+        }
+      });
+
+    return Object.keys(result).length > 0 ? result : null;
+  };
+
+  const processSelectedFiles = async (
+    selectedFiles: File[],
+  ): Promise<"ok" | "mapping" | "error"> => {
+    if (!selectedFiles.length) return "error";
 
     setIsProcessingFile(true);
+    setError(null);
+
     const validations: (CSVValidationResult | null)[] = Array(
       selectedFiles.length,
     ).fill(null);
+
     const mappings: (ColumnMapping | null)[] = Array(selectedFiles.length).fill(
       null,
     );
@@ -222,12 +357,23 @@ export default function UploadStatementModalWizard({
           validation = await fileUploadService.validateExcel(file);
         } else if (file.type === "application/pdf") {
           validation =
-            await transactionExtractorService.previewPDFColumns(file);
+            await transactionExtractorService.validatePDFColumns(file);
         }
 
         validations[index] = validation;
         if (validation) {
-          mappings[index] = buildSuggestedColumnMapping(validation);
+          const bankSuggestedMapping = buildBankSuggestedMapping(
+            validation.headers,
+            selectedBank,
+          );
+          const mergedSuggestedMapping = {
+            ...(validation.suggestedMapping || {}),
+            ...(bankSuggestedMapping || {}),
+          };
+          mappings[index] = buildSuggestedColumnMapping({
+            ...validation,
+            suggestedMapping: mergedSuggestedMapping,
+          });
         }
         setFileValidations([...validations]);
         setFileMappings([...mappings]);
@@ -236,31 +382,37 @@ export default function UploadStatementModalWizard({
         setError(
           error instanceof Error ? error.message : "Failed to validate file",
         );
+        setIsProcessingFile(false);
+        return "error";
       }
     }
+
     setIsProcessingFile(false);
-  };
 
-  const handleColumnMappingComplete = (
-    mapping: ColumnMapping,
-    rowsToDelete: number[],
-  ) => {
-    setFileMappings((prev) => {
-      const next = [...prev];
-      next[mappingIndex] = mapping;
-      return next;
-    });
-    setDeletedRows(rowsToDelete);
+    const invalidMappingIndices = mappings.reduce<number[]>(
+      (acc, mapping, index) => {
+        if (
+          validations[index] &&
+          requiresColumnMapping(selectedFiles[index]) &&
+          !isColumnMappingValid(mapping)
+        ) {
+          acc.push(index);
+        }
+        return acc;
+      },
+      [],
+    );
 
-    if (mappingIndex < files.length - 1) {
-      setMappingIndex(mappingIndex + 1);
-    } else {
-      setCurrentStep(4);
-    }
+    setFilesNeedingMapping(invalidMappingIndices);
+    setCurrentMappingIndex(0);
+
+    return invalidMappingIndices.length === 0 ? "ok" : "mapping";
   };
 
   const handleBankChange = (bankPreset: BankPreset) => {
     setSelectedBank(bankPreset);
+    setHasManualBankSelection(true);
+    transactionExtractorService.setBankPreset(bankPreset);
   };
 
   const handleSubmit = async () => {
@@ -284,20 +436,15 @@ export default function UploadStatementModalWizard({
         const validation = fileValidations[index];
         const mapping = fileMappings[index];
         if (!validation) return true;
-        if (
-          (file.type === "text/csv" ||
-            file.type === "application/pdf" ||
-            file.type ===
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-            file.type === "application/vnd.ms-excel") &&
-          !isColumnMappingValid(mapping)
-        ) {
+        if (requiresColumnMapping(file) && !isColumnMappingValid(mapping)) {
           return true;
         }
         return false;
       })
     ) {
-      setError("Please map columns for all files before uploading");
+      setError(
+        "Please complete column mapping for all files before uploading.",
+      );
       return;
     }
 
@@ -344,6 +491,19 @@ export default function UploadStatementModalWizard({
         });
       }
 
+      if (!user?.id) {
+        throw new Error("Unable to auto-merge without an active user session.");
+      }
+
+      const autoMergeResult = await counterpartyService.autoMergeCounterpartiesByCase(
+        caseId,
+        user.id,
+        0.95,
+      );
+      if (autoMergeResult.errors.length > 0) {
+        throw new Error(autoMergeResult.errors.join(" "));
+      }
+
       onUploadComplete();
       onClose();
     } catch (error) {
@@ -360,19 +520,17 @@ export default function UploadStatementModalWizard({
   const canGoNext = () => {
     switch (currentStep) {
       case 1:
-        return !isLoadingEntities && !!accountEntityId && !!accountId;
-      case 2:
         return (
-          files.length > 0 &&
-          !isProcessingFile &&
-          fileValidations.length === files.length &&
-          fileValidations.every((validation) => validation !== null)
+          !isLoadingEntities &&
+          !!accountEntityId &&
+          !!accountId &&
+          !!selectedBank
         );
+      case 2:
+        return files.length > 0 && !isProcessingFile;
       case 3:
-        return fileMappings.every((mapping) => isColumnMappingValid(mapping));
+        return false;
       case 4:
-        return !!selectedBank;
-      case 5:
         return true;
       default:
         return false;
@@ -380,54 +538,120 @@ export default function UploadStatementModalWizard({
   };
 
   const handleNext = async () => {
-    if (currentStep < 5) {
-      // If we have a PDF file and moving from step 1, process it first
+    if (currentStep === 2) {
+      const result = await processSelectedFiles(files);
+      if (result === "ok") {
+        setCurrentStep(4);
+      } else if (result === "mapping") {
+        setCurrentStep(3);
+      }
+      return;
+    }
+
+    if (currentStep < 4) {
       setCurrentStep(currentStep + 1);
     }
   };
 
   const handleBack = () => {
+    if (currentStep === 4 && filesNeedingMapping.length === 0) {
+      setCurrentStep(2);
+      return;
+    }
+    if (currentStep === 4 && filesNeedingMapping.length > 0) {
+      setCurrentMappingIndex(0);
+    }
     if (currentStep > 1) {
-      if (currentStep === 4) {
-        setMappingIndex(0);
-      }
       setCurrentStep(currentStep - 1);
     }
   };
 
   const handleEdit = (step: number) => {
-    if (step === 3) {
-      setMappingIndex(0);
-    }
     setCurrentStep(step);
   };
 
+  const handleMappingComplete = (mapping: ColumnMapping) => {
+    if (currentMappingFileIndex === null) return;
+    setFileMappings((prev) => {
+      const next = [...prev];
+      next[currentMappingFileIndex] = mapping;
+      return next;
+    });
+
+    const nextIndex = currentMappingIndex + 1;
+    if (nextIndex >= filesNeedingMapping.length) {
+      setCurrentStep(4);
+      return;
+    }
+    setCurrentMappingIndex(nextIndex);
+  };
+
+  const handleMappingCancel = () => {
+    setCurrentStep(2);
+  };
+
+  const containerClasses =
+    variant === "modal"
+      ? "fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+      : "min-h-screen bg-gray-50";
+  const cardClasses =
+    variant === "modal"
+      ? "relative top-10 mx-auto p-6 border w-full max-w-4xl shadow-lg rounded-md bg-white mb-10"
+      : "mx-auto w-full max-w-5xl bg-white border border-gray-200 shadow-sm rounded-xl p-6 md:p-8 my-8";
+
+  const currentMappingFileIndex =
+    filesNeedingMapping[currentMappingIndex] ?? null;
+  const currentMappingValidation =
+    currentMappingFileIndex !== null
+      ? fileValidations[currentMappingFileIndex]
+      : null;
+  const currentMappingFile =
+    currentMappingFileIndex !== null ? files[currentMappingFileIndex] : null;
+
   return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-      <div className="relative top-10 mx-auto p-6 border w-full max-w-4xl shadow-lg rounded-md bg-white mb-10">
+    <div className={containerClasses}>
+      <div className={cardClasses}>
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-medium text-gray-900">
-            Upload Bank Statement
-          </h3>
-          <button
-            onClick={onClose}
-            disabled={isUploading}
-            className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
-          >
-            <svg
-              className="w-6 h-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          <div>
+            <h3 className="text-xl font-medium text-gray-900">
+              Upload Bank Statement
+            </h3>
+            {variant === "page" && (
+              <p className="text-xs text-gray-500 mt-1">
+                Upload and auto-detect columns in a few steps.
+              </p>
+            )}
+          </div>
+          {variant === "modal" ? (
+            <button
+              onClick={onClose}
+              disabled={isUploading}
+              className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
+              aria-label="Close upload dialog"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={onClose}
+              disabled={isUploading}
+              className="text-sm font-medium text-gray-600 hover:text-gray-800 disabled:opacity-50"
+            >
+              Back to case
+            </button>
+          )}
         </div>
 
         {/* Progress Stepper */}
@@ -503,8 +727,16 @@ export default function UploadStatementModalWizard({
               </div>
               <p className="text-xs text-gray-500">
                 Select the entity first, then choose the account you want to
-                upload statements for.
+                upload statements for. Choose the bank type to improve
+                auto-detection.
               </p>
+              <div className="pt-4 border-t border-gray-100">
+                <BankTypeSelect
+                  selectedBank={selectedBank}
+                  onBankChange={handleBankChange}
+                  disabled={isUploading}
+                />
+              </div>
             </div>
           )}
 
@@ -518,33 +750,37 @@ export default function UploadStatementModalWizard({
           )}
 
           {currentStep === 3 && (
-            <Step2ColumnMapping
-              validationResult={fileValidations[mappingIndex] || null}
-              columnMapping={fileMappings[mappingIndex] || null}
-              onMappingComplete={handleColumnMappingComplete}
-              disabled={isUploading}
-              fileName={files[mappingIndex]?.name}
-              fileIndex={mappingIndex}
-              fileCount={files.length}
-              ctaLabel={
-                mappingIndex < files.length - 1
-                  ? "Save & Next File"
-                  : "Continue"
-              }
-            />
+            <div className="space-y-6">
+              {currentMappingValidation && currentMappingFile ? (
+                <CSVColumnMapper
+                  validationResult={currentMappingValidation}
+                  onMappingComplete={handleMappingComplete}
+                  onCancel={handleMappingCancel}
+                  initialMapping={
+                    currentMappingFileIndex !== null
+                      ? fileMappings[currentMappingFileIndex] || undefined
+                      : undefined
+                  }
+                  fileName={currentMappingFile.name}
+                  fileIndex={currentMappingFileIndex ?? undefined}
+                  fileCount={files.length}
+                  ctaLabel={
+                    currentMappingIndex + 1 >= filesNeedingMapping.length
+                      ? "Continue to Review"
+                      : "Save & Next File"
+                  }
+                />
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-500">
+                    Preparing column mapping...
+                  </p>
+                </div>
+              )}
+            </div>
           )}
 
           {currentStep === 4 && (
-            <Step3BankSelection
-              file={primaryFile}
-              columnMapping={primaryMapping}
-              selectedBank={selectedBank}
-              onBankChange={handleBankChange}
-              disabled={isUploading}
-            />
-          )}
-
-          {currentStep === 5 && (
             <Step4Review
               files={files}
               fileMappings={fileMappings}
@@ -557,7 +793,7 @@ export default function UploadStatementModalWizard({
         </div>
 
         {/* Statement Period (Optional) - Shown on Review Step */}
-        {currentStep === 5 && (
+        {currentStep === 4 && (
           <div className="mt-6 grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
             <div>
               <label
@@ -681,7 +917,7 @@ export default function UploadStatementModalWizard({
               Cancel
             </button>
 
-            {currentStep < 5 ? (
+            {currentStep < 4 && currentStep !== 3 ? (
               <button
                 type="button"
                 onClick={handleNext}
@@ -690,7 +926,7 @@ export default function UploadStatementModalWizard({
               >
                 Next
               </button>
-            ) : (
+            ) : currentStep === 4 ? (
               <button
                 type="button"
                 onClick={handleSubmit}
@@ -724,7 +960,7 @@ export default function UploadStatementModalWizard({
                   "Upload Statement(s)"
                 )}
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

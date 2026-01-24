@@ -61,6 +61,19 @@ export interface RegexSavePayload {
   created_by?: string | null;
 }
 
+export type BankHeaderMappingEntry = {
+  DATE?: string | null;
+  DESCRIPTION?: string | null;
+  DEBIT?: string | null;
+  CREDIT?: string | null;
+  AMOUNT?: string | null;
+  DIRECTION?: string | null;
+  NOTES?: string | null;
+  STATUS?: string | null;
+};
+
+export type BankHeaderMappings = Record<string, BankHeaderMappingEntry>;
+
 export async function generateRegexFromCsv(
   formData: FormData
 ): Promise<RegexGenerateResponse> {
@@ -93,4 +106,9 @@ export async function saveRegexConfiguration(
     body: JSON.stringify(body),
   });
   return handleResponse<RegexEntry>(response);
+}
+
+export async function fetchBankHeaderMappings(): Promise<BankHeaderMappings> {
+  const response = await fetch(`${SETTINGS_API_BASE}/bank-header-mappings`);
+  return handleResponse<BankHeaderMappings>(response);
 }

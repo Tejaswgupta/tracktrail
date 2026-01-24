@@ -7,63 +7,16 @@ import {
 } from "@/services/database";
 import type { EntityWithAccounts, Transaction } from "@/types/database";
 import { useEffect, useMemo, useState } from "react";
+import {
+  buildGroups,
+  type CounterpartyEntry,
+  type CounterpartyGroup,
+} from "@/utils/counterpartyMerge";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface EfficientCounterpartyMergeProps {
   caseId: string;
 }
-
-interface CounterpartyEntry {
-  name: string;
-  count: number;
-}
-
-interface CounterpartyGroup {
-  key: string;
-  label: string;
-  members: CounterpartyEntry[];
-  totalCount: number;
-}
-
-const getFirstWord = (name: string) => {
-  const trimmed = name.trim();
-  if (!trimmed) return "";
-  const rawFirst = trimmed.split(/\s+/)[0] || "";
-  return rawFirst.replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "");
-};
-
-const buildGroups = (counterparties: CounterpartyEntry[]): CounterpartyGroup[] => {
-  const map = new Map<string, CounterpartyGroup>();
-
-  counterparties.forEach((counterparty) => {
-    const firstWord = getFirstWord(counterparty.name);
-    if (!firstWord) return;
-
-    const key = firstWord.toLowerCase();
-    const existing = map.get(key);
-
-    if (existing) {
-      existing.members.push(counterparty);
-      existing.totalCount += counterparty.count;
-    } else {
-      map.set(key, {
-        key,
-        label: firstWord,
-        members: [counterparty],
-        totalCount: counterparty.count,
-      });
-    }
-  });
-
-  return Array.from(map.values())
-    .map((group) => ({
-      ...group,
-      members: [...group.members].sort(
-        (a, b) => b.count - a.count || a.name.localeCompare(b.name)
-      ),
-    }))
-    .filter((group) => group.members.length > 1)
-    .sort((a, b) => b.totalCount - a.totalCount || a.label.localeCompare(b.label));
-};
 
 export default function EfficientCounterpartyMerge({
   caseId,
@@ -84,6 +37,7 @@ export default function EfficientCounterpartyMerge({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [savingGroups, setSavingGroups] = useState<Record<string, boolean>>({});
   const [groupErrors, setGroupErrors] = useState<Record<string, string>>({});
+  const { user } = useAuth();
 
   const groups = useMemo(
     () => buildGroups(counterparties),
@@ -238,12 +192,20 @@ export default function EfficientCounterpartyMerge({
     }
 
     try {
+      if (!user?.id) {
+        setGroupErrors((prev) => ({
+          ...prev,
+          [group.key]: "User session is required to merge counterparties.",
+        }));
+        return;
+      }
+
       setGroupErrors((prev) => ({ ...prev, [group.key]: "" }));
       setSavingGroups((prev) => ({ ...prev, [group.key]: true }));
 
       const result = await counterpartyService.batchMergeCounterparties(
         fromNames.map((name) => ({ from: name, to: targetName })),
-        "current-user"
+        user.id
       );
 
       if (result.errors.length > 0) {
