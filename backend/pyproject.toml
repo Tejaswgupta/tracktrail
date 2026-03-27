@@ -41,7 +41,7 @@ dependencies = [
     "cryptography==45.0.6",
     "deprecation==2.1.0",
     "distro==1.9.0",
-    "ecdsa==0.19.1",
+    "ecdsa==0.19.2",
     "et-xmlfile==2.0.0",
     "filelock==3.19.1",
     "fsspec==2025.7.0",
